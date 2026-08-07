@@ -1,0 +1,40 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Loom.Web.Contracts.Dtos;
+
+namespace Loom.Web.Contracts;
+
+/// <summary>
+/// JSON serialization context for Native AOT.
+/// THIS IS CRITICAL! Every DTO type MUST be registered here.
+///
+/// Think of this like a registry or phonebook - the compiler needs to know
+/// at compile-time which types will be serialized to/from JSON.
+/// </summary>
+[JsonSerializable(typeof(HealthCheckResponse))]
+[JsonSerializable(typeof(CpuMetricResponse))]
+[JsonSerializable(typeof(CpuHotpath))]
+[JsonSerializable(typeof(MemoryMetricResponse))]
+[JsonSerializable(typeof(GarbageCollectionStats))]
+[JsonSerializable(typeof(MemoryAllocation))]
+[JsonSerializable(typeof(ThreadMetricResponse))]
+[JsonSerializable(typeof(ThreadBlockage))]
+[JsonSerializable(typeof(DiagnosticSearchRequest))]
+[JsonSerializable(typeof(DiagnosticSearchResponse))]
+[JsonSerializable(typeof(SearchResult))]
+[JsonSerializable(typeof(TelemetryIngestRequest))]
+[JsonSerializable(typeof(MetricUpdate))]
+[JsonSerializable(typeof(CpuMetricUpdate))]
+[JsonSerializable(typeof(MemoryMetricUpdate))]
+[JsonSerializable(typeof(ThreadMetricUpdate))]
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    GenerationMode = JsonSourceGenerationMode.Metadata | JsonSourceGenerationMode.Serialization,
+    WriteIndented = false
+)]
+public partial class LoomJsonSerializerContext : JsonSerializerContext
+{
+    // This class is partial and will be completed by the source generator at compile time.
+    // No code needed here - the attributes above do all the work!
+}

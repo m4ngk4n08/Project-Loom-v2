@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+
+		<!-- Native AOT Configuration -->
+		<PublishAot>true</PublishAot>
+		<IsTrimmable>true</IsTrimmable>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+		<EnableAotAnalyzer>true</EnableAotAnalyzer>
+		<EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+		<!-- Binary Size Optimization -->
+		<InvariantGlobalization>true</InvariantGlobalization>
+		<PublishTrimmed>true</PublishTrimmed>
+		<TrimMode>link</TrimMode>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Reference our Contracts project -->
+		<ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Services\" />
+	</ItemGroup>
+</Project>

@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Loom.Web.Contracts.Dtos;
 
@@ -17,7 +17,6 @@ public abstract record MetricUpdate
     /// </summary>
     public required DateTime Timestamp { get; init; }
 }
-
 /// <summary>
 /// CPU metric update for WebSocket streaming.
 /// </summary>

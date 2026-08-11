@@ -1,4 +1,5 @@
-namespace Loom.Web.Contracts.Dtos;
+﻿namespace Loom.Web.Contracts.Dtos;
+
 
 /// <summary>
 /// Thread activity and blockage metrics.
@@ -30,36 +31,4 @@ public sealed record ThreadMetricResponse
     /// When this snapshot was taken
     /// </summary>
     public required DateTime Timestamp { get; init; }
-}
-
-/// <summary>
-/// Information about a blocked thread.
-/// </summary>
-public sealed record ThreadBlockage
-{
-    /// <summary>
-    /// Thread ID
-    /// </summary>
-    public required int ThreadId { get; init; }
-
-    /// <summary>
-    /// Thread name (if available)
-    /// </summary>
-    public string? ThreadName { get; init; }  // Note: nullable
-
-    /// <summary>
-    /// What the thread is blocked on
-    /// Example: "Waiting for database", "Lock contention"
-    /// </summary>
-    public required string BlockedOn { get; init; }
-
-    /// <summary>
-    /// How long the thread has been blocked (milliseconds)
-    /// </summary>
-    public required double BlockedDurationMs { get; init; }
-
-    /// <summary>
-    /// Stack trace showing where the thread is blocked
-    /// </summary>
-    public string? StackTrace { get; init; }  // Note: nullable
 }

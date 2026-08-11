@@ -1,4 +1,4 @@
-namespace Loom.Web.Contracts.Dtos;
+﻿namespace Loom.Web.Contracts.Dtos;
 
 /// <summary>
 /// Request to ingest new telemetry data.

@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="Loom.Web.Api/Loom.Web.Api.csproj" />
   <Project Path="Loom.Web.Contracts/Loom.Web.Contracts.csproj" />
 </Solution>

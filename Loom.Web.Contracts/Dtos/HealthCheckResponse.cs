@@ -1,4 +1,4 @@
-namespace Loom.Web.Contracts.Dtos;
+﻿namespace Loom.Web.Contracts.Dtos;
 
 /// <summary>
 /// Response for health check endpoint.

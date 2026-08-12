@@ -28,5 +28,12 @@ namespace Loom.Web.Api.Interfaces
         /// <param name="ct"></param>
         /// <returns></returns>
         ValueTask<ThreadMetricResponse> GetThreadMetricsAsync(CancellationToken ct = default);
+
+        /// <summary>
+        /// Stream metrics updates continuosly.
+        /// </summary>
+        /// <param name="ct"></param>
+        /// <returns></returns>
+        IAsyncEnumerable<MetricUpdate> GetMetricsStreamAsync(CancellationToken ct = default);
     }
 }

@@ -17,14 +17,12 @@
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<PublishTrimmed>true</PublishTrimmed>
 		<TrimMode>link</TrimMode>
+		<UserSecretsId>7387c81c-b1c6-4bec-a0fa-8e9cadfd550f</UserSecretsId>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<!-- Reference our Contracts project -->
 		<ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <Folder Include="Services\" />
+		<ProjectReference Include="..\Loom.Web.RealTime\Loom.Web.RealTime.csproj" />
 	</ItemGroup>
 </Project>

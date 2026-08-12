@@ -1,3 +1,4 @@
+using Loom.Web.Api.Extensions;
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using System.Diagnostics;
@@ -9,6 +10,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, LoomJsonSerializerContext.Default);
 });
 
+builder.Services.AddServices();
+
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.AddServerHeader = false;
@@ -18,6 +21,19 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 var app = builder.Build();
+
+// ============================================================================
+// Enable WebSockets
+// ============================================================================
+
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(30)
+});
+
+// ============================================================================
+// Configure Middleware Pipeline
+// ============================================================================
 
 if (app.Environment.IsDevelopment())
 {
@@ -30,28 +46,7 @@ if(!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
-app.MapGet("/api/health", () =>
-{
-    var process = Process.GetCurrentProcess();
-    var uptime = DateTime.UtcNow - process.StartTime.ToUniversalTime();
 
-    var response = new HealthCheckResponse
-    {
-        Status = "Healthy",
-        Timestamp = DateTime.UtcNow,
-        UptimeSeconds = (long)uptime.TotalSeconds,
-        MemoryUsageMb = process.WorkingSet64 / 1_048_576.0 // Convert bytes to MB
-    };
-
-    return Results.Json(
-
-        response,
-        LoomJsonSerializerContext.Default.HealthCheckResponse,
-        statusCode: 200
-    );
-})
-.WithName("GetHealth")
-.WithTags("Health")
-.Produces<HealthCheckResponse>(200);
+app.MapApiEndpoints();
 
 app.Run();

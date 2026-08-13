@@ -1,12 +1,15 @@
 {
   "/api": {
-    "target": "http://localhost:5080",
+    "target": "http://localhost:5209",
     "secure": false,
-    "changeOrigin": true
+    "changeOrigin": true,
+    "logLevel": "debug"
   },
   "/ws": {
-    "target": "ws://localhost:5080",
+    "target": "ws://localhost:5209",
     "secure": false,
-    "ws": true
+    "ws": true,
+    "changeOrigin": true,
+    "logLevel": "debug"
   }
 }

@@ -1,0 +1,141 @@
+.cpu-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.metric-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #0b0b0b);
+  margin: 0;
+}
+
+.metric-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary, #0b0b0b);
+  font-variant-numeric: tabular-nums;
+
+  .unit {
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: var(--text-secondary, #52514e);
+    margin-left: 0.25rem;
+  }
+}
+
+.chart-container {
+  position: relative;
+  height: 200px;
+  width: 100%;
+}
+
+.hotpaths-list {
+  margin-top: 0.5rem;
+}
+
+.hotpaths-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary, #52514e);
+  margin: 0 0 0.75rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.hotpath-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.hotpath-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface-2, #f9f9f7);
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.hotpath-method {
+  color: var(--text-primary, #0b0b0b);
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.hotpath-percent {
+  color: #2a78d6; // Series-1 blue (light mode)
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-left: 1rem;
+}
+
+// Dark mode
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    .metric-title,
+    .metric-value {
+      color: #ffffff;
+    }
+
+    .metric-value .unit {
+      color: #c3c2b7;
+    }
+
+    .hotpaths-title {
+      color: #c3c2b7;
+    }
+
+    .hotpath-item {
+      background: #0d0d0d;
+    }
+
+    .hotpath-method {
+      color: #ffffff;
+    }
+
+    .hotpath-percent {
+      color: #3987e5; // Series-1 blue (dark mode)
+    }
+  }
+}
+
+:root[data-theme="dark"] {
+  .metric-title,
+  .metric-value {
+    color: #ffffff;
+  }
+
+  .metric-value .unit {
+    color: #c3c2b7;
+  }
+
+  .hotpaths-title {
+    color: #c3c2b7;
+  }
+
+  .hotpath-item {
+    background: #0d0d0d;
+  }
+
+  .hotpath-method {
+    color: #ffffff;
+  }
+
+  .hotpath-percent {
+    color: #3987e5;
+  }
+}

@@ -146,21 +146,49 @@ namespace Loom.Web.Api.Services
         /// <exception cref="NotImplementedException"></exception>
         public async IAsyncEnumerable<MetricUpdate> GetMetricsStreamAsync([EnumeratorCancellation] CancellationToken ct = default)
         {
+            var metricIndex = 0;
+
             // Stream metrics until client disconnects or cancellation is requested
             while (!ct.IsCancellationRequested)
             {
-                // Get current CPU metrics
-                var cpuMetrics = await GetCpuMetricsAsync(ct); // Blocking call for simplicity in this example
-
-                // Warp in MetricUpdate envelope
-                yield return new CpuMetricUpdate
+                // Cycle through metric types
+                switch (metricIndex % 3)
                 {
-                    Timestamp = DateTime.UtcNow,
-                    Data = cpuMetrics
-                };
+                    case 0:
+                        // Send CPU metrics
+                        var cpuMetrics = await GetCpuMetricsAsync(ct);
+                        yield return new CpuMetricUpdate
+                        {
+                            Timestamp = DateTime.UtcNow,
+                            Data = cpuMetrics
+                        };
+                        break;
 
-                // Wait for ~100ms to achieve ~10 Hz update rate
-                await Task.Delay(100, ct);
+                    case 1:
+                        // Send Memory metrics
+                        var memoryMetrics = await GetMemoryMetricsAsync(ct);
+                        yield return new MemoryMetricUpdate
+                        {
+                            Timestamp = DateTime.UtcNow,
+                            Data = memoryMetrics
+                        };
+                        break;
+
+                    case 2:
+                        // Send Thread metrics
+                        var threadMetrics = await GetThreadMetricsAsync(ct);
+                        yield return new ThreadMetricUpdate
+                        {
+                            Timestamp = DateTime.UtcNow,
+                            Data = threadMetrics
+                        };
+                        break;
+                }
+
+                metricIndex++;
+
+                // Wait ~300ms between updates (~3 updates per second per metric type)
+                await Task.Delay(300, ct);
             }
         }
     }

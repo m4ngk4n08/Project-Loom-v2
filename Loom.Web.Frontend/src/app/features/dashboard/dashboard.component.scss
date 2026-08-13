@@ -1,0 +1,166 @@
+.dashboard-container {
+  padding: 2rem;
+  max-width: 1600px;
+  margin: 0 auto;
+  background: var(--surface-1, #fcfcfb);
+  min-height: 100vh;
+}
+
+// Connection Status
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  margin-bottom: 2rem;
+  border-radius: 8px;
+  background: var(--surface-2, #f9f9f7);
+  border: 1px solid var(--border, rgba(11, 11, 11, 0.1));
+
+  &.connected {
+    background: color-mix(in srgb, #0ca30c 5%, transparent);
+    border-color: #0ca30c;
+
+    .status-indicator {
+      background: #0ca30c;
+    }
+  }
+
+  &.error {
+    background: color-mix(in srgb, #d03b3b 5%, transparent);
+    border-color: #d03b3b;
+
+    .status-indicator {
+      background: #d03b3b;
+    }
+  }
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-secondary, #898781);
+  animation: pulse 2s infinite;
+}
+
+.status-text {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary, #0b0b0b);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.reconnect-btn {
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: #d03b3b;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #d03b3b;
+    color: white;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+// Metrics Grid
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 1.5rem;
+}
+
+.metric-card {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border, rgba(11, 11, 11, 0.1));
+
+  &--wide {
+    grid-column: 1 / -1;
+  }
+}
+
+// Dark mode
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    .dashboard-container {
+      background: #0d0d0d;
+    }
+
+    .connection-status {
+      background: #1a1a19;
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .metric-card {
+      background: #1a1a19;
+      border-color: rgba(255, 255, 255, 0.1);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    .status-text {
+      color: #ffffff;
+    }
+  }
+}
+
+// Explicit dark theme override
+:root[data-theme="dark"] {
+  .dashboard-container {
+    background: #0d0d0d;
+  }
+
+  .connection-status {
+    background: #1a1a19;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .metric-card {
+    background: #1a1a19;
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  .status-text {
+    color: #ffffff;
+  }
+}
+
+// Responsive
+@media (max-width: 1200px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding: 1rem;
+  }
+
+  .metrics-grid {
+    gap: 1rem;
+  }
+
+  .metric-card {
+    padding: 1rem;
+  }
+}

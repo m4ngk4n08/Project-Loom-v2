@@ -1,0 +1,197 @@
+.memory-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.metric-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #0b0b0b);
+  margin: 0;
+}
+
+.metric-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary, #0b0b0b);
+  font-variant-numeric: tabular-nums;
+
+  .unit {
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: var(--text-secondary, #52514e);
+    margin-left: 0.25rem;
+  }
+}
+
+// Memory Bar (progress indicator)
+.memory-bar-container {
+  height: 8px;
+  background: var(--surface-2, #f0efec);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.memory-bar {
+  height: 100%;
+  background: #2a78d6; // Series-1 blue (light mode)
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.memory-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #52514e);
+  margin-top: 0.25rem;
+}
+
+.memory-used {
+  font-weight: 600;
+}
+
+.memory-total {
+  font-weight: 400;
+}
+
+.chart-container {
+  position: relative;
+  height: 200px;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+// GC Statistics
+.gc-stats {
+  margin-top: 0.5rem;
+}
+
+.gc-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary, #52514e);
+  margin: 0 0 0.75rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.gc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.gc-item {
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem;
+  background: var(--surface-2, #f9f9f7);
+  border-radius: 6px;
+
+  &--wide {
+    grid-column: span 3;
+  }
+}
+
+.gc-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #52514e);
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+}
+
+.gc-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary, #0b0b0b);
+  font-variant-numeric: tabular-nums;
+}
+
+// Dark mode
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    .metric-title,
+    .metric-value {
+      color: #ffffff;
+    }
+
+    .metric-value .unit {
+      color: #c3c2b7;
+    }
+
+    .memory-bar-container {
+      background: #2c2c2a;
+    }
+
+    .memory-bar {
+      background: #3987e5; // Series-1 blue (dark mode)
+    }
+
+    .memory-info,
+    .gc-title,
+    .gc-label {
+      color: #c3c2b7;
+    }
+
+    .gc-item {
+      background: #0d0d0d;
+    }
+
+    .gc-value {
+      color: #ffffff;
+    }
+  }
+}
+
+:root[data-theme="dark"] {
+  .metric-title,
+  .metric-value {
+    color: #ffffff;
+  }
+
+  .metric-value .unit {
+    color: #c3c2b7;
+  }
+
+  .memory-bar-container {
+    background: #2c2c2a;
+  }
+
+  .memory-bar {
+    background: #3987e5;
+  }
+
+  .memory-info,
+  .gc-title,
+  .gc-label {
+    color: #c3c2b7;
+  }
+
+  .gc-item {
+    background: #0d0d0d;
+  }
+
+  .gc-value {
+    color: #ffffff;
+  }
+}
+
+// Responsive
+@media (max-width: 768px) {
+  .gc-grid {
+    grid-template-columns: 1fr;
+
+    .gc-item--wide {
+      grid-column: span 1;
+    }
+  }
+}

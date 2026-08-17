@@ -41,6 +41,15 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(AlertStatusDto))]
 [JsonSerializable(typeof(AlertHistoryEntry))]
 [JsonSerializable(typeof(List<AlertHistoryEntry>))]
+[JsonSerializable(typeof(ExporterStatusDto))]
+[JsonSerializable(typeof(List<ExporterStatusDto>))]
+[JsonSerializable(typeof(GrafanaMetricPayload))]
+[JsonSerializable(typeof(GrafanaMetricSeries))]
+[JsonSerializable(typeof(GrafanaMetricSeries[]))]
+[JsonSerializable(typeof(GrafanaDataPoint))]
+[JsonSerializable(typeof(GrafanaDataPoint[]))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

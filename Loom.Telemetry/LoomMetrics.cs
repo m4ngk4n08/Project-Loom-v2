@@ -145,4 +145,12 @@ public static class LoomMetrics
     {
         return Buffers;
     }
+
+    /// <summary>
+    /// Test-only: Reset all metric buffers. Call this in test setup/teardown to isolate tests.
+    /// </summary>
+    public static void ResetForTesting()
+    {
+        Buffers.Clear();
+    }
 }

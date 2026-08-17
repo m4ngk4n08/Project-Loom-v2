@@ -4,8 +4,11 @@ using Loom.Web.Contracts.Dtos;
 using Loom.Web.RealTime;
 using Loom.Telemetry.Query;
 using Loom.Telemetry.Alerting;
+using Loom.Telemetry.Exporters;
+using Loom.Telemetry.Exporters.Prometheus;
 using System.Diagnostics;
 using System.Threading.Channels;
+using Loom.Telemetry;
 
 namespace Loom.Web.Api.Extensions
 {
@@ -18,6 +21,8 @@ namespace Loom.Web.Api.Extensions
             app.MapWebSocketEndpoints();
             app.MapQueryEndpoints();
             app.MapAlertEndpoints();
+            app.MapExporterEndpoints();
+            app.MapPrometheusEndpoint();
             return app;
         }
 
@@ -219,6 +224,58 @@ namespace Loom.Web.Api.Extensions
             .WithName("SilenceAlert")
             .Produces(204)
             .Produces(404);
+
+            return app;
+        }
+
+        private static WebApplication MapExporterEndpoints(this WebApplication app)
+        {
+            var exporterGroup = app.MapGroup("/api/exporters")
+                .WithTags("Exporters");
+
+            exporterGroup.MapGet("/status", (ExportStatusTracker tracker) =>
+            {
+                var statuses = tracker.GetStatuses().Values
+                    .Select(s => new ExporterStatusDto
+                    {
+                        Name = s.Name,
+                        IsHealthy = s.IsHealthy,
+                        LastSuccessUtc = s.LastSuccessUtc,
+                        LastFailureUtc = s.LastFailureUtc,
+                        LastError = s.LastError,
+                        TotalExports = s.TotalExports,
+                        TotalFailures = s.TotalFailures
+                    })
+                    .ToList();
+
+                return Results.Json(statuses, LoomJsonSerializerContext.Default.ListExporterStatusDto);
+            })
+            .WithName("GetExporterStatus")
+            .Produces<List<ExporterStatusDto>>(200);
+
+            // Metric names endpoint for frontend Metrics Explorer
+            exporterGroup.MapGet("/metrics/names", () =>
+            {
+                var buffers = LoomRuntime.GetBuffersSnapshot();
+                var names = buffers.Keys.ToList();
+                return Results.Json(names, LoomJsonSerializerContext.Default.ListString);
+            })
+            .WithName("GetMetricNames")
+            .Produces<List<string>>(200);
+
+            return app;
+        }
+
+        private static WebApplication MapPrometheusEndpoint(this WebApplication app)
+        {
+            app.MapGet("/metrics", () =>
+            {
+                var metricsText = PrometheusFormatter.Format();
+                return Results.Text(metricsText, "text/plain; version=0.0.4; charset=utf-8");
+            })
+            .WithName("PrometheusMetrics")
+            .WithTags("Exporters")
+            .Produces<string>(200, "text/plain");
 
             return app;
         }

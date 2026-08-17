@@ -2,6 +2,8 @@
 using Loom.Web.Api.Services;
 using Loom.Telemetry.Query;
 using Loom.Telemetry.Alerting;
+using Loom.Telemetry.Exporters;
+using Loom.Telemetry.Exporters.Console;
 
 namespace Loom.Web.Api.Extensions
 {
@@ -15,6 +17,14 @@ namespace Loom.Web.Api.Extensions
             // Alerting services
             services.AddLoomAlerting();
             services.AddAlertTarget<ConsoleAlertTarget>();
+
+            // Exporter services
+            services.AddLoomExporting(opts =>
+            {
+                opts.CollectionInterval = TimeSpan.FromSeconds(10);
+                opts.ChannelCapacity = 64;
+            });
+            services.AddLoomExporter<ConsoleExporter>();
 
             return services;
         }

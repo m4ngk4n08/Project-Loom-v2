@@ -1,19 +1,26 @@
 # Project Loom v2
 
-A lightweight, **real-time diagnostic terminal companion** for production .NET applications. Loom gives you live insight into **CPU hotpaths**, **memory allocations**, and **thread blockages** through a modern web interface.
+A **customizable telemetry platform** for .NET applications. Loom provides live insight into CPU hotpaths, memory allocations, thread blockages, and — critically — **your own business metrics**, with zero-allocation instrumentation powered by C# source generators.
 
-The successor to the original SSH-based design, Loom v2 pivots to an **HTTPS + Angular** architecture for better accessibility, richer visualizations, and easier deployment.
+The successor to the original SSH-based design, Loom v2 is a .NET-native observability stack that ships as a single AOT-compiled binary.
 
 ---
 
 ## Overview
 
-Loom is a standalone diagnostic service you attach to a production .NET application. It profiles performance-critical behavior and streams the results to a web dashboard in real time:
+Loom is not just a profiler. It's a **telemetry platform** you embed into .NET applications:
 
-- **CPU hotpaths** — which methods/paths consume the most CPU
-- **Memory allocations** — what's using RAM, top allocation types, GC statistics
-- **Thread blockages** — threads that are blocked/waiting and why
-- **Diagnostic search** — vector (semantic) search over telemetry
+- **Custom Metrics** — `RecordMetric`, `RecordCounter`, `RecordGauge`, `RecordHistogram` with tag/dimension support
+- **Attribute-Based Instrumentation** — `[LoomProfile]` and `[LoomTrack]` auto-instrument methods at compile time
+- **Custom Collectors** — `ILoomCollector` plugin interface for third-party integrations (Redis, RabbitMQ, etc.)
+- **Query Language** — SQL-like telemetry queries + fluent code-based `Query()` API
+- **Alerting** — `AddAlert()` with window-based conditions, webhook/email notifications
+- **Exporters** — Prometheus, Grafana Cloud, Elasticsearch, Console interoperability
+- **Source Generator** — zero-allocation instrumentation resolved entirely at compile time (no reflection)
+- **Sampling** — configuration-driven sampling rules (path-based, duration-based)
+- **Local Dev Mode** — `dotnet loom dev` for zero-config live metrics during development
+
+All built on .NET 10 Native AOT with zero runtime reflection.
 
 ---
 
@@ -23,13 +30,14 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 
 | Constraint | Why |
 |-----------|-----|
-| Binary size **< 15 MB** | |
-| Memory footprint **< 20 MB** background | |
+| Binary size **< 15 MB** | Single-binary deployment |
+| Memory footprint **< 20 MB** background | Minimal overhead on host app |
 | **No reflection** | AOT can't do runtime codegen |
 | **Zero-allocation hot paths** | `Span<T>`, `ValueTask`, `ArrayPool<T>` |
 | **Source-generated JSON** | All DTOs registered in `LoomJsonSerializerContext` |
 | **Minimal APIs only** | No MVC controllers (reflection-heavy) |
 | **Raw WebSockets, no SignalR** | SignalR uses reflection at runtime |
+| **Manual JWT** | No `System.IdentityModel.Tokens.Jwt` (reflection-heavy) |
 
 ---
 
@@ -41,17 +49,12 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 - Kestrel HTTP server
 - System.Text.Json with **source generators**
 - Raw **WebSockets** (native, not SignalR)
-- Manual JWT authentication (no `System.IdentityModel.Tokens.Jwt`)
-
-**Frontend**
-- **Angular 19+** with standalone components
-- RxJS for reactive data streams
-- Chart.js for real-time visualizations
-- Native WebSocket client
+- Manual JWT authentication
+- C# Source Generators (Roslyn analyzer project)
 
 **Build Tools**
 - MSVC v143 (Windows) / LLVM-Clang 19 (Linux) native compilation
-- Node.js 20+ LTS & Angular CLI 19+
+- Node.js 20+ LTS (build tooling only)
 
 ---
 
@@ -59,22 +62,37 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 
 ```
 Loom.sln
-├── Loom.Web.Api/            → ASP.NET Core Minimal APIs (Native AOT)
-├── Loom.Web.Frontend/       → Angular 19+ application
-├── Loom.Web.Contracts/      → Shared DTOs + source-generated JSON (MANDATORY for AOT)
-├── Loom.Web.RealTime/       → Zero-allocation WebSocket handlers
-├── Loom.Core/               → SIMD math engine (AVX2/Neon)
-├── Loom.Storage/            → Memory-mapped binary cache + RAG ingestor
-├── Loom.Host/               → Bootstrap entry point
-├── Loom.Tests/              → Unit & integration tests
-└── Loom.Benchmarks/         → BenchmarkDotNet performance benchmarks
+├── Loom.Web.Api/                  → ASP.NET Core Minimal APIs (Native AOT host)
+├── Loom.Web.Contracts/            → Shared DTOs + source-generated JSON (MANDATORY for AOT)
+├── Loom.Web.RealTime/             → Zero-allocation WebSocket handlers
+├── Loom.Core/                     → SIMD math engine (AVX2/Neon)
+├── Loom.Storage/                  → Memory-mapped binary cache
+├── Loom.Host/                     → Bootstrap entry point
+├── Loom.Telemetry/                → Custom Metrics API runtime (RecordMetric, etc.)
+├── Loom.Telemetry.Generators/     → C# source generator ([LoomProfile] → instrumented code)
+├── Loom.Telemetry.Collectors/     → ILoomCollector interface + plugin registration
+├── Loom.Telemetry.Query/          → Query engine (SQL-like parser + fluent API)
+├── Loom.Telemetry.Alerting/       → Alert rules, window conditions, notification dispatch
+├── Loom.Telemetry.Exporters/      → Prometheus, Grafana Cloud, Elasticsearch, Console
+├── Loom.DevTools/                 → `dotnet loom dev` CLI tool (local dev mode)
+├── Loom.Tests/                    → Unit & integration tests
+└── Loom.Benchmarks/               → BenchmarkDotNet performance benchmarks
 ```
 
 **Dependency flow:**
 ```
-Loom.Host → Loom.Web.Api → Loom.Web.Contracts (shared DTOs, depended on by all)
+Loom.Host → Loom.Web.Api → Loom.Web.Contracts
                          → Loom.Web.RealTime → Loom.Web.Contracts
+                         → Loom.Telemetry → Loom.Web.Contracts
+                         → Loom.Telemetry.Collectors → Loom.Telemetry
+                         → Loom.Telemetry.Query → Loom.Telemetry
+                         → Loom.Telemetry.Alerting → Loom.Telemetry.Query
+                         → Loom.Telemetry.Exporters → Loom.Telemetry
                          → Loom.Core ← Loom.Storage
+
+Loom.Telemetry.Generators (analyzer, referenced by consuming projects, no runtime dep)
+
+Loom.DevTools (standalone CLI, references Loom.Telemetry)
 ```
 
 ---
@@ -84,8 +102,6 @@ Loom.Host → Loom.Web.Api → Loom.Web.Contracts (shared DTOs, depended on by a
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (10.0.100+)
-- Node.js 20+ LTS & npm 10+
-- Angular CLI 19+ (`npm install -g @angular/cli@19`)
 - Native compilation tools (MSVC v143 on Windows / Clang 19 on Linux)
 
 ### Backend (development, fast iteration)
@@ -97,16 +113,19 @@ dotnet watch run --project Loom.Host --no-hot-reload
 
 The API listens on `http://localhost:5080` (HTTPS: `https://localhost:5443` in production).
 
-### Frontend
+### Local Dev Mode
 
 ```bash
-cd Loom.Web.Frontend
-npm install
-ng service
-# Access at http://localhost:4200
+dotnet loom dev
+# Auto-discovers .NET apps on localhost
+# Streams live metrics to console/JSON
 ```
 
-### API Endpoints
+---
+
+## API Endpoints
+
+### Infrastructure Metrics
 
 | Endpoint | Description |
 |----------|-------------|
@@ -114,19 +133,54 @@ ng service
 | `GET /api/metrics/cpu` | CPU hotpath metrics |
 | `GET /api/metrics/memory` | Memory allocation & GC stats |
 | `GET /api/metrics/thread` | Thread activity & blockage analysis |
-| `GET /api/diagnostics/search?q=...` | Semantic (vector) search |
-| `POST /api/telemetry/ingest` | Accept incoming telemetry events |
-| `WS /ws/metrics` | Real-time metric stream (~10 Hz) |
+| `WS /ws/metrics` | Real-time infrastructure metric stream (~10 Hz) |
+
+### Custom Telemetry
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/telemetry/ingest` | Accept incoming telemetry/metric events |
+| `GET /api/telemetry/metrics` | List registered custom metrics |
+| `GET /api/telemetry/collectors` | List active collectors + snapshots |
+| `POST /api/telemetry/collectors/{name}/collect` | Trigger manual collection |
+| `WS /ws/telemetry` | Real-time custom telemetry stream |
+
+### Query
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/query` | Execute SQL-like telemetry query (body: query string) |
+| `GET /api/query?q=...` | Execute query via GET (URL-encoded) |
+
+### Alerting
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/alerts` | List configured alerts + current status |
+| `GET /api/alerts/{name}` | Get specific alert status and history |
+| `POST /api/alerts/{name}/test` | Trigger test notification |
+| `PUT /api/alerts/{name}/silence` | Silence alert for duration |
+
+### Exporters
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/exporters` | List active exporters + connection status |
+| `GET /api/exporters/{name}/status` | Exporter health and throughput |
+| `GET /metrics` | Prometheus scrape endpoint (OpenMetrics format) |
+
+### Sampling
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/config/sampling` | Current sampling configuration |
+| `PUT /api/config/sampling` | Update sampling rules at runtime |
 
 ---
 
 ## Native AOT Production Build
 
 ```bash
-cd Loom.Web.Frontend && ng build --configuration production --output-hashing all && cd ..
-mkdir -p Loom.Host/wwwroot
-cp -r Loom.Web.Frontend/dist/browser/* Loom.Host/wwwroot/
-
 dotnet publish Loom.Host/Loom.Host.csproj \
   --configuration Release \
   -r linux-x64 \
@@ -143,8 +197,6 @@ ls -lh Loom.Host/bin/Release/net10.0/linux-x64/publish/Loom.Host
 ---
 
 ## Verification Checklist
-
-Before committing, the project verifies:
 
 ```bash
 # 1. No trim/AOT warnings
@@ -167,41 +219,95 @@ dotnet-counters monitor --process-id $(pidof Loom.Host) System.Runtime
 
 ## Implementation Phases
 
-| Phase | Objective | Status |
-|-------|-----------|--------|
-| 0 | Project setup & tooling | Will start |
-| 1 | Contracts & source-generated JSON | Will start |
-| 2 | Web API core & health endpoint | Will start |
-| 3 | Core API endpoints (metrics) | |
-| 4 | WebSocket real-time streaming | |
-| 5 | Angular frontend foundation | |
-| 6 | Dashboard & visualizations | |
-| 7 | Search & telemetry ingestion | |
-| 8 | Production build & optimization | |
-| 9 | Security hardening | |
-| 10 | Systemd integration & deployment | |
-| 11 | CI/CD pipeline (Linux & Windows) | |
+### Foundation (Existing Infrastructure)
+
+| Phase | System | Status | Description |
+|-------|--------|--------|-------------|
+| 0 | Project Setup & Tooling | Done | SDK, solution structure, project scaffolding |
+| 1 | Contracts & JSON Serialization | Done | DTOs + LoomJsonSerializerContext |
+| 2 | Web API Core | Done | Minimal API, health endpoint, Kestrel config |
+| 3 | Core Metrics Endpoints | Done | CPU, Memory, Thread metric APIs |
+| 4 | WebSocket Real-Time Streaming | Done | Zero-allocation WebSocket layer |
+
+### Telemetry Platform (Current Focus)
+
+| Phase | System | Status | Description |
+|-------|--------|--------|-------------|
+| 5 | Source Generator | In Progress | `Loom.Telemetry.Generators` — compile-time instrumentation rewriting |
+| 6 | Custom Metrics API | Planned | `RecordMetric`/`Counter`/`Gauge`/`Histogram` + tags |
+| 7 | Attribute-Based Instrumentation | Planned | `[LoomProfile]`, `[LoomTrack]` via source gen (depends on Phase 5) |
+| 8 | Custom Collectors/Plugins | Planned | `ILoomCollector`, `AddCollector<T>()` (depends on Phase 5) |
+| 9 | Configuration-Driven Sampling | Planned | `appsettings.json` sampling rules, path/duration overrides |
+| 10 | Query Language | Planned | SQL-like parser + fluent `Query()` API, `POST /api/query` |
+| 11 | Alerting/Thresholds | Planned | `AddAlert()`, window conditions, webhook/email targets |
+| 12 | Exporters | Planned | Prometheus, Grafana Cloud, Elasticsearch, Console |
+| 13 | Local Development Mode | Planned | `dotnet loom dev`, auto-discovery, zero-config |
+
+### Production Hardening
+
+| Phase | System | Status | Description |
+|-------|--------|--------|-------------|
+| 14 | Security Hardening | Planned | Manual JWT, HTTPS enforcement, systemd sandbox |
+| 15 | Production Build & Deployment | Planned | Binary optimization, systemd service, CI/CD |
+
+### Dependency Graph (Telemetry Phases)
+
+```
+Phase 5 (Source Generator) ──┬──→ Phase 7 (Attributes)
+                             └──→ Phase 8 (Collectors)
+Phase 6 (Metrics API) ──┬──→ Phase 8 (Collectors)
+                        ├──→ Phase 9 (Sampling)
+                        ├──→ Phase 10 (Query)
+                        ├──→ Phase 12 (Exporters)
+                        └──→ Phase 13 (Dev Mode)
+Phase 10 (Query) ────────────→ Phase 11 (Alerting)
+All Phases 5-12 ─────────────→ Phase 13 (Dev Mode)
+```
 
 ---
 
-## Key JSON Serialization Pattern
+## DTOs Registered in LoomJsonSerializerContext
 
-Every DTO is registered in `Loom.Web.Contracts/JsonContext.cs` with `[JsonSerializable]` attributes. Forgetting to register a type causes a **runtime crash** on serialize — Native AOT requires compile-time type registration:
+All DTO types used by the 9 telemetry systems must be registered at compile time:
 
-```csharp
-[JsonSerializable(typeof(CpuMetricResponse))]
-[JsonSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-public partial class LoomJsonSerializerContext : JsonSerializerContext { }
-```
+### Infrastructure (existing)
+- `HealthCheckResponse`, `CpuMetricResponse`, `CpuHotpath`
+- `MemoryMetricResponse`, `GarbageCollectionStats`, `MemoryAllocation`
+- `ThreadMetricResponse`, `ThreadBlockage`
+- `MetricUpdate`, `CpuMetricUpdate`, `MemoryMetricUpdate`, `ThreadMetricUpdate`
+- `DiagnosticSearchRequest`, `DiagnosticSearchResponse`, `SearchResult`
+- `TelemetryIngestRequest`
+
+### Custom Metrics API (Phase 6)
+- `MetricRecord`, `MetricTag`
+- `CounterValue`, `GaugeValue`, `HistogramValue`, `HistogramBucket`
+- `MetricBatch`, `MetricRegistration`
+
+### Collectors (Phase 8)
+- `CollectorSnapshot`, `CollectorRegistration`, `CollectorStatus`
+
+### Query (Phase 10)
+- `QueryRequest`, `QueryResponse`, `QueryResultRow`, `QueryColumn`
+
+### Alerting (Phase 11)
+- `AlertConfigDto`, `AlertConditionDto`, `AlertNotificationTarget`
+- `AlertStatusDto`, `AlertHistoryEntry`
+
+### Exporters (Phase 12)
+- `ExporterStatusDto`, `ExportBatchResult`
+
+### Sampling (Phase 9)
+- `SamplingConfigDto`, `SamplingRuleDto`
+
+### Dev Mode (Phase 13)
+- `DevModeStatusDto`, `DiscoveredAppDto`
 
 ---
 
 ## Security
 
 - HTTPS enforcement + HSTS in production
-- Manual JWT authentication (HS256)
+- Manual JWT authentication (HS256, Span-based, zero-allocation)
 - Strict CORS whitelist (no wildcards)
 - Security headers (CSP, X-Frame-Options, etc.)
 - systemd sandboxing (`ProtectSystem=strict`, `MemoryDenyWriteExecute`, etc.)
@@ -212,15 +318,31 @@ public partial class LoomJsonSerializerContext : JsonSerializerContext { }
 
 ## Documentation
 
-- [`IMPLEMENTATION-METHODOLOGY.md`](./IMPLEMENTATION-METHODOLOGY.md) — authoritative step-by-step build guide
-- [`wiggly-noodling-hoare.md`](./wiggly-noodling-hoare.md) — architecture decisions, all phases, deployment config
-- [`commands.md`](./commands.md) — development commands
-- [`skills.md`](./skills.md) — project skills guide
+| Document | Role |
+|----------|------|
+| [`IMPLEMENTATION-METHODOLOGY.md`](./IMPLEMENTATION-METHODOLOGY.md) | Authoritative step-by-step build guide (all 9 systems, full code) |
+| [`wiggly-noodling-hoare.md`](./wiggly-noodling-hoare.md) | Architecture decisions, deployment config, design rationale |
+| [`commands.md`](./commands.md) | Development commands reference |
+| [`skills.md`](./skills.md) | AI assistant skills guide |
+| [`CLAUDE.md`](./CLAUDE.md) | AI behavior constraints and project rules |
+
+---
+
+## Deferred / Not in Current Scope
+
+The following are explicitly **not in scope** for the current implementation pass. They are documented here so they aren't lost:
+
+| Feature | Reason Deferred | Future Phase |
+|---------|----------------|--------------|
+| Angular Frontend / Dashboard UI | Frontend work paused — .NET backend is the current focus | TBD |
+| Custom Dashboard Widgets (`@LoomWidget` plugin system) | Requires Angular plugin infrastructure | TBD |
+| Query Builder UI (autocomplete, visual query composer) | UI-shaped affordance; underlying query engine (#10) IS in scope | TBD |
+| Mobile app (PWA/React Native) | Depends on frontend | TBD |
+
+The query engine (Phase 10), alert conditions (Phase 11), and all other backend capabilities are fully built and testable via curl/API without any frontend. The Local Development Mode (Phase 13) provides terminal/console output for day-to-day use without a browser.
 
 ---
 
 ## License
 
 Licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
-
-<sub>**Note:** This project is currently in early implementation/planning. The repo contains only a `Contracts` project and planning documentation so far.</sub>

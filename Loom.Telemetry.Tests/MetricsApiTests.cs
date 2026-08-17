@@ -4,8 +4,18 @@ using Xunit;
 
 namespace Loom.Telemetry.Tests;
 
-public sealed class MetricsApiTests
+public sealed class MetricsApiTests : IDisposable
 {
+    public MetricsApiTests()
+    {
+        LoomSampling.ClearRules();
+    }
+
+    public void Dispose()
+    {
+        LoomSampling.ClearRules();
+    }
+
     [Fact]
     public void RecordCounter_StoresMetric()
     {

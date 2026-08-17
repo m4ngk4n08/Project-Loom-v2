@@ -12,6 +12,10 @@ public static class LoomRuntime
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void RecordMethodExecution(string metricName, TimeSpan elapsed, Exception? exception)
     {
+        // Check sampling rules before recording
+        if (!LoomSampling.ShouldRecord(metricName, elapsed, exception))
+            return;
+
         // Record as MethodExecution metric
         if (exception != null)
         {
@@ -31,6 +35,10 @@ public static class LoomRuntime
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void RecordPropertyChange<T>(string metricName, T value)
     {
+        // Check sampling rules before recording (no duration for properties)
+        if (!LoomSampling.ShouldRecord(metricName, null, null))
+            return;
+
         // Record property changes as gauges
         if (value is IConvertible convertible)
         {

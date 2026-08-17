@@ -3,8 +3,18 @@ using Xunit;
 
 namespace Loom.Telemetry.Tests;
 
-public sealed class GeneratorTests
+public sealed class GeneratorTests : IDisposable
 {
+    public GeneratorTests()
+    {
+        LoomSampling.ClearRules();
+    }
+
+    public void Dispose()
+    {
+        LoomSampling.ClearRules();
+    }
+
     [Fact]
     public void SimpleMethod_ExecutesWithoutError()
     {

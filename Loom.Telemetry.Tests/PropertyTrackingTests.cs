@@ -4,8 +4,20 @@ using Xunit;
 
 namespace Loom.Telemetry.Tests;
 
-public sealed class PropertyTrackingTests
+public sealed class PropertyTrackingTests : IDisposable
 {
+    public PropertyTrackingTests()
+    {
+        // Clear sampling rules before each test
+        LoomSampling.ClearRules();
+    }
+
+    public void Dispose()
+    {
+        // Clear sampling rules after each test
+        LoomSampling.ClearRules();
+    }
+
     [Fact]
     public void TrackedProperty_RecordsChanges()
     {

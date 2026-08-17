@@ -1,22 +1,41 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Text;
 
-namespace Loom.Telemetry
+namespace Loom.Telemetry;
+
+/// <summary>
+/// Internal runtime for recording telemetry from source-generated instrumentation.
+/// Used by [LoomProfile] and [LoomTrack] generated code.
+/// </summary>
+public static class LoomRuntime
 {
-    public static class LoomRuntime
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void RecordMethodExecution(string metricName, TimeSpan elapsed, Exception? exception)
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordMethodExecution(string metrickName, TimeSpan elapsed, Exception? exception)
+        // Record as MethodExecution metric
+        if (exception != null)
         {
-            // TODO: Storage implementation
+            LoomMetrics.RecordHistogram(
+                metricName,
+                elapsed.TotalMilliseconds,
+                new MetricTag("exception", exception.GetType().Name)
+            );
+            LoomMetrics.RecordCounter($"{metricName}.errors", 1);
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void RecordPropertyChange<T>(string metricName, T value)
+        else
         {
-            // TODO: Storage implementation
+            LoomMetrics.RecordHistogram(metricName, elapsed.TotalMilliseconds);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void RecordPropertyChange<T>(string metricName, T value)
+    {
+        // Record property changes as gauges
+        if (value is IConvertible convertible)
+        {
+            var numericValue = Convert.ToDouble(convertible);
+            LoomMetrics.RecordGauge(metricName, numericValue);
         }
     }
 }

@@ -2,6 +2,7 @@
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using Loom.Web.RealTime;
+using Loom.Telemetry.Query;
 using System.Diagnostics;
 
 namespace Loom.Web.Api.Extensions
@@ -13,6 +14,7 @@ namespace Loom.Web.Api.Extensions
             app.MapHealthEndpoints();
             app.MapMetricsEndpoints();
             app.MapWebSocketEndpoints();
+            app.MapQueryEndpoints();
             return app;
         }
 
@@ -121,6 +123,43 @@ namespace Loom.Web.Api.Extensions
                 // Stream until client disconnects or cancellation
                 await handler.StreamMetricsAsync(metricStream, context.RequestAborted);
             });
+
+            return app;
+        }
+
+        private static WebApplication MapQueryEndpoints(this WebApplication app)
+        {
+            app.MapGet("/api/query", async (string q, IQueryExecutor executor, CancellationToken ct) =>
+            {
+                try
+                {
+                    var result = await executor.ExecuteAsync(q, ct);
+                    return Results.Json(result, LoomJsonSerializerContext.Default.QueryResponse);
+                }
+                catch (QuerySyntaxException ex)
+                {
+                    return Results.Problem(ex.Message, statusCode: 400);
+                }
+            })
+            .WithName("GetQuery")
+            .WithTags("Query")
+            .Produces<QueryResponse>(200);
+
+            app.MapPost("/api/query", async (QueryRequest request, IQueryExecutor executor, CancellationToken ct) =>
+            {
+                try
+                {
+                    var result = await executor.ExecuteAsync(request.Query, ct);
+                    return Results.Json(result, LoomJsonSerializerContext.Default.QueryResponse);
+                }
+                catch (QuerySyntaxException ex)
+                {
+                    return Results.Problem(ex.Message, statusCode: 400);
+                }
+            })
+            .WithName("PostQuery")
+            .WithTags("Query")
+            .Produces<QueryResponse>(200);
 
             return app;
         }

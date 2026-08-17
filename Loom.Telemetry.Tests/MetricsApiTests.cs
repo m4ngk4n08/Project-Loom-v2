@@ -144,17 +144,18 @@ public sealed class MetricsApiTests : IDisposable
     [Fact]
     public void MetricBuffer_CircularBehavior()
     {
-        // Arrange - Get buffer capacity
+        // Arrange - Get buffer capacity and use unique metric name
         var capacity = LoomMetrics.GetBufferCapacity();
+        var metricName = $"overflow.test.{Guid.NewGuid()}";
 
-        // Act - Write more than capacity
+        // Act - Write more than capacity to a single metric
         for (int i = 0; i < capacity + 100; i++)
         {
-            LoomMetrics.RecordCounter("overflow.test", i);
+            LoomMetrics.RecordCounter(metricName, i);
         }
 
-        // Assert - Should only have 'capacity' records (oldest overwritten)
-        var recent = LoomMetrics.GetRecentMetrics(capacity * 2);
-        Assert.True(recent.Length <= capacity);
+        // Assert - Query this specific metric, should only have 'capacity' records (oldest overwritten)
+        var recent = LoomMetrics.QueryMetrics(metricName, TimeSpan.FromHours(1)).ToArray();
+        Assert.True(recent.Length <= capacity, $"Expected at most {capacity} records, got {recent.Length}");
     }
 }

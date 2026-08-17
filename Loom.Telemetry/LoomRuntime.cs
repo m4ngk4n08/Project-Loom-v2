@@ -46,4 +46,13 @@ public static class LoomRuntime
             LoomMetrics.RecordGauge(metricName, numericValue);
         }
     }
+
+    /// <summary>
+    /// Get snapshot of all metric buffers for query engine (Phase 10).
+    /// Returns a dictionary mapping metric name to its ring buffer.
+    /// </summary>
+    public static System.Collections.Generic.IReadOnlyDictionary<string, MetricBuffer> GetBuffersSnapshot()
+    {
+        return LoomMetrics.GetBuffersSnapshot();
+    }
 }

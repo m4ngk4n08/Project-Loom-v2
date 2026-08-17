@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsTrimmable>true</IsTrimmable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
+    <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
+  </ItemGroup>
+</Project>

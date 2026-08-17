@@ -27,6 +27,13 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(CpuMetricUpdate))]
 [JsonSerializable(typeof(MemoryMetricUpdate))]
 [JsonSerializable(typeof(ThreadMetricUpdate))]
+[JsonSerializable(typeof(QueryRequest))]
+[JsonSerializable(typeof(QueryResponse))]
+[JsonSerializable(typeof(QueryResultRow))]
+[JsonSerializable(typeof(List<QueryResultRow>))]
+[JsonSerializable(typeof(QueryValue))]
+[JsonSerializable(typeof(List<QueryValue>))]
+[JsonSerializable(typeof(QueryColumn))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

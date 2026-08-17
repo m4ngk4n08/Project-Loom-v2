@@ -7,8 +7,9 @@ namespace Loom.Telemetry;
 /// <summary>
 /// Lock-free circular buffer for storing metric records.
 /// Zero-allocation writes, bounded memory.
+/// NOTE: Public for query engine access (Phase 10), but not part of main API surface.
 /// </summary>
-internal sealed class MetricBuffer
+public sealed class MetricBuffer
 {
     private const int DefaultCapacity = 8192;
     private readonly MetricRecord[] _buffer;
@@ -101,6 +102,31 @@ internal sealed class MetricBuffer
 
         var result = new MetricRecord[matchCount];
         Array.Copy(temp, result, matchCount);
+        return result;
+    }
+
+    /// <summary>
+    /// Get snapshot of all entries in buffer (for Phase 10 query executor).
+    /// Returns array of (Value, Timestamp) entries.
+    /// </summary>
+    public (double Value, DateTime Timestamp)[] Snapshot()
+    {
+        var currentIndex = Interlocked.Read(ref _writeIndex);
+        var maxRead = Math.Min((int)currentIndex, _buffer.Length);
+
+        if (maxRead == 0)
+            return Array.Empty<(double, DateTime)>();
+
+        var result = new (double, DateTime)[maxRead];
+
+        for (int i = 0; i < maxRead; i++)
+        {
+            var readIndex = currentIndex - 1 - i;
+            var slot = (int)(readIndex & _mask);
+            var record = _buffer[slot];
+            result[i] = (record.Value, new DateTime(record.TimestampUtcTicks, DateTimeKind.Utc));
+        }
+
         return result;
     }
 

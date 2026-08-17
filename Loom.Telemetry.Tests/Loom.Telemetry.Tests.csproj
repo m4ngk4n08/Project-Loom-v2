@@ -32,5 +32,6 @@
                   OutputItemType="Analyzer"
                   ReferenceOutputAssembly="false" />
 	  <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
+	  <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
 	</ItemGroup>
 </Project>

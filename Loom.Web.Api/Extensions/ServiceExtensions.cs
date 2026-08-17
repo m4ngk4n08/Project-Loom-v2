@@ -1,5 +1,6 @@
 ﻿using Loom.Web.Api.Interfaces;
 using Loom.Web.Api.Services;
+using Loom.Telemetry.Query;
 
 namespace Loom.Web.Api.Extensions
 {
@@ -8,6 +9,7 @@ namespace Loom.Web.Api.Extensions
         public static IServiceCollection AddServices(this IServiceCollection services)
         {
             services.AddSingleton<IMetricsService, MetricsService>();
+            services.AddSingleton<IQueryExecutor, QueryExecutor>();
             return services;
         }
     }

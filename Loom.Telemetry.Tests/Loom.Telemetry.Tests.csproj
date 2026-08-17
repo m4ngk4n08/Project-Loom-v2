@@ -28,10 +28,15 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Loom.Telemetry.Generators\Loom.Telemetry.Generators.csproj"
-                  OutputItemType="Analyzer"
-                  ReferenceOutputAssembly="false" />
-	  <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
+		<ProjectReference Include="..\Loom.Telemetry.Generators\Loom.Telemetry.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	  <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
+	  <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
+	  <ProjectReference Include="..\Loom.Telemetry.Alerting\Loom.Telemetry.Alerting.csproj" />
+	  <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Moq" Version="4.20.72" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
 	</ItemGroup>
 </Project>

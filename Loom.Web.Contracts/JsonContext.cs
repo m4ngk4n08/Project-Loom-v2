@@ -34,6 +34,13 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(QueryValue))]
 [JsonSerializable(typeof(List<QueryValue>))]
 [JsonSerializable(typeof(QueryColumn))]
+[JsonSerializable(typeof(AlertWebhookPayload))]
+[JsonSerializable(typeof(AlertConfigDto))]
+[JsonSerializable(typeof(List<AlertConfigDto>))]
+[JsonSerializable(typeof(AlertConditionDto))]
+[JsonSerializable(typeof(AlertStatusDto))]
+[JsonSerializable(typeof(AlertHistoryEntry))]
+[JsonSerializable(typeof(List<AlertHistoryEntry>))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

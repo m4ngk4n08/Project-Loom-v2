@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="Loom.Telemetry.Alerting/Loom.Telemetry.Alerting.csproj" />
   <Project Path="Loom.Telemetry.Generators/Loom.Telemetry.Generators.csproj" Id="af48dbf2-e1fc-4714-8b2c-1cef04ad6bcd" />
   <Project Path="Loom.Telemetry.Query/Loom.Telemetry.Query.csproj" />
   <Project Path="Loom.Telemetry.Tests/Loom.Telemetry.Tests.csproj" Id="d1b0b251-ca81-4209-9640-b30b6ab3de32" />

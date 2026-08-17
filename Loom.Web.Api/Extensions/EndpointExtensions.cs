@@ -3,7 +3,9 @@ using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using Loom.Web.RealTime;
 using Loom.Telemetry.Query;
+using Loom.Telemetry.Alerting;
 using System.Diagnostics;
+using System.Threading.Channels;
 
 namespace Loom.Web.Api.Extensions
 {
@@ -15,6 +17,7 @@ namespace Loom.Web.Api.Extensions
             app.MapMetricsEndpoints();
             app.MapWebSocketEndpoints();
             app.MapQueryEndpoints();
+            app.MapAlertEndpoints();
             return app;
         }
 
@@ -160,6 +163,62 @@ namespace Loom.Web.Api.Extensions
             .WithName("PostQuery")
             .WithTags("Query")
             .Produces<QueryResponse>(200);
+
+            return app;
+        }
+
+        private static WebApplication MapAlertEndpoints(this WebApplication app)
+        {
+            var alertGroup = app.MapGroup("/api/alerts")
+                .WithTags("Alerts");
+
+            alertGroup.MapGet("", () =>
+            {
+                var rules = LoomTelemetryOptionsAlertingExtensions.Rules
+                    .Select(r => new AlertConfigDto { Name = r.Name, MetricName = r.MetricName, Window = r.Window })
+                    .ToList();
+                return Results.Json(rules, LoomJsonSerializerContext.Default.ListAlertConfigDto);
+            })
+            .WithName("GetAlerts")
+            .Produces<List<AlertConfigDto>>(200);
+
+            alertGroup.MapGet("/{name}", (string name) =>
+            {
+                var rule = LoomTelemetryOptionsAlertingExtensions.Rules.FirstOrDefault(r => r.Name == name);
+                if (rule is null) return Results.NotFound();
+
+                return Results.Json(
+                    new AlertConfigDto { Name = rule.Name, MetricName = rule.MetricName, Window = rule.Window },
+                    LoomJsonSerializerContext.Default.AlertConfigDto);
+            })
+            .WithName("GetAlert")
+            .Produces<AlertConfigDto>(200)
+            .Produces(404);
+
+            alertGroup.MapPost("/{name}/test", async (string name, Channel<AlertNotification> channel) =>
+            {
+                var rule = LoomTelemetryOptionsAlertingExtensions.Rules.FirstOrDefault(r => r.Name == name);
+                if (rule is null) return Results.NotFound();
+
+                var testAggregate = new MetricAggregate(rule.MetricName, Count: 1, Average: 0, Max: 0, P99: 0);
+                await channel.Writer.WriteAsync(new AlertNotification(rule, testAggregate, DateTime.UtcNow));
+                return Results.Accepted();
+            })
+            .WithName("TestAlert")
+            .Produces(202)
+            .Produces(404);
+
+            alertGroup.MapPut("/{name}/silence", (string name, TimeSpan duration, ISilenceStore silenceStore) =>
+            {
+                var rule = LoomTelemetryOptionsAlertingExtensions.Rules.FirstOrDefault(r => r.Name == name);
+                if (rule is null) return Results.NotFound();
+
+                silenceStore.Silence(name, DateTime.UtcNow + duration);
+                return Results.NoContent();
+            })
+            .WithName("SilenceAlert")
+            .Produces(204)
+            .Produces(404);
 
             return app;
         }

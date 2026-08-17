@@ -64,7 +64,7 @@ public class QueryExecutorTests
         var row = result.Rows.FirstOrDefault(r => r.Values[0].Text == metricName);
         if (row != null && row.Values[1].Number.HasValue)
         {
-            Assert.Equal(20.0, row.Values[1].Number.Value, precision: 1);
+            Assert.Equal(20.0, row.Values[1].Number!.Value, precision: 1);
         }
     }
 

@@ -1,18 +1,27 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>Exe</OutputType>
-    <ToolCommandName>loom</ToolCommandName>
+    <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
+    <ToolCommandName>loom-dashboard</ToolCommandName>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.607501" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.18" />
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.11" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
     <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
     <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
+    <ProjectReference Include="..\Loom.Telemetry.Exporters\Loom.Telemetry.Exporters.csproj" />
     <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\Loom.Web.Frontend\dist\Loom.Web.Frontend\browser\**\*" LinkBase="wwwroot" />
   </ItemGroup>
 </Project>

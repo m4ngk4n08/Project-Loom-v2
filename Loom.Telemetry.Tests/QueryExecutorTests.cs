@@ -1,10 +1,11 @@
+using Loom.Storage;
+using Loom.Telemetry;
+using Loom.Telemetry.Query;
 using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
-using Loom.Telemetry;
-using Loom.Telemetry.Query;
 
 namespace Loom.Telemetry.Tests;
 
@@ -13,7 +14,7 @@ public class QueryExecutorTests
     [Fact]
     public async Task Executor_ExecutesSuccessfully()
     {
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method FROM telemetry";
 
         var result = await executor.ExecuteAsync(query, CancellationToken.None);
@@ -31,7 +32,7 @@ public class QueryExecutorTests
         LoomMetrics.RecordCounter("requests", 1);
         LoomMetrics.RecordCounter("requests", 1);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, COUNT(*) FROM telemetry";
 
         // Act
@@ -53,7 +54,7 @@ public class QueryExecutorTests
         LoomMetrics.RecordHistogram(metricName, 20.0);
         LoomMetrics.RecordHistogram(metricName, 30.0);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = $"SELECT method, AVG(duration) FROM telemetry";
 
         // Act
@@ -77,7 +78,7 @@ public class QueryExecutorTests
         LoomMetrics.RecordHistogram(metricName, 15.0);
         LoomMetrics.RecordHistogram(metricName, 10.0);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, MAX(duration) FROM telemetry";
 
         // Act
@@ -101,7 +102,7 @@ public class QueryExecutorTests
         LoomMetrics.RecordHistogram(metricName, 15.0);
         LoomMetrics.RecordHistogram(metricName, 10.0);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, MIN(duration) FROM telemetry";
 
         // Act
@@ -126,7 +127,7 @@ public class QueryExecutorTests
             LoomMetrics.RecordHistogram(metricName, i);
         }
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, P99(duration) FROM telemetry";
 
         // Act
@@ -151,7 +152,7 @@ public class QueryExecutorTests
             LoomMetrics.RecordCounter($"metric_{i}", 1);
         }
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method FROM telemetry LIMIT 5";
 
         // Act
@@ -174,7 +175,7 @@ public class QueryExecutorTests
         LoomMetrics.RecordHistogram(metric2, 30.0);
         LoomMetrics.RecordHistogram(metric3, 20.0);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, AVG(duration) FROM telemetry ORDER BY AVG(duration) DESC";
 
         // Act
@@ -194,7 +195,7 @@ public class QueryExecutorTests
     [Fact]
     public async Task Executor_ReportsExecutionTime()
     {
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method FROM telemetry";
 
         var result = await executor.ExecuteAsync(query, CancellationToken.None);
@@ -212,7 +213,7 @@ public class QueryExecutorTests
         LoomMetrics.RecordHistogram(metricName, 20.0);
         LoomMetrics.RecordHistogram(metricName, 30.0);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, AVG(duration), MAX(duration), MIN(duration), COUNT(*) FROM telemetry";
 
         // Act
@@ -235,7 +236,7 @@ public class QueryExecutorTests
     [Fact]
     public async Task Executor_ThrowsOnInvalidSyntax()
     {
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "INVALID QUERY SYNTAX";
 
         await Assert.ThrowsAsync<QuerySyntaxException>(
@@ -246,7 +247,7 @@ public class QueryExecutorTests
     [Fact]
     public async Task Executor_ReturnsCorrectColumnNames()
     {
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, AVG(duration), MAX(value) FROM telemetry";
 
         var result = await executor.ExecuteAsync(query, CancellationToken.None);
@@ -266,7 +267,7 @@ public class QueryExecutorTests
             LoomMetrics.RecordCounter($"concurrent_{i}", i);
         }
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var query = "SELECT method, COUNT(*) FROM telemetry";
 
         // Act: Run 10 queries concurrently

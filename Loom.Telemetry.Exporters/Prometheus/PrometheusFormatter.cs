@@ -1,4 +1,5 @@
 using System.Text;
+using Loom.Storage;
 
 namespace Loom.Telemetry.Exporters.Prometheus;
 
@@ -9,11 +10,11 @@ namespace Loom.Telemetry.Exporters.Prometheus;
 public static class PrometheusFormatter
 {
     /// <summary>
-    /// Format all metrics from ring buffers into OpenMetrics text format.
+    /// Format all metrics from the store into OpenMetrics text format.
     /// </summary>
-    public static string Format()
+    public static string Format(IMetricStore store)
     {
-        var buffers = LoomRuntime.GetBuffersSnapshot();
+        var buffers = store.GetBuffers();
         var sb = new StringBuilder();
 
         foreach (var (metricName, buffer) in buffers)

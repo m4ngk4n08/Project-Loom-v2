@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
     <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
     <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
     <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />

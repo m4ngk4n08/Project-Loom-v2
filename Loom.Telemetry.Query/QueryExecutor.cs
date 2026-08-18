@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Web.Contracts.Dtos;
 
@@ -11,6 +12,13 @@ public interface IQueryExecutor
 
 public sealed class QueryExecutor : IQueryExecutor
 {
+    private readonly IMetricStore _store;
+
+    public QueryExecutor(IMetricStore store)
+    {
+        _store = store;
+    }
+
     public ValueTask<QueryResponse> ExecuteAsync(string queryText, CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
@@ -29,13 +37,17 @@ public sealed class QueryExecutor : IQueryExecutor
         return ValueTask.FromResult(response);
     }
 
-    private static List<QueryResultRow> Execute(QueryPlan plan)
+    private List<QueryResultRow> Execute(QueryPlan plan)
     {
-        // Executor stage: switch on closed AggregateFunction enum, not a visitor.Visit(dynamic).
-        var buffers = LoomRuntime.GetBuffersSnapshot();
+        var buffers = _store.GetBuffers();
         var rows = new List<QueryResultRow>();
 
-        foreach (var metricName in plan.ReferencedMetricNames.DefaultIfEmpty(buffers.Keys.FirstOrDefault() ?? ""))
+        // SELECT * should iterate all metrics
+        var metricNames = plan.ReferencedMetricNames.Count > 0
+            ? plan.ReferencedMetricNames
+            : buffers.Keys.ToList();
+
+        foreach (var metricName in metricNames)
         {
             if (!buffers.TryGetValue(metricName, out var buffer)) continue;
             if (!MatchesConditions(metricName, plan.Ast.Conditions)) continue;

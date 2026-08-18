@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Loom.Storage;
 using Microsoft.Extensions.Hosting;
 using Loom.Telemetry;
 
@@ -8,7 +9,8 @@ public sealed record AlertNotification(AlertRule Rule, MetricAggregate Observed,
 
 public sealed class AlertEvaluationHostedService(
     Channel<AlertNotification> notificationChannel,
-    ISilenceStore silenceStore) : BackgroundService
+    ISilenceStore silenceStore,
+    IMetricStore metricStore) : BackgroundService
 {
     private readonly Dictionary<string, DateTime> _lastFired = [];
 
@@ -17,8 +19,6 @@ public sealed class AlertEvaluationHostedService(
         var rules = LoomTelemetryOptionsAlertingExtensions.Rules;
         if (rules.Count == 0) return;
 
-        // Tick at (smallest window / 10) per ADR-8, so even the tightest window gets
-        // several evaluation opportunities within its own duration.
         var tickInterval = rules.Select(r => r.Window).DefaultIfEmpty(TimeSpan.FromMinutes(5)).Min() / 10;
         using var timer = new PeriodicTimer(tickInterval);
 
@@ -32,10 +32,6 @@ public sealed class AlertEvaluationHostedService(
 
                 if (rule.Condition(aggregate.Value) && ShouldFire(rule, now))
                 {
-                    // Fire-and-forget: TryWrite never blocks the evaluation loop.
-                    // On a full bounded channel, the notification is dropped rather than
-                    // stalling evaluation of the remaining rules — see Step 11.5 for the
-                    // channel's bounded/drop-oldest configuration.
                     notificationChannel.Writer.TryWrite(new AlertNotification(rule, aggregate.Value, now));
                     _lastFired[rule.Name] = now;
                 }
@@ -43,9 +39,9 @@ public sealed class AlertEvaluationHostedService(
         }
     }
 
-    private static MetricAggregate? ComputeWindowAggregate(AlertRule rule, DateTime now)
+    private MetricAggregate? ComputeWindowAggregate(AlertRule rule, DateTime now)
     {
-        var buffers = LoomRuntime.GetBuffersSnapshot();
+        var buffers = metricStore.GetBuffers();
         if (!buffers.TryGetValue(rule.MetricName, out var buffer) || buffer is null) return null;
 
         var cutoff = now - rule.Window;

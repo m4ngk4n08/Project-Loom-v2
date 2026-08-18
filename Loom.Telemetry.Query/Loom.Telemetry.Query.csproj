@@ -9,6 +9,7 @@
     <EnableAotAnalyzer>true</EnableAotAnalyzer>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
     <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
     <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
   </ItemGroup>

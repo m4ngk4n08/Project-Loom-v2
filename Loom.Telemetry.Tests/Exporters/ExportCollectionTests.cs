@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Loom.Storage;
 using Loom.Telemetry.Exporters;
 using Xunit;
 
@@ -25,7 +26,7 @@ public sealed class ExportCollectionTests : IDisposable
         // Arrange
         var channel = Channel.CreateUnbounded<MetricBatch>();
         var options = new ExportOptions { CollectionInterval = TimeSpan.FromMilliseconds(100) };
-        var service = new ExportCollectionHostedService(channel, options);
+        var service = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
 
         // Act
         var cts = new CancellationTokenSource();
@@ -46,7 +47,7 @@ public sealed class ExportCollectionTests : IDisposable
         var metricName = $"test.counter.{Guid.NewGuid()}";
         var channel = Channel.CreateUnbounded<MetricBatch>();
         var options = new ExportOptions { CollectionInterval = TimeSpan.FromMilliseconds(200) };
-        var service = new ExportCollectionHostedService(channel, options);
+        var service = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
 
         // Act - Start service first, then record metrics
         var cts = new CancellationTokenSource();
@@ -83,7 +84,7 @@ public sealed class ExportCollectionTests : IDisposable
 
         var channel = Channel.CreateUnbounded<MetricBatch>();
         var options = new ExportOptions { CollectionInterval = TimeSpan.FromMilliseconds(100) };
-        var service = new ExportCollectionHostedService(channel, options);
+        var service = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
 
         // Record different metric types
         LoomMetrics.RecordCounter(counter, 5.0);
@@ -116,7 +117,7 @@ public sealed class ExportCollectionTests : IDisposable
         var metricName = $"test.counter.{Guid.NewGuid()}";
         var channel = Channel.CreateUnbounded<MetricBatch>();
         var options = new ExportOptions { CollectionInterval = TimeSpan.FromMilliseconds(100) };
-        var service = new ExportCollectionHostedService(channel, options);
+        var service = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
 
         var cts = new CancellationTokenSource();
         await service.StartAsync(cts.Token);
@@ -158,7 +159,7 @@ public sealed class ExportCollectionTests : IDisposable
         var metricName = $"test.counter.{Guid.NewGuid()}";
         var channel = Channel.CreateUnbounded<MetricBatch>();
         var options = new ExportOptions { CollectionInterval = TimeSpan.FromMilliseconds(500) };
-        var service = new ExportCollectionHostedService(channel, options);
+        var service = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
 
         LoomMetrics.RecordCounter(metricName, 1.0);
 

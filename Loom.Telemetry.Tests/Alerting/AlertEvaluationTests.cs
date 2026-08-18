@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
 using Xunit;
@@ -18,7 +19,7 @@ public class AlertEvaluationTests
         // Arrange
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore);
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Clear any existing rules
         LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
@@ -42,7 +43,7 @@ public class AlertEvaluationTests
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore);
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Create metric data
         var metricName = "TestMetric_" + Guid.NewGuid().ToString("N");
@@ -83,7 +84,7 @@ public class AlertEvaluationTests
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore);
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Create metric data
         var metricName = "TestMetric2_" + Guid.NewGuid().ToString("N");
@@ -118,7 +119,7 @@ public class AlertEvaluationTests
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore);
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Create metric data
         var metricName = "SilencedMetric_" + Guid.NewGuid().ToString("N");
@@ -244,7 +245,7 @@ public class AlertEvaluationTests
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore);
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "CooldownTest_" + Guid.NewGuid().ToString("N");
         LoomMetrics.RecordCounter(metricName, 100.0);

@@ -1,4 +1,5 @@
 using System;
+using Loom.Storage;
 using Loom.Telemetry.Exporters.Prometheus;
 using Xunit;
 
@@ -20,7 +21,7 @@ public sealed class PrometheusFormatterTests : IDisposable
     public void Format_NoMetrics_ReturnsEmptyString()
     {
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         Assert.NotNull(result);
@@ -35,7 +36,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         LoomMetrics.RecordCounter(metricName, 42.0);
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         Assert.Contains("# TYPE", result);
@@ -56,7 +57,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         LoomMetrics.RecordGauge(metricName, 123.45);
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         Assert.Contains("# TYPE", result);
@@ -77,7 +78,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         }
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         Assert.Contains("# TYPE", result);
@@ -104,7 +105,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         LoomMetrics.RecordHistogram(histogram, 30.0);
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         var sanitizedCounter = counter.Replace('.', '_').Replace('-', '_');
@@ -128,7 +129,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         LoomMetrics.RecordCounter(metricName, 1.0);
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         Assert.Contains("my_dotted_metric_name", result);
@@ -143,7 +144,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         LoomMetrics.RecordCounter(metricName, 1.0);
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         Assert.Contains("my_hyphen_metric", result);
@@ -160,7 +161,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         LoomMetrics.RecordCounter(metricName, 5.0);  // Most recent
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert - should contain the most recent value
         var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
@@ -182,7 +183,7 @@ public sealed class PrometheusFormatterTests : IDisposable
         }
 
         // Act
-        var result = PrometheusFormatter.Format();
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
         // Assert
         Assert.Contains("# TYPE", result);

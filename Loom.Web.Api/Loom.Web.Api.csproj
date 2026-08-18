@@ -22,6 +22,7 @@
 
 	<ItemGroup>
 		<!-- Reference our Contracts project -->
+		<ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
 		<ProjectReference Include="..\Loom.Telemetry.Exporters\Loom.Telemetry.Exporters.csproj" />
 		<ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
 		<ProjectReference Include="..\Loom.Telemetry.Alerting\Loom.Telemetry.Alerting.csproj" />

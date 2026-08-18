@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Loom.Storage;
 using Loom.Telemetry.Exporters;
 using Xunit;
 
@@ -30,7 +31,7 @@ public sealed class ExporterIntegrationTests : IDisposable
         var exporters = new[] { new TrackingExporter() };
         var tracker = new ExportStatusTracker();
 
-        var collectionService = new ExportCollectionHostedService(channel, options);
+        var collectionService = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new ExportDispatchHostedService(channel, exporters, tracker);
 
         // Act
@@ -85,7 +86,7 @@ public sealed class ExporterIntegrationTests : IDisposable
         var exporters = new IMetricExporter[] { exporter1, exporter2 };
         var tracker = new ExportStatusTracker();
 
-        var collectionService = new ExportCollectionHostedService(channel, options);
+        var collectionService = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new ExportDispatchHostedService(channel, exporters, tracker);
 
         LoomMetrics.RecordGauge(metricName, 42.0);
@@ -122,7 +123,7 @@ public sealed class ExporterIntegrationTests : IDisposable
         var exporters = new IMetricExporter[] { failingExporter, successExporter };
         var tracker = new ExportStatusTracker();
 
-        var collectionService = new ExportCollectionHostedService(channel, options);
+        var collectionService = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new ExportDispatchHostedService(channel, exporters, tracker);
 
         LoomMetrics.RecordHistogram(metricName, 100.0);
@@ -163,7 +164,7 @@ public sealed class ExporterIntegrationTests : IDisposable
         var slowExporter = new SlowExporter();
         var tracker = new ExportStatusTracker();
 
-        var collectionService = new ExportCollectionHostedService(channel, options);
+        var collectionService = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new ExportDispatchHostedService(channel, new[] { slowExporter }, tracker);
 
         // Record metrics rapidly
@@ -197,7 +198,7 @@ public sealed class ExporterIntegrationTests : IDisposable
         var exporter = new TrackingExporter();
         var tracker = new ExportStatusTracker();
 
-        var collectionService = new ExportCollectionHostedService(channel, options);
+        var collectionService = new ExportCollectionHostedService(channel, options, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new ExportDispatchHostedService(channel, new[] { exporter }, tracker);
 
         // Start services

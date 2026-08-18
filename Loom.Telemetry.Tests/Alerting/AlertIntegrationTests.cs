@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
 using Microsoft.Extensions.DependencyInjection;
@@ -145,7 +146,7 @@ public class AlertIntegrationTests
         }
 
         // Act - start services
-        var evaluationService = new AlertEvaluationHostedService(channel, silenceStore);
+        var evaluationService = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new AlertDispatchHostedService(channel, targets);
 
         var cts = new CancellationTokenSource();
@@ -195,7 +196,7 @@ public class AlertIntegrationTests
         silenceStore.Silence("SilencedE2EAlert", DateTime.UtcNow.AddMinutes(10));
 
         // Act
-        var evaluationService = new AlertEvaluationHostedService(channel, silenceStore);
+        var evaluationService = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new AlertDispatchHostedService(channel, targets);
 
         var cts = new CancellationTokenSource();

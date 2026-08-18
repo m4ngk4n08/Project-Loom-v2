@@ -31,6 +31,7 @@ public static class LoomMetrics
             null
         );
         GetOrCreateBuffer(name).Write(in record);
+        MetricsBridge.PublishCounter(name, (long)value);
     }
 
     /// <summary>
@@ -49,6 +50,7 @@ public static class LoomMetrics
             null
         );
         GetOrCreateBuffer(name).Write(in record);
+        MetricsBridge.PublishHistogram(name, value);
     }
 
     /// <summary>
@@ -67,6 +69,7 @@ public static class LoomMetrics
             null
         );
         GetOrCreateBuffer(name).Write(in record);
+        MetricsBridge.PublishHistogram(name, value);
     }
 
     /// <summary>

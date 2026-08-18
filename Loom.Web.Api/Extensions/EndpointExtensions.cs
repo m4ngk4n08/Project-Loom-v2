@@ -2,6 +2,7 @@
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using Loom.Web.RealTime;
+using Loom.Storage;
 using Loom.Telemetry.Query;
 using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Exporters;
@@ -255,10 +256,9 @@ namespace Loom.Web.Api.Extensions
             .Produces<List<ExporterStatusDto>>(200);
 
             // Metric names endpoint for frontend Metrics Explorer
-            exporterGroup.MapGet("/metrics/names", () =>
+            exporterGroup.MapGet("/metrics/names", (IMetricStore store) =>
             {
-                var buffers = LoomRuntime.GetBuffersSnapshot();
-                var names = buffers.Keys.ToList();
+                var names = store.GetMetricNames().ToList();
                 return Results.Json(names, LoomJsonSerializerContext.Default.ListString);
             })
             .WithName("GetMetricNames")
@@ -269,36 +269,36 @@ namespace Loom.Web.Api.Extensions
 
         private static WebApplication MapMetricIngestEndpoint(this WebApplication app)
         {
-            app.MapPost("/api/metrics/ingest", (MetricIngestRequest request) =>
+            app.MapPost("/api/metrics/ingest", (MetricIngestRequest request, IMetricStore store) =>
             {
-                // Ingest each metric into the ring buffer via LoomMetrics
                 foreach (var metric in request.Metrics)
                 {
-                    // Convert tags from dictionary to MetricTag array
                     var tags = metric.Tags?.Select(kvp => new MetricTag(kvp.Key, kvp.Value)).ToArray()
                         ?? Array.Empty<MetricTag>();
 
-                    // Use provided timestamp or default to now
                     var timestamp = metric.Timestamp ?? DateTime.UtcNow;
 
-                    // Route to the appropriate LoomMetrics method based on type
-                    switch (metric.Type.ToLowerInvariant())
+                    var type = metric.Type.ToLowerInvariant() switch
                     {
-                        case "counter":
-                            LoomMetrics.RecordCounter(metric.Name, metric.Value, tags);
-                            break;
-                        case "gauge":
-                            LoomMetrics.RecordGauge(metric.Name, metric.Value, tags);
-                            break;
-                        case "histogram":
-                            LoomMetrics.RecordHistogram(metric.Name, metric.Value, tags);
-                            break;
-                        default:
-                            return Results.BadRequest(new { error = $"Unknown metric type: {metric.Type}. Must be Counter, Gauge, or Histogram." });
-                    }
+                        "counter" => MetricType.Counter,
+                        "gauge" => MetricType.Gauge,
+                        "histogram" => MetricType.Histogram,
+                        _ => (MetricType?)null
+                    };
+
+                    if (type is null)
+                        return Results.BadRequest(new { error = $"Unknown metric type: {metric.Type}. Must be Counter, Gauge, or Histogram." });
+
+                    var record = new MetricRecord(
+                        metric.Name,
+                        type.Value,
+                        metric.Value,
+                        timestamp.Ticks,
+                        tags.Length > 0 ? tags : null
+                    );
+                    store.Write(in record);
                 }
 
-                // Return 202 Accepted with no body (metrics ingested successfully)
                 return Results.Accepted();
             })
             .WithName("IngestMetrics")
@@ -311,9 +311,9 @@ namespace Loom.Web.Api.Extensions
 
         private static WebApplication MapPrometheusEndpoint(this WebApplication app)
         {
-            app.MapGet("/metrics", () =>
+            app.MapGet("/metrics", (IMetricStore store) =>
             {
-                var metricsText = PrometheusFormatter.Format();
+                var metricsText = PrometheusFormatter.Format(store);
                 return Results.Text(metricsText, "text/plain; version=0.0.4; charset=utf-8");
             })
             .WithName("PrometheusMetrics")

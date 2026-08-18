@@ -1,5 +1,6 @@
 ﻿using Loom.Web.Api.Interfaces;
 using Loom.Web.Api.Services;
+using Loom.Storage;
 using Loom.Telemetry.Query;
 using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Exporters;
@@ -11,6 +12,9 @@ namespace Loom.Web.Api.Extensions
     {
         public static IServiceCollection AddServices(this IServiceCollection services)
         {
+            // Centralized metric storage
+            services.AddLoomStorage();
+
             services.AddSingleton<IMetricsService, MetricsService>();
             services.AddSingleton<IQueryExecutor, QueryExecutor>();
 

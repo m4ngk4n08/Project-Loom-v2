@@ -1,5 +1,6 @@
 ﻿using Loom.Web.Api.Interfaces;
 using Loom.Web.Contracts.Dtos;
+using Loom.Storage;
 using Loom.Telemetry;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -7,11 +8,17 @@ using System.Runtime.CompilerServices;
 namespace Loom.Web.Api.Services
 {
     /// <summary>
-    /// Real metrics collection from LoomMetrics ring buffers.
+    /// Real metrics collection from Loom.Storage.
     /// </summary>
     public sealed class MetricsService : IMetricsService
     {
+        private readonly IMetricStore _store;
         private readonly Process _currentProcess = Process.GetCurrentProcess();
+
+        public MetricsService(IMetricStore store)
+        {
+            _store = store;
+        }
 
         /// <summary>
         /// Get CPU metrics from ring buffers.
@@ -25,7 +32,7 @@ namespace Loom.Web.Api.Services
 
             // Read hotpaths from ring buffer (if any CPU metrics recorded)
             var hotpaths = new List<CpuHotpath>();
-            var buffers = LoomRuntime.GetBuffersSnapshot();
+            var buffers = _store.GetBuffers();
 
             // Look for CPU-related metrics in the buffers
             foreach (var kvp in buffers)
@@ -67,7 +74,7 @@ namespace Loom.Web.Api.Services
 
             // Read memory allocations from ring buffer
             var allocations = new List<MemoryAllocation>();
-            var buffers = LoomRuntime.GetBuffersSnapshot();
+            var buffers = _store.GetBuffers();
 
             foreach (var kvp in buffers)
             {
@@ -115,7 +122,7 @@ namespace Loom.Web.Api.Services
 
             // Read thread blockages from ring buffer
             var blockages = new List<ThreadBlockage>();
-            var buffers = LoomRuntime.GetBuffersSnapshot();
+            var buffers = _store.GetBuffers();
 
             foreach (var kvp in buffers)
             {

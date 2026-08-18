@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="Loom.DevTools/Loom.DevTools.csproj" />
+  <Project Path="Loom.Storage/Loom.Storage.csproj" />
   <Project Path="Loom.Telemetry.Alerting/Loom.Telemetry.Alerting.csproj" />
   <Project Path="Loom.Telemetry.Exporters/Loom.Telemetry.Exporters.csproj" />
   <Project Path="Loom.Telemetry.Generators/Loom.Telemetry.Generators.csproj" Id="af48dbf2-e1fc-4714-8b2c-1cef04ad6bcd" />

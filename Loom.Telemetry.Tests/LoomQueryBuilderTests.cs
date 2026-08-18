@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Xunit;
 using Loom.Telemetry;
 using Loom.Telemetry.Query;
+using Loom.Storage;
 
 namespace Loom.Telemetry.Tests;
 
@@ -16,7 +17,7 @@ public class LoomQueryBuilderTests
         var builder = new LoomQueryBuilder()
             .Select("method");
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -35,7 +36,7 @@ public class LoomQueryBuilderTests
             .Select("method")
             .Select("duration");
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -57,7 +58,7 @@ public class LoomQueryBuilderTests
             .Select("method")
             .Select("duration", AggregateFunction.Avg);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -79,7 +80,7 @@ public class LoomQueryBuilderTests
             .Select("d", AggregateFunction.Min)
             .Select("e", AggregateFunction.P99);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -102,7 +103,7 @@ public class LoomQueryBuilderTests
             .Select("method")
             .Where("method", "=", "ProcessOrder");
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -120,7 +121,7 @@ public class LoomQueryBuilderTests
             .Where("method", "=", "test")
             .Where("duration", ">", "100");
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -137,7 +138,7 @@ public class LoomQueryBuilderTests
             .Select("method")
             .Last(TimeSpan.FromMinutes(5));
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -155,7 +156,7 @@ public class LoomQueryBuilderTests
             .Select("duration", AggregateFunction.Avg)
             .GroupBy("method");
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -173,7 +174,7 @@ public class LoomQueryBuilderTests
             .Select("duration", AggregateFunction.Avg)
             .OrderByDescending("duration");
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -190,7 +191,7 @@ public class LoomQueryBuilderTests
             .Select("method")
             .Take(10);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -217,7 +218,7 @@ public class LoomQueryBuilderTests
             .OrderByDescending("duration")
             .Take(10);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);
@@ -232,7 +233,7 @@ public class LoomQueryBuilderTests
     public async Task Builder_SupportsMethodChaining()
     {
         // Arrange & Act
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var result = await new LoomQueryBuilder()
             .Select("method")
             .Select("duration", AggregateFunction.Avg)
@@ -251,7 +252,7 @@ public class LoomQueryBuilderTests
     {
         // Arrange
         var builder = new LoomQueryBuilder().Select("method");
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
         var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -270,7 +271,7 @@ public class LoomQueryBuilderTests
         LoomMetrics.RecordHistogram(metricName, 15.0);
         LoomMetrics.RecordHistogram(metricName, 25.0);
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act: Execute via fluent API
         var fluentResult = await new LoomQueryBuilder()
@@ -299,7 +300,7 @@ public class LoomQueryBuilderTests
             .Select("method")
             .Where("method", "=", "nonexistent_metric_" + Guid.NewGuid());
 
-        var executor = new QueryExecutor();
+        var executor = new QueryExecutor(LoomMetricsStoreAdapter.Instance);
 
         // Act
         var result = await builder.ExecuteAsync(executor);

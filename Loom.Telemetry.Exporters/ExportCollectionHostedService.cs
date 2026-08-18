@@ -1,15 +1,17 @@
 using System.Threading.Channels;
+using Loom.Storage;
 using Microsoft.Extensions.Hosting;
 
 namespace Loom.Telemetry.Exporters;
 
 /// <summary>
-/// Background service that periodically collects metrics from ring buffers
+/// Background service that periodically collects metrics from the store
 /// and writes batches to the export channel.
 /// </summary>
 public sealed class ExportCollectionHostedService(
     Channel<MetricBatch> exportChannel,
-    ExportOptions options) : BackgroundService
+    ExportOptions options,
+    IMetricStore store) : BackgroundService
 {
     private long _lastCollectionTicks = DateTime.UtcNow.Ticks;
 
@@ -22,7 +24,6 @@ public sealed class ExportCollectionHostedService(
             var now = DateTime.UtcNow;
             var batch = CollectBatch(now);
 
-            // Only write if we have data
             if (batch.Entries.Length > 0)
             {
                 exportChannel.Writer.TryWrite(batch);
@@ -34,7 +35,7 @@ public sealed class ExportCollectionHostedService(
 
     private MetricBatch CollectBatch(DateTime collectedAt)
     {
-        var buffers = LoomRuntime.GetBuffersSnapshot();
+        var buffers = store.GetBuffers();
         var entries = new List<MetricBatchEntry>(buffers.Count);
 
         foreach (var (metricName, buffer) in buffers)
@@ -43,7 +44,6 @@ public sealed class ExportCollectionHostedService(
 
             if (records.Length > 0)
             {
-                // Determine metric type from first record
                 var metricType = records[0].Type;
 
                 entries.Add(new MetricBatchEntry

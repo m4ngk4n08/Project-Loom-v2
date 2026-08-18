@@ -1,68 +1,91 @@
 ﻿using Loom.Web.Api.Interfaces;
 using Loom.Web.Contracts.Dtos;
+using Loom.Telemetry;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace Loom.Web.Api.Services
 {
     /// <summary>
-    /// Implementation of metrics collection.
+    /// Real metrics collection from LoomMetrics ring buffers.
     /// </summary>
     public sealed class MetricsService : IMetricsService
     {
-        // Cache the current process to avoid repeated lookups
         private readonly Process _currentProcess = Process.GetCurrentProcess();
 
-        // MOCK ONLY: Real implementation MUST use pooled/cached arrays (zero-allocation)
-        // These static arrays avoid per-call allocation for mock data
-        private static readonly CpuHotpath[] MockHotpaths = new[]
-        {
-        new CpuHotpath
-        {
-            MethodName = "OrderProcessor.CalculateTotal",
-            CpuPercent = 15.3,
-            InvocationCount = 1523,
-            AverageTimeMs = 2.4
-        },
-        new CpuHotpath
-        {
-            MethodName = "Database.ExecuteQuery",
-            CpuPercent = 8.7,
-            InvocationCount = 892,
-            AverageTimeMs = 5.1
-        }
-    };
-
         /// <summary>
-        /// Get CPU metrics.
+        /// Get CPU metrics from ring buffers.
         /// </summary>
         public ValueTask<CpuMetricResponse> GetCpuMetricsAsync(CancellationToken ct = default)
         {
-            // For now, return mock data
-            // TODO Phase 7: Integrate with Loom.Core for real SIMD-based profiling
+            // Calculate real CPU usage
+            _currentProcess.Refresh();
+            var cpuPercent = _currentProcess.TotalProcessorTime.TotalMilliseconds /
+                           (Environment.ProcessorCount * Environment.TickCount) * 100.0;
+
+            // Read hotpaths from ring buffer (if any CPU metrics recorded)
+            var hotpaths = new List<CpuHotpath>();
+            var buffers = LoomRuntime.GetBuffersSnapshot();
+
+            // Look for CPU-related metrics in the buffers
+            foreach (var kvp in buffers)
+            {
+                if (kvp.Key.StartsWith("cpu.") && kvp.Value.Capacity > 0)
+                {
+                    var recent = kvp.Value.ReadRecent(10);
+                    if (recent.Length > 0)
+                    {
+                        var avg = recent.Average(r => r.Value);
+                        hotpaths.Add(new CpuHotpath
+                        {
+                            MethodName = kvp.Key,
+                            CpuPercent = avg,
+                            InvocationCount = recent.Length,
+                            AverageTimeMs = avg
+                        });
+                    }
+                }
+            }
 
             var response = new CpuMetricResponse
             {
-                CpuUsagePercent = _currentProcess.TotalProcessorTime.TotalMilliseconds /
-                                 (Environment.ProcessorCount * Environment.TickCount) * 100.0,
-                Hotpaths = MockHotpaths,  // Use cached array - zero allocation!
+                CpuUsagePercent = Math.Max(0, Math.Min(100, cpuPercent)),
+                Hotpaths = hotpaths.ToArray(),
                 Timestamp = DateTime.UtcNow
             };
 
-            // Return synchronously wrapped in ValueTask
             return ValueTask.FromResult(response);
         }
 
         /// <summary>
-        /// Get memory metrics.
+        /// Get memory metrics from GC and ring buffers.
         /// </summary>
         public ValueTask<MemoryMetricResponse> GetMemoryMetricsAsync(CancellationToken ct = default)
         {
-            // Refresh process info to get current values
             _currentProcess.Refresh();
-
-            // Get GC information
             var gcInfo = GC.GetGCMemoryInfo();
+
+            // Read memory allocations from ring buffer
+            var allocations = new List<MemoryAllocation>();
+            var buffers = LoomRuntime.GetBuffersSnapshot();
+
+            foreach (var kvp in buffers)
+            {
+                if (kvp.Key.StartsWith("memory.") && kvp.Value.Capacity > 0)
+                {
+                    var recent = kvp.Value.ReadRecent(5);
+                    if (recent.Length > 0)
+                    {
+                        var totalBytes = (long)recent.Sum(r => r.Value);
+                        allocations.Add(new MemoryAllocation
+                        {
+                            TypeName = kvp.Key.Replace("memory.", ""),
+                            Count = recent.Length,
+                            TotalBytes = totalBytes
+                        });
+                    }
+                }
+            }
 
             var response = new MemoryMetricResponse
             {
@@ -75,21 +98,7 @@ namespace Loom.Web.Api.Services
                     Gen2Collections = GC.CollectionCount(2),
                     TotalGcTimeMs = GC.GetTotalPauseDuration().TotalMilliseconds
                 },
-                TopAllocations = new[]
-                {
-                new MemoryAllocation
-                {
-                    TypeName = "System.String",
-                    Count = 50000,
-                    TotalBytes = 2_500_000
-                },
-                new MemoryAllocation
-                {
-                    TypeName = "System.Byte[]",
-                    Count = 1200,
-                    TotalBytes = 1_800_000
-                }
-            },
+                TopAllocations = allocations.Take(10).ToArray(),
                 Timestamp = DateTime.UtcNow
             };
 
@@ -97,41 +106,44 @@ namespace Loom.Web.Api.Services
         }
 
         /// <summary>
-        /// Get thread metrics.
+        /// Get thread metrics from Process and ring buffers.
         /// </summary>
         public ValueTask<ThreadMetricResponse> GetThreadMetricsAsync(CancellationToken ct = default)
         {
-            // Get thread information
             _currentProcess.Refresh();
             var threadCount = _currentProcess.Threads.Count;
 
-            // For now, mock blocked threads
-            // TODO Phase 7: Real thread profiling
+            // Read thread blockages from ring buffer
+            var blockages = new List<ThreadBlockage>();
+            var buffers = LoomRuntime.GetBuffersSnapshot();
+
+            foreach (var kvp in buffers)
+            {
+                if (kvp.Key.StartsWith("thread.blocked") && kvp.Value.Capacity > 0)
+                {
+                    var recent = kvp.Value.ReadRecent(5);
+                    foreach (var record in recent)
+                    {
+                        blockages.Add(new ThreadBlockage
+                        {
+                            ThreadId = (int)record.Value,
+                            ThreadName = kvp.Key.Replace("thread.blocked.", ""),
+                            BlockedOn = "Lock contention",
+                            BlockedDurationMs = record.Value,
+                            StackTrace = null
+                        });
+                    }
+                }
+            }
+
+            var blockedCount = blockages.Count;
 
             var response = new ThreadMetricResponse
             {
                 TotalThreads = threadCount,
-                ActiveThreads = threadCount - 2,
-                BlockedThreads = 2,
-                Blockages = new[]
-                {
-                new ThreadBlockage
-                {
-                    ThreadId = 12345,
-                    ThreadName = "WorkerThread-1",
-                    BlockedOn = "Waiting for database connection",
-                    BlockedDurationMs = 1250.5,
-                    StackTrace = "at Database.WaitForConnection()\nat OrderProcessor.Process()"
-                },
-                new ThreadBlockage
-                {
-                    ThreadId = 12346,
-                    ThreadName = null,  // Unnamed thread
-                    BlockedOn = "Lock contention on OrderLock",
-                    BlockedDurationMs = 500.2,
-                    StackTrace = null  // Sometimes we don't capture stack trace
-                }
-            },
+                ActiveThreads = threadCount - blockedCount,
+                BlockedThreads = blockedCount,
+                Blockages = blockages.Take(10).ToArray(),
                 Timestamp = DateTime.UtcNow
             };
 
@@ -139,23 +151,18 @@ namespace Loom.Web.Api.Services
         }
 
         /// <summary>
-        /// Stream metric updates continuosly at ~10 Hz (10 updates per second)
+        /// Stream metric updates continuously at ~3 Hz per metric type.
         /// </summary>
-        /// <param name="ct"></param>
-        /// <returns></returns>
-        /// <exception cref="NotImplementedException"></exception>
         public async IAsyncEnumerable<MetricUpdate> GetMetricsStreamAsync([EnumeratorCancellation] CancellationToken ct = default)
         {
             var metricIndex = 0;
 
-            // Stream metrics until client disconnects or cancellation is requested
             while (!ct.IsCancellationRequested)
             {
                 // Cycle through metric types
                 switch (metricIndex % 3)
                 {
                     case 0:
-                        // Send CPU metrics
                         var cpuMetrics = await GetCpuMetricsAsync(ct);
                         yield return new CpuMetricUpdate
                         {
@@ -165,7 +172,6 @@ namespace Loom.Web.Api.Services
                         break;
 
                     case 1:
-                        // Send Memory metrics
                         var memoryMetrics = await GetMemoryMetricsAsync(ct);
                         yield return new MemoryMetricUpdate
                         {
@@ -175,7 +181,6 @@ namespace Loom.Web.Api.Services
                         break;
 
                     case 2:
-                        // Send Thread metrics
                         var threadMetrics = await GetThreadMetricsAsync(ct);
                         yield return new ThreadMetricUpdate
                         {
@@ -186,8 +191,6 @@ namespace Loom.Web.Api.Services
                 }
 
                 metricIndex++;
-
-                // Wait ~300ms between updates (~3 updates per second per metric type)
                 await Task.Delay(300, ct);
             }
         }

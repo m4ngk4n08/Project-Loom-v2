@@ -10,4 +10,8 @@
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
 		<EnableAotAnalyzer>true</EnableAotAnalyzer>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
 </Project>

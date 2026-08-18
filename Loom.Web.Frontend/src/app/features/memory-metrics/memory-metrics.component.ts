@@ -111,7 +111,7 @@ export class MemoryMetricsComponent implements OnChanges {
               font: {
                 size: 11
               },
-              callback: (value) => `${value} MB`
+              callback: (value: number | string) => `${value} MB`
             }
           }
         },
@@ -129,7 +129,7 @@ export class MemoryMetricsComponent implements OnChanges {
             padding: 12,
             displayColors: false,
             callbacks: {
-              label: (context) => `Memory: ${context.parsed.toFixed(1)} MB`
+              label: (context: any) => `Memory: ${context.parsed.toFixed(1)} MB`
             }
           }
         }

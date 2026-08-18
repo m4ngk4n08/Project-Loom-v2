@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Loom.Web.Contracts.Dtos;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Loom.Web.Contracts;
 
@@ -23,6 +24,9 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(DiagnosticSearchResponse))]
 [JsonSerializable(typeof(SearchResult))]
 [JsonSerializable(typeof(TelemetryIngestRequest))]
+[JsonSerializable(typeof(MetricIngestRequest))]
+[JsonSerializable(typeof(MetricIngestDto))]
+[JsonSerializable(typeof(MetricIngestDto[]))]
 [JsonSerializable(typeof(MetricUpdate))]
 [JsonSerializable(typeof(CpuMetricUpdate))]
 [JsonSerializable(typeof(MemoryMetricUpdate))]
@@ -50,6 +54,7 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(GrafanaDataPoint[]))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(List<string>))]
+[JsonSerializable(typeof(ProblemDetails))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

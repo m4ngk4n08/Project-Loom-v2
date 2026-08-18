@@ -1,7 +1,7 @@
 import { CommonModule } from "@angular/common";
-import { Component, DestroyRef, inject, OnInit, signal } from "@angular/core";
-import { WebSocketService } from "../../core/services/websocket.service";
-import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
+import { Component, inject, computed } from "@angular/core";
+import { DashboardStateService } from "../../core/services/dashboard-state.service";
+import { StatTileComponent } from "../../shared/stat-tile/stat-tile.component";
 import { CpuMetricsComponent } from "../cpu-metrics/cpu-metrics.component";
 import { MemoryMetricsComponent } from "../memory-metrics/memory-metrics.component";
 import { ThreadMetricsComponent } from "../thread-metrics/thread-metrics.component";
@@ -9,66 +9,38 @@ import { ThreadMetricsComponent } from "../thread-metrics/thread-metrics.compone
 
 @Component({
     selector: 'app-dashboard',
-    standalone: true, 
-    imports: [CommonModule, CpuMetricsComponent, MemoryMetricsComponent, ThreadMetricsComponent],
+    standalone: true,
+    imports: [
+        CommonModule,
+        StatTileComponent,
+        CpuMetricsComponent,
+        MemoryMetricsComponent,
+        ThreadMetricsComponent
+    ],
     templateUrl: './dashboard.component.html',
     styleUrls: ['./dashboard.component.scss']
 })
+export class DashboardComponent {
+    stateService = inject(DashboardStateService);
 
-export class DashboardComponent implements OnInit{
-    private wsService = inject(WebSocketService);
-    private destroyRef = inject(DestroyRef);
+    // Computed values for stat tiles
+    cpuUsage = computed(() => {
+        const data = this.stateService.cpuData();
+        return data ? data.cpuUsagePercent.toFixed(1) : '-';
+    });
 
-    // Signals for reactive state
-    cpuData = signal<any>(null);
-    memoryData = signal<any>(null);
-    threadData = signal<any>(null);
-    isConnected = signal<boolean>(false);
-    connectionError = signal<boolean>(false);
+    memoryUsage = computed(() => {
+        const data = this.stateService.memoryData();
+        return data ? ((data.usedMemoryMb / data.totalMemoryMb) * 100).toFixed(1) : '-';
+    });
 
-    ngOnInit(): void {
-        this.connectWebSocket();
-    }
+    threadCount = computed(() => {
+        const data = this.stateService.threadData();
+        return data ? data.totalThreads.toString() : '-';
+    });
 
-    private connectWebSocket(): void {
-        this.wsService.connect('/ws/metrics')
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe({
-                next: (message) => {
-                    this.isConnected.set(true);
-                    this.connectionError.set(false);
-                    this.handleMetricUpdate(message);
-                },
-                error: (error) => {
-                    console.error('WebSocket error:', error);
-                    this.isConnected.set(false);
-                    this.connectionError.set(true);
-                },
-                complete: () => {
-                    console.log('WebSocket connection closed');
-                    this.isConnected.set(false);
-                }
-            });
-    }
-
-    private handleMetricUpdate(message: any): void {
-        // Handle discriminated union based on $type field
-        switch(message.$type || message.type) {
-            case 'cpu':
-                this.cpuData.set(message.data);
-                break;
-            case 'memory':
-                this.memoryData.set(message.data);
-                break;
-            case 'thread':
-                this.threadData.set(message.data);
-                break;
-            default:
-                console.warn('Unknown metric type:', message);
-        }
-    }
-
-    reconnect(): void {
-        this.connectWebSocket();
-    }
+    blockedThreads = computed(() => {
+        const data = this.stateService.threadData();
+        return data ? data.blockedThreads.toString() : '-';
+    });
 }

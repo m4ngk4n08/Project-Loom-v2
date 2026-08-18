@@ -112,7 +112,7 @@ export class CpuMetricsComponent implements OnChanges {
               font: {
                 size: 11
               },
-              callback: (value) => `${value}%`
+              callback: (value: number | string) => `${value}%`
             }
           }
         },
@@ -130,7 +130,7 @@ export class CpuMetricsComponent implements OnChanges {
             padding: 12,
             displayColors: false,
             callbacks: {
-              label: (context) => {
+              label: (context: any) => {
                     return `CPU: ${context.parsed.y?.toFixed(1)}%`;
                 }
             }

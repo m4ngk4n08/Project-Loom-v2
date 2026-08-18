@@ -155,7 +155,7 @@ export class ThreadMetricsComponent implements OnChanges {
             borderWidth: 1,
             padding: 12,
             callbacks: {
-              label: (context) => `${context.dataset.label}: ${context.parsed.y} threads`
+              label: (context: any) => `${context.dataset.label}: ${context.parsed.y} threads`
             }
           }
         }

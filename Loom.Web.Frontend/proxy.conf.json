@@ -6,10 +6,15 @@
     "logLevel": "debug"
   },
   "/ws": {
-    "target": "ws://localhost:5209",
+    "target": "http://localhost:5209",
     "secure": false,
     "ws": true,
     "changeOrigin": true,
     "logLevel": "debug"
+  },
+  "/metrics": {
+    "target": "http://localhost:5209",
+    "secure": false,
+    "changeOrigin": true
   }
 }

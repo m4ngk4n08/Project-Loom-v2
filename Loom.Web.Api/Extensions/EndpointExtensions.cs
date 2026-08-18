@@ -18,6 +18,7 @@ namespace Loom.Web.Api.Extensions
         {
             app.MapHealthEndpoints();
             app.MapMetricsEndpoints();
+            app.MapMetricIngestEndpoint();
             app.MapWebSocketEndpoints();
             app.MapQueryEndpoints();
             app.MapAlertEndpoints();
@@ -262,6 +263,48 @@ namespace Loom.Web.Api.Extensions
             })
             .WithName("GetMetricNames")
             .Produces<List<string>>(200);
+
+            return app;
+        }
+
+        private static WebApplication MapMetricIngestEndpoint(this WebApplication app)
+        {
+            app.MapPost("/api/metrics/ingest", (MetricIngestRequest request) =>
+            {
+                // Ingest each metric into the ring buffer via LoomMetrics
+                foreach (var metric in request.Metrics)
+                {
+                    // Convert tags from dictionary to MetricTag array
+                    var tags = metric.Tags?.Select(kvp => new MetricTag(kvp.Key, kvp.Value)).ToArray()
+                        ?? Array.Empty<MetricTag>();
+
+                    // Use provided timestamp or default to now
+                    var timestamp = metric.Timestamp ?? DateTime.UtcNow;
+
+                    // Route to the appropriate LoomMetrics method based on type
+                    switch (metric.Type.ToLowerInvariant())
+                    {
+                        case "counter":
+                            LoomMetrics.RecordCounter(metric.Name, metric.Value, tags);
+                            break;
+                        case "gauge":
+                            LoomMetrics.RecordGauge(metric.Name, metric.Value, tags);
+                            break;
+                        case "histogram":
+                            LoomMetrics.RecordHistogram(metric.Name, metric.Value, tags);
+                            break;
+                        default:
+                            return Results.BadRequest(new { error = $"Unknown metric type: {metric.Type}. Must be Counter, Gauge, or Histogram." });
+                    }
+                }
+
+                // Return 202 Accepted with no body (metrics ingested successfully)
+                return Results.Accepted();
+            })
+            .WithName("IngestMetrics")
+            .WithTags("Metrics")
+            .Produces(202)
+            .Produces(400);
 
             return app;
         }

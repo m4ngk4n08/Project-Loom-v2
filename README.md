@@ -240,7 +240,7 @@ dotnet-counters monitor --process-id $(pidof Loom.Host) System.Runtime
 | 9 | Configuration-Driven Sampling | Planned | `appsettings.json` sampling rules, path/duration overrides |
 | 10 | Query Language | Planned | SQL-like parser + fluent `Query()` API, `POST /api/query` |
 | 11 | Alerting/Thresholds | Planned | `AddAlert()`, window conditions, webhook/email targets |
-| 12 | Exporters | Planned | Prometheus, Grafana Cloud, Elasticsearch, Console |
+| 12 | Exporters | ✅ Complete | Prometheus, Grafana Cloud, Elasticsearch, Console |
 | 13 | Local Development Mode | Planned | `dotnet loom dev`, auto-discovery, zero-config |
 
 ### Production Hardening
@@ -249,6 +249,12 @@ dotnet-counters monitor --process-id $(pidof Loom.Host) System.Runtime
 |-------|--------|--------|-------------|
 | 14 | Security Hardening | Planned | Manual JWT, HTTPS enforcement, systemd sandbox |
 | 15 | Production Build & Deployment | Planned | Binary optimization, systemd service, CI/CD |
+
+### Frontend (Phase 16)
+
+| Phase | System | Status | Description |
+|-------|--------|--------|-------------|
+| 16 | Dashboard Modernization | 🚧 In Progress | Angular 21 + Apache ECharts, dark theme with teal accent, multi-page SPA |
 
 ### Dependency Graph (Telemetry Phases)
 
@@ -334,10 +340,11 @@ The following are explicitly **not in scope** for the current implementation pas
 
 | Feature | Reason Deferred | Future Phase |
 |---------|----------------|--------------|
-| Angular Frontend / Dashboard UI | Frontend work paused — .NET backend is the current focus | TBD |
-| Custom Dashboard Widgets (`@LoomWidget` plugin system) | Requires Angular plugin infrastructure | TBD |
-| Query Builder UI (autocomplete, visual query composer) | UI-shaped affordance; underlying query engine (#10) IS in scope | TBD |
-| Mobile app (PWA/React Native) | Depends on frontend | TBD |
+| Custom Dashboard Widgets (`@LoomWidget` plugin system) | Requires Angular plugin infrastructure | Phase 17+ |
+| Query Builder UI (autocomplete, visual query composer) | UI-shaped affordance; underlying query engine (#10) IS in scope | Phase 16+ |
+| Mobile app (PWA/React Native) | Depends on frontend | Phase 17+ |
+
+**Note:** The Angular frontend (Phase 16) is now **in progress** — it was un-deferred to provide a modern dashboard with Apache ECharts visualizations and dark theme.
 
 The query engine (Phase 10), alert conditions (Phase 11), and all other backend capabilities are fully built and testable via curl/API without any frontend. The Local Development Mode (Phase 13) provides terminal/console output for day-to-day use without a browser.
 

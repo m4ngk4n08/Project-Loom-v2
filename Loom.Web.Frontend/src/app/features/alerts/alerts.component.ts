@@ -55,7 +55,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge/status-badge.com
 
                 <div class="detail-row">
                   <dt>Condition</dt>
-                  <dd>{{ alert.condition }} {{ alert.threshold }}</dd>
+                  <dd>{{ alert.condition ?? 'Threshold breached' }} {{ alert.threshold ?? '' }}</dd>
                 </div>
 
                 <div class="detail-row">
@@ -63,7 +63,7 @@ import { StatusBadgeComponent } from '../../shared/status-badge/status-badge.com
                   <dd>{{ alert.window }}</dd>
                 </div>
 
-                @if (alert.actions.length > 0) {
+                @if ((alert.actions?.length ?? 0) > 0) {
                   <div class="detail-row">
                     <dt>Actions</dt>
                     <dd>
@@ -469,7 +469,7 @@ export class AlertsComponent implements OnInit {
 
   getAlertStatus(alert: AlertRule): 'healthy' | 'degraded' | 'unknown' {
     // In real implementation, this would check actual alert state
-    return alert.actions.length > 0 ? 'healthy' : 'degraded';
+    return (alert.actions?.length ?? 0) > 0 ? 'healthy' : 'degraded';
   }
 
   private setMessage(alertName: string, message: string): void {

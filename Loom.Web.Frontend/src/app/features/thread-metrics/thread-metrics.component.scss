@@ -47,18 +47,18 @@
   border-left: 4px solid;
 
   &--active {
-    background: color-mix(in srgb, #2a78d6 8%, transparent);
-    border-color: #2a78d6; // blue
+    background: color-mix(in srgb, var(--info, #3b82f6) 8%, transparent);
+    border-color: var(--info, #3b82f6);
   }
 
   &--blocked {
-    background: color-mix(in srgb, #eb6834 8%, transparent);
-    border-color: #eb6834; // orange
+    background: color-mix(in srgb, var(--warning, #f59e0b) 8%, transparent);
+    border-color: var(--warning, #f59e0b);
   }
 
   &--waiting {
-    background: color-mix(in srgb, #1baf7a 8%, transparent);
-    border-color: #1baf7a; // aqua
+    background: color-mix(in srgb, var(--success, #10b981) 8%, transparent);
+    border-color: var(--success, #10b981);
   }
 }
 
@@ -107,9 +107,10 @@
 
 .blockage-item {
   padding: 0.875rem;
-  background: var(--surface-2, #f9f9f7);
-  border-radius: 6px;
-  border-left: 3px solid #eb6834; // orange (blocked state)
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--warning, #f59e0b); // orange (blocked state)
 }
 
 .blockage-header {
@@ -135,7 +136,7 @@
 .blockage-duration {
   font-size: 0.875rem;
   font-weight: 700;
-  color: #eb6834; // orange
+  color: var(--warning, #f59e0b);
   font-variant-numeric: tabular-nums;
 }
 
@@ -143,126 +144,6 @@
   font-size: 0.8125rem;
   color: var(--text-secondary, #52514e);
   line-height: 1.4;
-}
-
-// Dark mode
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    .metric-title,
-    .metric-value {
-      color: #ffffff;
-    }
-
-    .metric-value .unit {
-      color: #c3c2b7;
-    }
-
-    .stat-item {
-      &--active {
-        background: color-mix(in srgb, #3987e5 12%, transparent);
-        border-color: #3987e5;
-      }
-
-      &--blocked {
-        background: color-mix(in srgb, #d95926 12%, transparent);
-        border-color: #d95926;
-      }
-
-      &--waiting {
-        background: color-mix(in srgb, #199e70 12%, transparent);
-        border-color: #199e70;
-      }
-    }
-
-    .stat-label {
-      color: #c3c2b7;
-    }
-
-    .stat-value {
-      color: #ffffff;
-    }
-
-    .blockages-title,
-    .stat-label {
-      color: #c3c2b7;
-    }
-
-    .blockage-item {
-      background: #0d0d0d;
-      border-color: #d95926;
-    }
-
-    .blockage-thread {
-      color: #ffffff;
-    }
-
-    .blockage-name,
-    .blockage-reason {
-      color: #c3c2b7;
-    }
-
-    .blockage-duration {
-      color: #d95926;
-    }
-  }
-}
-
-:root[data-theme="dark"] {
-  .metric-title,
-  .metric-value {
-    color: #ffffff;
-  }
-
-  .metric-value .unit {
-    color: #c3c2b7;
-  }
-
-  .stat-item {
-    &--active {
-      background: color-mix(in srgb, #3987e5 12%, transparent);
-      border-color: #3987e5;
-    }
-
-    &--blocked {
-      background: color-mix(in srgb, #d95926 12%, transparent);
-      border-color: #d95926;
-    }
-
-    &--waiting {
-      background: color-mix(in srgb, #199e70 12%, transparent);
-      border-color: #199e70;
-    }
-  }
-
-  .stat-label {
-    color: #c3c2b7;
-  }
-
-  .stat-value {
-    color: #ffffff;
-  }
-
-  .blockages-title {
-    color: #c3c2b7;
-  }
-
-  .blockage-item {
-    background: #0d0d0d;
-    border-color: #d95926;
-  }
-
-  .blockage-thread {
-    color: #ffffff;
-  }
-
-  .blockage-name,
-  .blockage-reason {
-    color: #c3c2b7;
-  }
-
-  .blockage-duration {
-    color: #d95926;
-  }
 }
 
 // Responsive

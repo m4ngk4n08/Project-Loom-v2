@@ -22,6 +22,11 @@ export const routes: Routes = [
           .then(m => m.MetricsExplorerComponent)
       },
       {
+        path: 'rankings',
+        loadComponent: () => import('./features/rankings/rankings.component')
+          .then(m => m.RankingsComponent)
+      },
+      {
         path: 'query',
         loadComponent: () => import('./features/query-builder/query-builder.component')
           .then(m => m.QueryBuilderComponent)

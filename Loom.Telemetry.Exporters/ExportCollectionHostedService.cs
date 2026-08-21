@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Loom.Storage;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Loom.Telemetry.Exporters;
 
@@ -11,7 +12,8 @@ namespace Loom.Telemetry.Exporters;
 public sealed class ExportCollectionHostedService(
     Channel<MetricBatch> exportChannel,
     ExportOptions options,
-    IMetricStore store) : BackgroundService
+    IMetricStore store,
+    ILogger<ExportCollectionHostedService>? logger = null) : BackgroundService
 {
     private long _lastCollectionTicks = DateTime.UtcNow.Ticks;
 
@@ -26,7 +28,15 @@ public sealed class ExportCollectionHostedService(
 
             if (batch.Entries.Length > 0)
             {
-                exportChannel.Writer.TryWrite(batch);
+                var written = exportChannel.Writer.TryWrite(batch);
+                var totalRecords = batch.Entries.Sum(e => e.Records.Length);
+                logger?.LogInformation(
+                    "Export batch collected: {MetricCount} metric(s), {RecordCount} record(s) at {CollectedAt:O} (channel accepted={Accepted})",
+                    batch.Entries.Length, totalRecords, batch.CollectedAtUtc, written);
+            }
+            else
+            {
+                logger?.LogDebug("Export collection tick: no new records since last collection.");
             }
 
             _lastCollectionTicks = now.Ticks;

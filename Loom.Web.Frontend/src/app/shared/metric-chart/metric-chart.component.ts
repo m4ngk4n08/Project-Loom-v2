@@ -1,4 +1,4 @@
-import { Component, Input, OnInit, OnDestroy, signal, effect, ViewChild, ElementRef } from '@angular/core';
+import { Component, Input, OnInit, OnDestroy, signal, effect, ViewChild, ElementRef, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import * as echarts from 'echarts';
 import type { EChartsOption } from 'echarts';
@@ -105,7 +105,7 @@ export class MetricChartComponent implements OnInit, OnDestroy {
   @ViewChild('chartElement', { static: true }) chartElement!: ElementRef<HTMLDivElement>;
 
   @Input({ required: true }) title!: string;
-  @Input({ required: true }) data!: ChartDataPoint[];
+  data = input.required<ChartDataPoint[]>();
   @Input() type: ChartType = 'line';
   @Input() height: string = '300px';
   @Input() ariaLabel?: string;
@@ -120,7 +120,8 @@ export class MetricChartComponent implements OnInit, OnDestroy {
   constructor() {
     // React to data changes
     effect(() => {
-      if (this.chart && this.data) {
+      const chartData = this.data();
+      if (this.chart && chartData) {
         this.updateChart();
       }
     });
@@ -129,6 +130,9 @@ export class MetricChartComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.initChart();
     this.setupResizeObserver();
+    if (this.data().length > 0) {
+      this.updateChart();
+    }
   }
 
   ngOnDestroy(): void {
@@ -194,7 +198,7 @@ export class MetricChartComponent implements OnInit, OnDestroy {
       },
       xAxis: {
         type: 'category',
-        data: this.data.map(d => d.label || (d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '')),
+        data: this.data().map(d => d.label || (d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '')),
         boundaryGap: this.type === 'bar'
       },
       yAxis: {
@@ -203,7 +207,7 @@ export class MetricChartComponent implements OnInit, OnDestroy {
       series: [
         {
           type: this.type === 'area' ? 'line' : this.type,
-          data: this.data.map(d => d.value),
+          data: this.data().map(d => d.value),
           smooth: true,
           itemStyle: {
             color: this.color
@@ -239,10 +243,10 @@ export class MetricChartComponent implements OnInit, OnDestroy {
   }
 
   getChartDescription(): string {
-    const dataPoints = this.data.length;
-    const minValue = Math.min(...this.data.map(d => d.value));
-    const maxValue = Math.max(...this.data.map(d => d.value));
-    const avgValue = this.data.reduce((sum, d) => sum + d.value, 0) / dataPoints;
+    const dataPoints = this.data().length;
+    const minValue = Math.min(...this.data().map(d => d.value));
+    const maxValue = Math.max(...this.data().map(d => d.value));
+    const avgValue = this.data().reduce((sum, d) => sum + d.value, 0) / dataPoints;
 
     return `${this.title} ${this.type} chart showing ${dataPoints} data points. ` +
            `Minimum value: ${minValue.toFixed(2)}, ` +

@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Loom.Storage;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Loom.Telemetry;
 
 namespace Loom.Telemetry.Alerting;
@@ -10,14 +11,22 @@ public sealed record AlertNotification(AlertRule Rule, MetricAggregate Observed,
 public sealed class AlertEvaluationHostedService(
     Channel<AlertNotification> notificationChannel,
     ISilenceStore silenceStore,
-    IMetricStore metricStore) : BackgroundService
+    IMetricStore metricStore,
+    ILogger<AlertEvaluationHostedService>? logger = null) : BackgroundService
 {
     private readonly Dictionary<string, DateTime> _lastFired = [];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var rules = LoomTelemetryOptionsAlertingExtensions.Rules;
-        if (rules.Count == 0) return;
+        if (rules.Count == 0)
+        {
+            logger?.LogInformation("Alert evaluation started: no rules registered.");
+            return;
+        }
+
+        logger?.LogInformation("Alert evaluation started: {RuleCount} rule(s) registered: {RuleNames}",
+            rules.Count, string.Join(", ", rules.Select(r => r.Name)));
 
         var tickInterval = rules.Select(r => r.Window).DefaultIfEmpty(TimeSpan.FromMinutes(5)).Min() / 10;
         using var timer = new PeriodicTimer(tickInterval);
@@ -28,12 +37,26 @@ public sealed class AlertEvaluationHostedService(
             foreach (var rule in rules)
             {
                 var aggregate = ComputeWindowAggregate(rule, now);
-                if (aggregate is null) continue;
+                if (aggregate is null)
+                {
+                    logger?.LogDebug("Alert rule {Rule} evaluated: no data in window.", rule.Name);
+                    continue;
+                }
 
-                if (rule.Condition(aggregate.Value) && ShouldFire(rule, now))
+                var fired = rule.Condition(aggregate.Value) && ShouldFire(rule, now);
+                logger?.LogDebug(
+                    "Alert rule {Rule} evaluated: metric={Metric} count={Count} avg={Avg:F2} max={Max:F2} p99={P99:F2} fired={Fired}",
+                    rule.Name, aggregate.Value.MetricName, aggregate.Value.Count,
+                    aggregate.Value.Average, aggregate.Value.Max, aggregate.Value.P99, fired);
+
+                if (fired)
                 {
                     notificationChannel.Writer.TryWrite(new AlertNotification(rule, aggregate.Value, now));
                     _lastFired[rule.Name] = now;
+                    logger?.LogInformation(
+                        "Alert FIRED: rule={Rule} metric={Metric} count={Count} avg={Avg:F2} max={Max:F2} p99={P99:F2} window={Window}",
+                        rule.Name, aggregate.Value.MetricName, aggregate.Value.Count,
+                        aggregate.Value.Average, aggregate.Value.Max, aggregate.Value.P99, rule.Window);
                 }
             }
         }

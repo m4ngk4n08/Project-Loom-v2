@@ -1,6 +1,8 @@
 import { CommonModule } from "@angular/common";
-import { Component, ElementRef, Input, OnChanges, SimpleChanges, ViewChild } from "@angular/core";
+import { Component, ElementRef, Input, Output, EventEmitter, ViewChild, AfterViewInit, OnDestroy, inject, effect } from "@angular/core";
 import { Chart, ChartConfiguration, registerables } from "chart.js";
+import { DashboardTimelineService } from "../../core/services/dashboard-timeline.service";
+import { createChartWithCrosshair, syncCrosshairOnHover } from "../../shared/chart-sync/chart-crosshair.plugin";
 
 
 // Register Chart.js component
@@ -13,41 +15,45 @@ Chart.register(...registerables);
     templateUrl: './cpu-metrics.component.html',
     styleUrls: ['./cpu-metrics.component.scss']
 })
-export class CpuMetricsComponent implements OnChanges {
+export class CpuMetricsComponent implements AfterViewInit, OnDestroy {
     @Input() data: any = null;
+    @Output() pointClick = new EventEmitter<{ timestamp: Date; method: string }>();
     @ViewChild('chartCanvas', { static: false }) chartCanvas!: ElementRef<HTMLCanvasElement>;
 
     private chart: Chart | null = null;
-    private maxDataPoints = 30; // Keep last 30 data points
-    private timestamps: string[] = [];
-    private cpuValues: number[] = [];
+    private timeline = inject(DashboardTimelineService);
 
     // Color pallete
     private readonly COLORS = {
     light: {
-      series1: '#2a78d6',
-      surface: '#fcfcfb',
-      textPrimary: '#0b0b0b',
-      textSecondary: '#52514e',
-      gridline: '#e1e0d9'
+      series1: '#0d9488',
+      surface: '#ffffff',
+      textPrimary: '#0f172a',
+      textSecondary: '#475569',
+      gridline: '#e2e8f0'
     },
     dark: {
-      series1: '#3987e5',
-      surface: '#1a1a19',
-      textPrimary: '#ffffff',
-      textSecondary: '#c3c2b7',
-      gridline: '#2c2c2a'
+      series1: '#14b8a6',
+      surface: '#1a1d26',
+      textPrimary: '#f1f5f9',
+      textSecondary: '#94a3b8',
+      gridline: '#242832'
     }
   };
 
-  ngOnChanges(changes: SimpleChanges): void {
-      if(changes['data'] && this.data){
-        this.updateChart();
-      }
+  constructor() {
+    effect(() => {
+      this.timeline.ticks();
+      this.timeline.windowStart();
+      this.timeline.windowEnd();
+      this.timeline.crosshairIndex();
+      if (this.chart) this.updateChart();
+    });
   }
 
   ngAfterViewInit(): void {
     this.initChart();
+    this.updateChart();
   }
 
   ngOnDestroy(): void {
@@ -57,25 +63,27 @@ export class CpuMetricsComponent implements OnChanges {
   }
 
   private initChart(): void {
-    const isDark = window.matchMedia('(prefers-color-scheme: dark').matches;
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const colors = isDark ? this.COLORS.dark : this.COLORS.light;
 
     const config: ChartConfiguration = {
       type: 'line',
       data: {
-        labels: this.timestamps,
+        labels: [],
         datasets: [{
           label: 'CPU Usage %',
-          data: this.cpuValues,
+          data: [],
           borderColor: colors.series1,
           backgroundColor: 'transparent',
           borderWidth: 2,
-          pointRadius: 4,
+          pointRadius: 0,
+          pointHoverRadius: 5,
           pointBackgroundColor: colors.series1,
           pointBorderColor: colors.surface,
           pointBorderWidth: 2,
           tension: 0.4,
-          fill: false
+          fill: false,
+          spanGaps: true
         }]
       },
       options: {
@@ -83,6 +91,20 @@ export class CpuMetricsComponent implements OnChanges {
         maintainAspectRatio: false,
         animation: {
           duration: 300
+        },
+        onHover: syncCrosshairOnHover(this.timeline),
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
+        onClick: (_event: any, elements: any[]) => {
+          if (elements.length > 0) {
+            const globalIndex = this.timeline.windowStart() + elements[0].index;
+            const tick = this.timeline.ticks()[globalIndex];
+            if (tick) {
+              this.pointClick.emit({ timestamp: tick.timestamp, method: 'cpu-usage' });
+            }
+          }
         },
         scales: {
           x: {
@@ -96,7 +118,9 @@ export class CpuMetricsComponent implements OnChanges {
               font: {
                 size: 11
               },
-              maxRotation: 0
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 6
             }
           },
           y: {
@@ -139,26 +163,18 @@ export class CpuMetricsComponent implements OnChanges {
       }
     };
 
-    this.chart = new Chart(this.chartCanvas.nativeElement, config);
+    this.chart = createChartWithCrosshair(this.chartCanvas.nativeElement, config, this.timeline);
   }
 
   private updateChart(): void {
-    if(!this.chart || !this.data) return;
+    if(!this.chart) return;
 
-    // Add new data point
-    const timestamp = new Date(this.data.timestamp).toLocaleTimeString();
-    this.timestamps.push(timestamp);
-    this.cpuValues.push(this.data.cpuUsagePercent);
-
-    // Keep only the last N data points (sliding window)
-    if(this.timestamps.length > this.maxDataPoints) {
-        this.timestamps.shift();
-        this.cpuValues.shift();
-    }
-
-    // Update chart
-    this.chart.data.labels = this.timestamps;
-    this.chart.data.datasets[0].data = this.cpuValues;
+    const ticks = this.timeline.ticks().slice(
+      this.timeline.windowStart(),
+      this.timeline.windowEnd()
+    );
+    this.chart.data.labels = ticks.map(t => t.timestamp.toLocaleTimeString());
+    this.chart.data.datasets[0].data = ticks.map(t => t.cpu);
     this.chart.update('none') // 'none' = no animation for real-time updates
   }
 

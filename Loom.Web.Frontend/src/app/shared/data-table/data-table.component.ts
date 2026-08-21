@@ -1,6 +1,5 @@
 import { Component, Input, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-
 export interface TableColumn {
   key: string;
   label: string;
@@ -51,7 +50,7 @@ type SortDirection = 'asc' | 'desc' | null;
             </tr>
           } @else {
             @for (row of sortedData(); track $index) {
-              <tr>
+              <tr [class.highlighted]="isHighlighted(row)">
                 @for (column of columns; track column.key) {
                   <td>{{ row[column.key] ?? '-' }}</td>
                 }
@@ -137,6 +136,15 @@ type SortDirection = 'asc' | 'desc' | null;
       &:last-child {
         border-bottom: none;
       }
+
+      &.highlighted {
+        background: rgba(20, 184, 166, 0.12);
+        box-shadow: inset 3px 0 0 var(--accent);
+
+        &:hover {
+          background: rgba(20, 184, 166, 0.18);
+        }
+      }
     }
 
     td {
@@ -163,11 +171,16 @@ export class DataTableComponent {
   @Input({ required: true }) data!: TableRow[];
   @Input() emptyMessage?: string;
   @Input() ariaLabel?: string;
+  @Input() highlightPredicate?: (row: TableRow) => boolean;
 
   sortColumn = signal<string | null>(null);
   sortDirection = signal<SortDirection>(null);
 
   sortedData = signal<TableRow[]>([]);
+
+  isHighlighted(row: TableRow): boolean {
+    return this.highlightPredicate ? this.highlightPredicate(row) : false;
+  }
 
   ngOnChanges(): void {
     this.applySort();

@@ -34,7 +34,7 @@
 // Memory Bar (progress indicator)
 .memory-bar-container {
   height: 8px;
-  background: var(--surface-2, #f0efec);
+  background: var(--bg-elevated);
   border-radius: 4px;
   overflow: hidden;
   margin-top: 0.5rem;
@@ -42,7 +42,7 @@
 
 .memory-bar {
   height: 100%;
-  background: #2a78d6; // Series-1 blue (light mode)
+  background: var(--accent, #14b8a6);
   border-radius: 4px;
   transition: width 0.5s ease;
 }
@@ -94,8 +94,9 @@
   display: flex;
   flex-direction: column;
   padding: 0.75rem;
-  background: var(--surface-2, #f9f9f7);
-  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 
   &--wide {
     grid-column: span 3;
@@ -116,72 +117,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-// Dark mode
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    .metric-title,
-    .metric-value {
-      color: #ffffff;
-    }
-
-    .metric-value .unit {
-      color: #c3c2b7;
-    }
-
-    .memory-bar-container {
-      background: #2c2c2a;
-    }
-
-    .memory-bar {
-      background: #3987e5; // Series-1 blue (dark mode)
-    }
-
-    .memory-info,
-    .gc-title,
-    .gc-label {
-      color: #c3c2b7;
-    }
-
-    .gc-item {
-      background: #0d0d0d;
-    }
-
-    .gc-value {
-      color: #ffffff;
-    }
-  }
-}
-
-:root[data-theme="dark"] {
-  .metric-title,
-  .metric-value {
-    color: #ffffff;
-  }
-
-  .metric-value .unit {
-    color: #c3c2b7;
-  }
-
+// Light theme (theme tokens already define dark as default)
+[data-theme="light"] {
+  .gc-item,
   .memory-bar-container {
-    background: #2c2c2a;
-  }
-
-  .memory-bar {
-    background: #3987e5;
-  }
-
-  .memory-info,
-  .gc-title,
-  .gc-label {
-    color: #c3c2b7;
-  }
-
-  .gc-item {
-    background: #0d0d0d;
-  }
-
-  .gc-value {
-    color: #ffffff;
+    background: var(--bg-elevated);
   }
 }
 

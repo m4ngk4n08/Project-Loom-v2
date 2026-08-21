@@ -1,14 +1,16 @@
 namespace Loom.Telemetry.Query;
 
 /// <summary>Resolves column references in the AST into metric names for the executor.
-/// SELECT * produces an empty list — the executor iterates all store keys.</summary>
+/// SELECT * and the pseudo-column `method` produce an empty list — the executor
+/// iterates all store keys in those cases.</summary>
 public static class QueryPlanner
 {
     public static QueryPlan Plan(QueryAst ast)
     {
-        var referencedNames = ast.Columns.Select(c => c.Name)
-            .Concat(ast.Conditions.Select(c => c.Column))
-            .Where(n => n != "*")
+        var referencedNames = ast.Columns
+            .Where(c => c.Aggregate == AggregateFunction.None)
+            .Select(c => c.Name)
+            .Where(n => n != "*" && !n.Equals("method", StringComparison.OrdinalIgnoreCase))
             .Distinct()
             .ToList();
 

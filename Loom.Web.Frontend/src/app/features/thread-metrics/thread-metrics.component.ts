@@ -1,6 +1,8 @@
-import { Component, Input, OnChanges, SimpleChanges, ViewChild, ElementRef } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, AfterViewInit, OnDestroy, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Chart, ChartConfiguration, registerables } from 'chart.js';
+import { DashboardTimelineService } from '../../core/services/dashboard-timeline.service';
+import { createChartWithCrosshair, syncCrosshairOnHover } from '../../shared/chart-sync/chart-crosshair.plugin';
 
 Chart.register(...registerables);
 
@@ -11,47 +13,49 @@ Chart.register(...registerables);
   templateUrl: './thread-metrics.component.html',
   styleUrls: ['./thread-metrics.component.scss']
 })
-export class ThreadMetricsComponent implements OnChanges {
+export class ThreadMetricsComponent implements AfterViewInit, OnDestroy {
   @Input() data: any = null;
+  @Output() pointClick = new EventEmitter<{ timestamp: Date; method: string }>();
   @ViewChild('chartCanvas', { static: false }) chartCanvas!: ElementRef<HTMLCanvasElement>;
 
   private chart: Chart | null = null;
-  private maxDataPoints = 20;
-  private timestamps: string[] = [];
-  private activeThreadsData: number[] = [];
-  private blockedThreadsData: number[] = [];
-  private waitingThreadsData: number[] = [];
+  private timeline = inject(DashboardTimelineService);
 
   // Color palette (validated from dataviz skill - categorical)
   private readonly COLORS = {
     light: {
-      active: '#2a78d6',    // blue - running threads
-      blocked: '#eb6834',   // orange - blocked threads
-      waiting: '#1baf7a',   // aqua - waiting threads
-      surface: '#fcfcfb',
-      textPrimary: '#0b0b0b',
-      textSecondary: '#52514e',
-      gridline: '#e1e0d9'
+      active: '#3b82f6',    // blue - running threads
+      blocked: '#f59e0b',   // amber - blocked threads
+      waiting: '#10b981',   // green - waiting threads
+      surface: '#ffffff',
+      textPrimary: '#0f172a',
+      textSecondary: '#475569',
+      gridline: '#e2e8f0'
     },
     dark: {
-      active: '#3987e5',    // blue (dark)
-      blocked: '#d95926',   // orange (dark)
-      waiting: '#199e70',   // aqua (dark)
-      surface: '#1a1a19',
-      textPrimary: '#ffffff',
-      textSecondary: '#c3c2b7',
-      gridline: '#2c2c2a'
+      active: '#3b82f6',    // blue
+      blocked: '#f59e0b',   // amber
+      waiting: '#10b981',   // green
+      surface: '#1a1d26',
+      textPrimary: '#f1f5f9',
+      textSecondary: '#94a3b8',
+      gridline: '#242832'
     }
   };
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['data'] && this.data) {
-      this.updateChart();
-    }
+  constructor() {
+    effect(() => {
+      this.timeline.ticks();
+      this.timeline.windowStart();
+      this.timeline.windowEnd();
+      this.timeline.crosshairIndex();
+      if (this.chart) this.updateChart();
+    });
   }
 
   ngAfterViewInit(): void {
     this.initChart();
+    this.updateChart();
   }
 
   ngOnDestroy(): void {
@@ -67,11 +71,11 @@ export class ThreadMetricsComponent implements OnChanges {
     const config: ChartConfiguration = {
       type: 'bar',
       data: {
-        labels: this.timestamps,
+        labels: [],
         datasets: [
           {
             label: 'Active',
-            data: this.activeThreadsData,
+            data: [],
             backgroundColor: colors.active,
             borderWidth: 0,
             borderRadius: 4,
@@ -79,7 +83,7 @@ export class ThreadMetricsComponent implements OnChanges {
           },
           {
             label: 'Blocked',
-            data: this.blockedThreadsData,
+            data: [],
             backgroundColor: colors.blocked,
             borderWidth: 0,
             borderRadius: 4,
@@ -87,7 +91,7 @@ export class ThreadMetricsComponent implements OnChanges {
           },
           {
             label: 'Waiting',
-            data: this.waitingThreadsData,
+            data: [],
             backgroundColor: colors.waiting,
             borderWidth: 0,
             borderRadius: 4,
@@ -101,6 +105,20 @@ export class ThreadMetricsComponent implements OnChanges {
         animation: {
           duration: 300
         },
+        onHover: syncCrosshairOnHover(this.timeline),
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
+        onClick: (_event: any, elements: any[]) => {
+          if (elements.length > 0) {
+            const globalIndex = this.timeline.windowStart() + elements[0].index;
+            const tick = this.timeline.ticks()[globalIndex];
+            if (tick) {
+              this.pointClick.emit({ timestamp: tick.timestamp, method: 'threadpool-thread-count' });
+            }
+          }
+        },
         scales: {
           x: {
             stacked: true,
@@ -113,7 +131,9 @@ export class ThreadMetricsComponent implements OnChanges {
               font: {
                 size: 11
               },
-              maxRotation: 0
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 6
             }
           },
           y: {
@@ -162,33 +182,20 @@ export class ThreadMetricsComponent implements OnChanges {
       }
     };
 
-    this.chart = new Chart(this.chartCanvas.nativeElement, config);
+    this.chart = createChartWithCrosshair(this.chartCanvas.nativeElement, config, this.timeline);
   }
 
   private updateChart(): void {
-    if (!this.chart || !this.data) return;
+    if (!this.chart) return;
 
-    const timestamp = new Date(this.data.timestamp).toLocaleTimeString();
-    this.timestamps.push(timestamp);
-    this.activeThreadsData.push(this.data.activeThreads);
-    this.blockedThreadsData.push(this.data.blockedThreads);
-
-    // Calculate waiting threads (total - active -
-    const waitingThreads = this.data.totalThreads - this.data.activeThreads - this.data.blockedThreads;
-    this.waitingThreadsData.push(Math.max(0, waitingThreads));
-
-    // Sliding window
-    if (this.timestamps.length > this.maxDataPoints) {
-      this.timestamps.shift();
-      this.activeThreadsData.shift();
-      this.blockedThreadsData.shift();
-      this.waitingThreadsData.shift();
-    }
-
-    this.chart.data.labels = this.timestamps;
-    this.chart.data.datasets[0].data = this.activeThreadsData;
-    this.chart.data.datasets[1].data = this.blockedThreadsData;
-    this.chart.data.datasets[2].data = this.waitingThreadsData;
+    const ticks = this.timeline.ticks().slice(
+      this.timeline.windowStart(),
+      this.timeline.windowEnd()
+    );
+    this.chart.data.labels = ticks.map(t => t.timestamp.toLocaleTimeString());
+    this.chart.data.datasets[0].data = ticks.map(t => t.active);
+    this.chart.data.datasets[1].data = ticks.map(t => t.blocked);
+    this.chart.data.datasets[2].data = ticks.map(t => t.waiting);
     this.chart.update('none');
   }
 

@@ -30,29 +30,34 @@ namespace Loom.Web.Api.Services
             var cpuPercent = _currentProcess.TotalProcessorTime.TotalMilliseconds /
                            (Environment.ProcessorCount * Environment.TickCount) * 100.0;
 
-            // Read hotpaths from ring buffer (if any CPU metrics recorded)
+            // Read hotpaths from ring buffer (instrumented method metrics only)
             var hotpaths = new List<CpuHotpath>();
             var buffers = _store.GetBuffers();
 
-            // Look for CPU-related metrics in the buffers
             foreach (var kvp in buffers)
             {
-                if (kvp.Key.StartsWith("cpu.") && kvp.Value.Capacity > 0)
+                if (!IsInstrumentedMethod(kvp.Key)) continue;
+                var recent = kvp.Value.ReadRecent(10);
+                if (recent.Length > 0)
                 {
-                    var recent = kvp.Value.ReadRecent(10);
-                    if (recent.Length > 0)
+                    var avg = recent.Average(r => r.Value);
+                    hotpaths.Add(new CpuHotpath
                     {
-                        var avg = recent.Average(r => r.Value);
-                        hotpaths.Add(new CpuHotpath
-                        {
-                            MethodName = kvp.Key,
-                            CpuPercent = avg,
-                            InvocationCount = recent.Length,
-                            AverageTimeMs = avg
-                        });
-                    }
+                        MethodName = kvp.Key,
+                        CpuPercent = 0, // normalized below
+                        InvocationCount = recent.Length,
+                        AverageTimeMs = avg
+                    });
                 }
             }
+
+            // Each path's share of total observed instrumented time.
+            var totalMs = hotpaths.Sum(h => h.AverageTimeMs);
+            hotpaths = hotpaths
+                .Select(h => h with { CpuPercent = totalMs > 0 ? h.AverageTimeMs / totalMs * 100 : 0 })
+                .OrderByDescending(h => h.AverageTimeMs)
+                .Take(3)
+                .ToList();
 
             var response = new CpuMetricResponse
             {
@@ -62,6 +67,16 @@ namespace Loom.Web.Api.Services
             };
 
             return ValueTask.FromResult(response);
+        }
+
+        private static bool IsInstrumentedMethod(string name)
+        {
+            // Instrumented method metrics carry duration semantics in their name.
+            // System.Runtime gauges (cpu-usage, gc-*, gen-*, threadpool-*) are excluded.
+            return name.Contains("latency", StringComparison.OrdinalIgnoreCase) ||
+                   name.Contains("duration", StringComparison.OrdinalIgnoreCase) ||
+                   name.Contains("elapsed", StringComparison.OrdinalIgnoreCase) ||
+                   name.Contains(".time", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

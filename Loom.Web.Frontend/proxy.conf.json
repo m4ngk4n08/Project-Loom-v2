@@ -12,7 +12,7 @@
     "changeOrigin": true,
     "logLevel": "debug"
   },
-  "/metrics": {
+  "/prometheus": {
     "target": "http://localhost:5209",
     "secure": false,
     "changeOrigin": true

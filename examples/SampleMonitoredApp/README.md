@@ -90,11 +90,11 @@ loom watch 12345
 ### 4. Query Metrics (via Loom.Web.Api)
 If you have Loom.Web.Api running:
 ```bash
-# Get recent orders
-curl http://localhost:5080/api/query -d '{"query": "SELECT * FROM orders.processed LAST 5m"}'
+# Get recent orders (note: LoomQL string literals use single quotes)
+curl http://localhost:5209/api/query -H "Content-Type: application/json" -d "{\"query\": \"SELECT * FROM telemetry WHERE method = 'orders.processed' LIMIT 10\"}"
 
 # Get payment success rate
-curl http://localhost:5080/api/query -d '{"query": "SELECT COUNT(*) FROM payments.succeeded GROUP BY method"}'
+curl http://localhost:5209/api/query -H "Content-Type: application/json" -d "{\"query\": \"SELECT COUNT(*) FROM telemetry WHERE method = 'payments.succeeded'\"}"
 ```
 
 ## Expected Metrics

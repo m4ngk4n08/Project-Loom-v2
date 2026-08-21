@@ -264,6 +264,14 @@ namespace Loom.Web.Api.Extensions
             .WithName("GetMetricNames")
             .Produces<List<string>>(200);
 
+            exporterGroup.MapGet("/metrics/summary", (IMetricStore store) =>
+            {
+                var summaries = MetricSummaryBuilder.BuildAll(store);
+                return Results.Json(summaries, LoomJsonSerializerContext.Default.ListMetricSummaryDto);
+            })
+            .WithName("GetMetricSummary")
+            .Produces<List<MetricSummaryDto>>(200);
+
             return app;
         }
 

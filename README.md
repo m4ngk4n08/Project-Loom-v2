@@ -139,11 +139,9 @@ dotnet loom dev
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /api/telemetry/ingest` | Accept incoming telemetry/metric events |
-| `GET /api/telemetry/metrics` | List registered custom metrics |
-| `GET /api/telemetry/collectors` | List active collectors + snapshots |
-| `POST /api/telemetry/collectors/{name}/collect` | Trigger manual collection |
-| `WS /ws/telemetry` | Real-time custom telemetry stream |
+| `POST /api/metrics/ingest` | Batch metric ingestion (Counter/Gauge/Histogram) |
+| `GET /api/exporters/metrics/names` | List registered metric names |
+| `GET /prometheus` | Prometheus scrape endpoint (OpenMetrics format) |
 
 ### Query
 
@@ -165,16 +163,13 @@ dotnet loom dev
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/exporters` | List active exporters + connection status |
-| `GET /api/exporters/{name}/status` | Exporter health and throughput |
-| `GET /metrics` | Prometheus scrape endpoint (OpenMetrics format) |
+| `GET /api/exporters/status` | Exporter health and throughput |
+| `GET /api/exporters/metrics/names` | List registered metric names |
+| `GET /prometheus` | Prometheus scrape endpoint (OpenMetrics format) |
 
 ### Sampling
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/config/sampling` | Current sampling configuration |
-| `PUT /api/config/sampling` | Update sampling rules at runtime |
+Collectors and sampling are **library-level APIs** (via `LoomMetrics`, `LoomSampling.Configure`, `LoomCollectors.Register`) — no HTTP endpoints are exposed for these.
 
 ---
 

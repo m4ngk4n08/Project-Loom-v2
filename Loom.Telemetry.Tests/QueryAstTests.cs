@@ -139,8 +139,9 @@ public class QueryAstTests
         // Assert
         Assert.NotNull(plan);
         Assert.NotNull(plan.ReferencedMetricNames);
-        // Metric doesn't exist in buffers, so shouldn't be in referenced names
-        Assert.DoesNotContain(nonexistentMetric, plan.ReferencedMetricNames);
+        // Planner is syntactic — it resolves the requested name; the executor
+        // skips metrics missing from the store.
+        Assert.Contains(nonexistentMetric, plan.ReferencedMetricNames);
     }
 
     [Fact]
@@ -167,9 +168,8 @@ public class QueryAstTests
 
         var columns = new List<SelectColumn>
         {
-            new(metricName, AggregateFunction.Avg),
-            new(metricName, AggregateFunction.Max),
-            new(metricName, AggregateFunction.Min)
+            new(metricName, AggregateFunction.None),
+            new(metricName, AggregateFunction.None)
         };
         var ast = new QueryAst(columns, new List<WhereCondition>(), null, null, false, null);
 
@@ -178,7 +178,7 @@ public class QueryAstTests
 
         // Assert
         Assert.NotNull(plan);
-        // Should only appear once despite being in 3 columns
+        // Should only appear once despite being in multiple columns
         Assert.Equal(1, plan.ReferencedMetricNames.Count(m => m == metricName));
     }
 
@@ -190,7 +190,7 @@ public class QueryAstTests
         LoomMetrics.RecordCounter(metricName, 1);
 
         var columns = new List<SelectColumn> { new("method", AggregateFunction.None) };
-        var conditions = new List<WhereCondition> { new(metricName, "=", "test") };
+        var conditions = new List<WhereCondition> { new("method", "=", metricName) };
         var ast = new QueryAst(columns, conditions, null, null, false, null);
 
         // Act
@@ -198,6 +198,8 @@ public class QueryAstTests
 
         // Assert
         Assert.NotNull(plan);
-        Assert.Contains(metricName, plan.ReferencedMetricNames);
+        // WHERE filters are applied at execution; they must not be treated as
+        // literal metric-name references (method is a pseudo-column).
+        Assert.DoesNotContain("method", plan.ReferencedMetricNames);
     }
 }

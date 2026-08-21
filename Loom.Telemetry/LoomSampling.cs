@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Loom.Telemetry.Sampling;
 
 namespace Loom.Telemetry;
@@ -12,6 +13,12 @@ public static class LoomSampling
 {
     private static IReadOnlyList<ISamplingRule> _rules = Array.Empty<ISamplingRule>();
     private static readonly object Lock = new object();
+
+    // Zero-allocation aggregate counters — incremented in the hot path via
+    // Interlocked (no allocation, no blocking) and read via GetStats() for logging.
+    private static long _evaluatedCount;
+    private static long _droppedCount;
+    private static long _alwaysRecordedCount;
 
     /// <summary>
     /// Configure sampling rules using a fluent builder API.
@@ -47,6 +54,8 @@ public static class LoomSampling
             rules = _rules;
         }
 
+        Interlocked.Increment(ref _evaluatedCount);
+
         // No rules configured - record everything
         if (rules.Count == 0)
             return true;
@@ -59,7 +68,10 @@ public static class LoomSampling
             if (rule is Sampling.AlwaysRecordRule alwaysRule)
             {
                 if (alwaysRule.ShouldRecord(metricName, duration, exception))
+                {
+                    Interlocked.Increment(ref _alwaysRecordedCount);
                     return true; // AlwaysRecord escape hatch triggered
+                }
             }
         }
 
@@ -70,13 +82,26 @@ public static class LoomSampling
             if (rule is not Sampling.AlwaysRecordRule)
             {
                 if (!rule.ShouldRecord(metricName, duration, exception))
+                {
+                    Interlocked.Increment(ref _droppedCount);
                     return false;
+                }
             }
         }
 
         // No rules blocked it - record
         return true;
     }
+
+    /// <summary>
+    /// Snapshot of sampling statistics. Allocation-free to update; read on
+    /// a non-hot-path (logger, status endpoint, or shutdown summary).
+    /// </summary>
+    public static SamplingStats GetStats() => new(
+        Interlocked.Read(ref _evaluatedCount),
+        Interlocked.Read(ref _droppedCount),
+        Interlocked.Read(ref _alwaysRecordedCount),
+        GetRules().Count);
 
     /// <summary>
     /// Clear all sampling rules (record everything).
@@ -99,4 +124,12 @@ public static class LoomSampling
             return _rules;
         }
     }
+}
+
+/// <summary>
+/// Immutable snapshot of sampling counters for diagnostics/logging.
+/// </summary>
+public readonly record struct SamplingStats(long EvaluatedCount, long DroppedCount, long AlwaysRecordedCount, long RuleCount)
+{
+    public double DropRate => EvaluatedCount == 0 ? 0 : (double)DroppedCount / EvaluatedCount;
 }

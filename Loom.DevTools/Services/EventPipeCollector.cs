@@ -61,6 +61,14 @@ public sealed class EventPipeCollector : IDisposable
                     ["MaxTimeSeries"] = "1000",
                     ["MaxHistograms"] = "20",
                     ["ClientId"] = Guid.NewGuid().ToString()
+                }),
+            // Real system/runtime counters (CPU %, working set, GC heap, allocations/sec,
+            // thread pool) for any .NET target — not just Loom-instrumented ones.
+            new EventPipeProvider(SystemRuntimeCounters.ProviderName,
+                EventLevel.Informational,
+                0,
+                new Dictionary<string, string?> {
+                    ["EventCounterIntervalSec"] = "1"
                 })
         };
 
@@ -82,6 +90,25 @@ public sealed class EventPipeCollector : IDisposable
                 if (eventName.Contains("Collection") || eventName.Contains("ProcessInfo"))
                     return;
 
+                // System.Runtime delivers EventCounters events (JSON payload) rather
+                // than the strongly-typed *ValuePublished shape.
+                if (eventName == "EventCounters")
+                {
+                    try
+                    {
+                        IngestEventCounters(traceEvent);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"EventCounters parse failed: {ex.Message}");
+                    }
+                    return;
+                }
+
+                // Only ingest actual value-publish events; BeginInstrumentReporting is metadata only
+                if (!eventName.Contains("ValuePublished"))
+                    return;
+
                 var payloadNames = traceEvent.PayloadNames;
                 if (payloadNames == null) return;
 
@@ -93,11 +120,14 @@ public sealed class EventPipeCollector : IDisposable
                     switch (payloadNames[i])
                     {
                         case "Name":
+                        case "instrumentName":
                             metricName = traceEvent.PayloadValue(i)?.ToString();
                             break;
                         case "Value":
                         case "Mean":
                         case "Rate":
+                        case "value":
+                        case "sum":
                             if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), out var v))
                                 value = v;
                             break;
@@ -125,6 +155,19 @@ public sealed class EventPipeCollector : IDisposable
         finally
         {
             session?.Dispose();
+        }
+    }
+
+    private void IngestEventCounters(TraceEvent traceEvent)
+    {
+        var payload = traceEvent.PayloadValue(0)?.ToString();
+        if (string.IsNullOrEmpty(payload)) return;
+
+        var records = SystemRuntimeCounters.Parse(payload);
+        var now = DateTime.UtcNow.Ticks;
+        foreach (var (name, type, value) in records)
+        {
+            _store.Write(new MetricRecord(name, type, value, now));
         }
     }
 }

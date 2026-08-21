@@ -6,9 +6,9 @@ export interface AlertRule {
   name: string;
   metricName: string;
   window: string;
-  condition: string;
-  threshold: number;
-  actions: string[];
+  condition?: string;
+  threshold?: number;
+  actions?: string[];
 }
 
 @Injectable({

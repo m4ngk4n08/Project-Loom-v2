@@ -39,7 +39,8 @@ public static class PrometheusFormatter
             // For counter/gauge: output most recent value
             if (metricType is MetricType.Counter or MetricType.Gauge)
             {
-                var latest = snapshot[^1];
+                // Snapshot() returns newest-first, so [0] is the most recent record.
+                var latest = snapshot[0];
                 sb.AppendLine($"{sanitizedName} {latest.Value:F2}");
             }
             // For histogram/method execution: output summary statistics

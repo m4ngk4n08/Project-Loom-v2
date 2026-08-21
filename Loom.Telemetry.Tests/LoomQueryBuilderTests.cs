@@ -43,7 +43,12 @@ public class LoomQueryBuilderTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(2, result.Columns.Count);
+        // Raw select emits the comprehensive sample shape
+        Assert.Equal(4, result.Columns.Count);
+        Assert.Contains("method", result.Columns);
+        Assert.Contains("value", result.Columns);
+        Assert.Contains("timestamp", result.Columns);
+        Assert.Contains("type", result.Columns);
     }
 
     [Fact]
@@ -87,7 +92,8 @@ public class LoomQueryBuilderTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(5, result.Columns.Count);
+        Assert.Equal(6, result.Columns.Count);
+        Assert.Equal("method", result.Columns[0]);
         Assert.Contains("AVG(A)", result.Columns);
         Assert.Contains("COUNT(B)", result.Columns);
         Assert.Contains("MAX(C)", result.Columns);

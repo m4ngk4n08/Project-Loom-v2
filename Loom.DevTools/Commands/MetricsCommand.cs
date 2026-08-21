@@ -43,8 +43,8 @@ public static class MetricsCommand
 
     private static void PrintAllMetrics(IMetricStore store, IReadOnlyCollection<string> names)
     {
-        Console.WriteLine($"{"Metric",-40} {"Type",-12} {"Count",-8} {"Avg",-12} {"Min",-12} {"Max",-12}");
-        Console.WriteLine(new string('─', 96));
+        Console.WriteLine($"{"Metric",-40} {"Type",-12} {"Count",-8} {"Unit",-8} {"Avg",-12} {"Min",-12} {"Max",-12}");
+        Console.WriteLine(new string('─', 104));
 
         foreach (var name in names.OrderBy(n => n))
         {
@@ -52,8 +52,68 @@ public static class MetricsCommand
             if (records.Length == 0) continue;
 
             var values = records.Select(r => r.Value).ToArray();
-            Console.WriteLine($"{Truncate(name, 39),-40} {records[0].Type,-12} {records.Length,-8} {values.Average(),-12:F2} {values.Min(),-12:F2} {values.Max(),-12:F2}");
+            Console.WriteLine($"{Truncate(name, 39),-40} {records[0].Type,-12} {records.Length,-8} {InferUnit(name),-8} {values.Average(),-12:F2} {values.Min(),-12:F2} {values.Max(),-12:F2}");
         }
+    }
+
+    /// <summary>
+    /// Infer a human-readable unit from the metric name so mixed-unit tables
+    /// (durations, currency, item counts) are unambiguous at a glance.
+    /// </summary>
+    private static string InferUnit(string name)
+    {
+        if (name.Contains("cpu-usage", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("usage", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("percent", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("%", StringComparison.OrdinalIgnoreCase))
+            return "%";
+
+        if (name.Contains("alloc-rate", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gc-time", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("lock-contention", StringComparison.OrdinalIgnoreCase))
+            return "/s";
+
+        if (name.Contains("cpu-usage", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("time-in-gc", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gc-fragmentation", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("usage", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("percent", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("%", StringComparison.OrdinalIgnoreCase))
+            return "%";
+
+        if (name.Contains("alloc-rate", StringComparison.OrdinalIgnoreCase))
+            return "B/s";
+
+        if (name.Contains("working-set", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gc-heap-size", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gc-committed", StringComparison.OrdinalIgnoreCase))
+            return "MB";
+
+        if (name.Contains("loh-size", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("poh-size", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gen-0-size", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gen-1-size", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("gen-2-size", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("il-bytes-jitted", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("bytes", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("alloc", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("memory", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("heap", StringComparison.OrdinalIgnoreCase))
+            return "B";
+
+        if (name.Contains("duration", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("latency", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("elapsed", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("time", StringComparison.OrdinalIgnoreCase))
+            return "ms";
+
+        if (name.Contains("amount", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("total", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("price", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("revenue", StringComparison.OrdinalIgnoreCase))
+            return "$";
+
+        return "count";
     }
 
     private static void PrintCpuMetrics(IMetricStore store, IReadOnlyCollection<string> names)

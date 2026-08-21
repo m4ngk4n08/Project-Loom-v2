@@ -10,27 +10,28 @@ import { StatusBarComponent } from './status-bar/status-bar.component';
   imports: [RouterOutlet, SidebarComponent, TopBarComponent, StatusBarComponent],
   template: `
     <div class="layout" role="application">
-      <app-top-bar />
-      <div class="layout-main">
-        <app-sidebar />
+      <app-sidebar />
+      <div class="layout-body">
+        <app-top-bar />
         <main class="content" id="main-content" tabindex="-1">
           <router-outlet />
         </main>
+        <app-status-bar />
       </div>
-      <app-status-bar />
     </div>
   `,
   styles: [`
     .layout {
       display: flex;
-      flex-direction: column;
       height: 100vh;
       background: var(--bg-primary);
     }
 
-    .layout-main {
+    .layout-body {
       display: flex;
+      flex-direction: column;
       flex: 1;
+      min-width: 0;
       overflow: hidden;
     }
 

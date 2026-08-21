@@ -13,6 +13,7 @@ namespace Loom.Web.Contracts;
 /// at compile-time which types will be serialized to/from JSON.
 /// </summary>
 [JsonSerializable(typeof(HealthCheckResponse))]
+[JsonSerializable(typeof(SessionInfoResponse))]
 [JsonSerializable(typeof(CpuMetricResponse))]
 [JsonSerializable(typeof(CpuHotpath))]
 [JsonSerializable(typeof(MemoryMetricResponse))]
@@ -47,6 +48,8 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(List<AlertHistoryEntry>))]
 [JsonSerializable(typeof(ExporterStatusDto))]
 [JsonSerializable(typeof(List<ExporterStatusDto>))]
+[JsonSerializable(typeof(MetricSummaryDto))]
+[JsonSerializable(typeof(List<MetricSummaryDto>))]
 [JsonSerializable(typeof(GrafanaMetricPayload))]
 [JsonSerializable(typeof(GrafanaMetricSeries))]
 [JsonSerializable(typeof(GrafanaMetricSeries[]))]

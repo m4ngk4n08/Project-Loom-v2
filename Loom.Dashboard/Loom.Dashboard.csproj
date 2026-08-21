@@ -18,8 +18,10 @@
     <ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
     <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
     <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
+    <ProjectReference Include="..\Loom.Telemetry.Alerting\Loom.Telemetry.Alerting.csproj" />
     <ProjectReference Include="..\Loom.Telemetry.Exporters\Loom.Telemetry.Exporters.csproj" />
     <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
+    <ProjectReference Include="..\Loom.Web.RealTime\Loom.Web.RealTime.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="..\Loom.Web.Frontend\dist\Loom.Web.Frontend\browser\**\*" LinkBase="wwwroot" />

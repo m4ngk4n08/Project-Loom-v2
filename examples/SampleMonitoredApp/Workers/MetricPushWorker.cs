@@ -68,6 +68,21 @@ public class MetricPushWorker : BackgroundService
                 _logger.LogWarning(ex, "MetricPushWorker error");
             }
 
+            // Periodically surface sampling statistics (zero-alloc counters read on a
+            // non-hot-path) so operators see how much data sampling is suppressing.
+            var stats = LoomSampling.GetStats();
+            if (stats.EvaluatedCount > 0)
+            {
+                _logger.LogInformation(
+                    "Sampling stats: evaluated={Evaluated} recorded={Recorded} dropped={Dropped} alwaysRecorded={AlwaysRecorded} dropRate={DropRate:P1} rules={Rules}",
+                    stats.EvaluatedCount,
+                    stats.EvaluatedCount - stats.DroppedCount,
+                    stats.DroppedCount,
+                    stats.AlwaysRecordedCount,
+                    stats.DropRate,
+                    stats.RuleCount);
+            }
+
             await Task.Delay(2000, stoppingToken);
         }
     }

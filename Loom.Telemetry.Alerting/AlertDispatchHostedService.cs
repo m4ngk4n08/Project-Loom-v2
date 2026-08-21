@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Loom.Telemetry.Alerting;
 
@@ -8,7 +9,9 @@ namespace Loom.Telemetry.Alerting;
 /// blocking evaluation" and the Risk Register's mitigation for "Alert evaluation
 /// blocking hot path."</summary>
 public sealed class AlertDispatchHostedService(
-    Channel<AlertNotification> channel, IEnumerable<IAlertTarget> allTargets) : BackgroundService
+    Channel<AlertNotification> channel,
+    IEnumerable<IAlertTarget> allTargets,
+    ILogger<AlertDispatchHostedService>? logger = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -17,10 +20,19 @@ public sealed class AlertDispatchHostedService(
             var targets = allTargets.Where(t => notification.Rule.TargetTypes.Contains(t.GetType()));
             foreach (var target in targets)
             {
-                try { await target.NotifyAsync(notification, stoppingToken); }
-                catch (Exception) when (stoppingToken.IsCancellationRequested is false)
+                try
+                {
+                    await target.NotifyAsync(notification, stoppingToken);
+                    logger?.LogInformation(
+                        "Alert notification delivered: rule={Rule} metric={Metric} firedAt={FiredAt:O} target={Target}",
+                        notification.Rule.Name, notification.Rule.MetricName, notification.FiredAt, target.GetType().Name);
+                }
+                catch (Exception ex) when (stoppingToken.IsCancellationRequested is false)
                 {
                     // A failed notification must not crash the dispatcher or block other targets/alerts.
+                    logger?.LogError(ex,
+                        "Alert notification FAILED: rule={Rule} metric={Metric} target={Target}",
+                        notification.Rule.Name, notification.Rule.MetricName, target.GetType().Name);
                 }
             }
         }

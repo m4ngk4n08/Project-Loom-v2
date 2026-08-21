@@ -7,5 +7,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
     <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
+    <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
   </ItemGroup>
 </Project>

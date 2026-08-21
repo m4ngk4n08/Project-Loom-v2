@@ -1,23 +1,74 @@
 .sidebar {
   width: var(--sidebar-width);
-  background: var(--bg-surface);
+  background: linear-gradient(180deg, var(--bg-surface) 0%, #171a22 100%);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   transition: width var(--transition-slow);
   position: relative;
+  overflow: hidden;
+  height: 100vh;
 
   &.collapsed {
     width: var(--sidebar-collapsed-width);
   }
 }
 
+/* Brand header */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.25rem 1rem;
+  min-height: 64px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--accent) 0%, #0d9488 100%);
+  color: #042f2a;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(20, 184, 166, 0.35);
+
+  svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.brand-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.brand-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Collapse toggle — lives inside the brand row */
 .collapse-toggle {
-  position: absolute;
-  top: 1rem;
-  right: -12px;
-  width: 24px;
-  height: 24px;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -25,7 +76,7 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  z-index: 10;
+  flex-shrink: 0;
   color: var(--text-secondary);
   transition: all var(--transition);
 
@@ -40,10 +91,10 @@
     outline-offset: 2px;
   }
 
-  .toggle-icon {
-    display: inline-block;
+  svg {
+    width: 14px;
+    height: 14px;
     transition: transform var(--transition-slow);
-    font-size: 12px;
 
     &.rotated {
       transform: rotate(180deg);
@@ -51,30 +102,58 @@
   }
 }
 
+/* Scrollable nav area */
+.nav-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+
+  &.collapsed {
+    align-items: center;
+  }
+}
+
+.nav-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 0 0.75rem;
+}
+
 .nav-list {
   list-style: none;
-  padding: 4rem 0.5rem 1rem;
+  padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
 
-.nav-item {
-  margin: 0;
-}
-
 .nav-link {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 0.625rem 0.75rem;
   color: var(--text-secondary);
   text-decoration: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   transition: all var(--transition);
   position: relative;
-  font-size: 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1px solid transparent;
 
   /* WCAG: Focus indicator */
   &:focus-visible {
@@ -82,17 +161,19 @@
     outline-offset: 2px;
   }
 
-  /* Hover state - WCAG compliant contrast */
+  /* Hover state */
   &:hover {
-    background: rgba(20, 184, 166, 0.1); /* Teal with 10% opacity */
-    color: var(--accent);
+    background: rgba(20, 184, 166, 0.08);
+    color: var(--text-primary);
+    border-color: rgba(20, 184, 166, 0.12);
   }
 
-  /* Active state - WCAG AA compliant */
+  /* Active state */
   &.active {
-    background: rgba(20, 184, 166, 0.15);
+    background: linear-gradient(90deg, rgba(20, 184, 166, 0.16) 0%, rgba(20, 184, 166, 0.06) 100%);
     color: var(--accent);
-    font-weight: 500;
+    font-weight: 600;
+    border-color: rgba(20, 184, 166, 0.25);
 
     &::before {
       content: '';
@@ -101,23 +182,154 @@
       top: 50%;
       transform: translateY(-50%);
       width: 3px;
-      height: 70%;
+      height: 60%;
       background: var(--accent);
       border-radius: 0 2px 2px 0;
+    }
+
+    .nav-icon {
+      color: var(--accent);
     }
   }
 
   .nav-icon {
-    font-size: 20px;
+    font-size: 0;
     flex-shrink: 0;
-    width: 24px;
-    text-align: center;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    transition: color var(--transition);
+
+    svg {
+      width: 20px;
+      height: 20px;
+    }
+  }
+
+  &:hover .nav-icon {
+    color: var(--accent);
   }
 
   .nav-label {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Tooltip placeholder on hover. When expanded the label is already visible,
+     so the tooltip sits above the link; when collapsed it sits to the right
+     of the icon (see .collapsed rule below). */
+  &::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: calc(100% + 0.5rem);
+    padding: 0.4rem 0.65rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity var(--transition) 100ms;
+    z-index: 20;
+  }
+
+  &:hover::after {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+/* Footer */
+.sidebar-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.875rem 1.25rem;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.footer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.footer-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.footer-version {
+  color: var(--text-muted);
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+/* Collapsed state refinements */
+.collapsed {
+  .brand {
+    justify-content: center;
+    gap: 0;
+    padding: 1.25rem 0.25rem 1rem;
+  }
+
+  .brand-logo {
+    width: 28px;
+    height: 28px;
+
+    svg {
+      width: 17px;
+      height: 17px;
+    }
+  }
+
+  .brand-text {
+    display: none;
+  }
+
+  .collapse-toggle {
+    margin-left: auto;
+  }
+
+  .nav-scroll {
+    padding: 1rem 0.5rem;
+  }
+
+  .nav-group {
+    align-items: center;
+  }
+
+  .nav-link {
+    justify-content: center;
+    padding: 0.625rem;
+
+    &.active::before {
+      height: 40%;
+    }
+
+    &::after {
+      left: 100%;
+      transform: translateY(-50%);
+      top: 50%;
+      margin-left: 0.75rem;
+    }
   }
 }
 
@@ -127,8 +339,42 @@
     width: var(--sidebar-collapsed-width);
   }
 
-  .nav-label {
+  /* At collapsed width there's no room for the text or labels, but the
+     logo fits fine next to the in-flow toggle. */
+  .brand {
+    justify-content: center;
+    gap: 0;
+    padding: 1.25rem 0.25rem 1rem;
+  }
+
+  .brand-logo {
+    width: 28px;
+    height: 28px;
+
+    svg {
+      width: 17px;
+      height: 17px;
+    }
+  }
+
+  .brand-text,
+  .nav-group-label,
+  .nav-label,
+  .sidebar-footer {
     display: none;
+  }
+
+  .nav-group {
+    align-items: center;
+  }
+
+  .nav-link {
+    justify-content: center;
+    padding: 0.625rem;
+
+    &.active::before {
+      height: 40%;
+    }
   }
 }
 
@@ -136,8 +382,8 @@
   .sidebar {
     position: fixed;
     left: 0;
-    top: var(--topbar-height);
-    bottom: var(--statusbar-height);
+    top: 0;
+    bottom: 0;
     z-index: 100;
     transform: translateX(-100%);
     transition: transform var(--transition-slow);

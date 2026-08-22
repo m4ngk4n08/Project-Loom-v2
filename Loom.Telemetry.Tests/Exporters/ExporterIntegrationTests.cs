@@ -20,7 +20,7 @@ public sealed class ExporterIntegrationTests : IDisposable
         LoomMetrics.ResetForTesting();
     }
 
-    [Fact(Skip = "Flaky due to PeriodicTimer timing and test isolation issues")]
+    [Fact]
     public async Task FullPipeline_RecordMetrics_ExportersReceiveBatches()
     {
         // Arrange

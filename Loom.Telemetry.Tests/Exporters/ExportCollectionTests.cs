@@ -40,7 +40,7 @@ public sealed class ExportCollectionTests : IDisposable
         Assert.False(hasData);
     }
 
-    [Fact(Skip = "Flaky due to PeriodicTimer timing and test isolation issues")]
+    [Fact]
     public async Task ExportCollectionHostedService_WithMetrics_CollectsAndWritesBatch()
     {
         // Arrange

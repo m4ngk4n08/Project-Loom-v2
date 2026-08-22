@@ -1,5 +1,7 @@
+using Loom.DevTools.Rendering;
 using Loom.DevTools.Services;
 using Loom.Storage;
+using Spectre.Console;
 
 namespace Loom.DevTools.Commands;
 
@@ -10,8 +12,7 @@ public static class ExploreCommand
 {
     public static async Task RunAsync(int pid, CancellationToken ct)
     {
-        Console.WriteLine($"Exploring metrics from PID {pid}...");
-        Console.WriteLine("Collecting for 3 seconds...\n");
+        AnsiConsole.MarkupLine($"[{Hex(LoomTheme.Dim)}]Exploring metrics from PID {pid} (3s)...[/]");
 
         var store = new InMemoryMetricStore();
         using var collector = new EventPipeCollector(pid, store);
@@ -20,22 +21,34 @@ public static class ExploreCommand
         var names = store.GetMetricNames();
         if (names.Count == 0)
         {
-            Console.WriteLine("No metrics found. Is the process Loom-instrumented?");
+            AnsiConsole.MarkupLine($"[{Hex(LoomTheme.Warn)}]No metrics found. Is the process Loom-instrumented?[/]");
             return;
         }
 
-        Console.WriteLine($"{"Metric",-40} {"Type",-12} {"Latest Value",-15} {"Samples"}");
-        Console.WriteLine(new string('─', 80));
+        var table = new Table { Border = TableBorder.None };
+        table.AddColumn("Metric");
+        table.AddColumn("Type");
+        table.AddColumn(new TableColumn("Latest") { Alignment = Justify.Right });
+        table.AddColumn("Unit");
+        table.AddColumn(new TableColumn("Samples") { Alignment = Justify.Right });
 
-        foreach (var name in names.OrderBy(n => n))
+        foreach (var name in names.OrderBy(n => n, StringComparer.Ordinal))
         {
             var records = store.ReadRecent(name, 100);
             if (records.Length == 0) continue;
 
             var latest = records[0];
-            Console.WriteLine($"{name,-40} {latest.Type,-12} {latest.Value,-15:F2} {records.Length}");
+            table.AddRow(
+                Markup.Escape(name),
+                latest.Type.ToString(),
+                UnitFormatter.Format(name, latest.Value),
+                UnitFormatter.InferUnit(name),
+                records.Length.ToString());
         }
 
-        Console.WriteLine($"\n{names.Count} metric(s) found.");
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine($"[{Hex(LoomTheme.Dim)}]{names.Count} metric(s) found.[/]");
     }
+
+    private static string Hex(Color color) => $"#{color.ToHex()}";
 }

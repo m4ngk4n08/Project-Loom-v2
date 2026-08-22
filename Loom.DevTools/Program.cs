@@ -1,5 +1,14 @@
 using Loom.DevTools.Commands;
 
+// Windows terminals (cmd.exe, older PowerShell hosts) default to a legacy OEM
+// codepage that can't render the block-drawing sparkline glyphs or the "●" live
+// indicator - they show up as "?". Forcing UTF-8 output fixes that; redirected
+// output has no console to configure, so this is a no-op there.
+if (!Console.IsOutputRedirected)
+{
+    try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+}
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 

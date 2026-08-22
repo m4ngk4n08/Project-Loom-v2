@@ -70,5 +70,6 @@ logs/
 # AI
 # ============================================================
 *.claude/
-*.html
-*.txt
+/commitmsg.txt
+/buildprojectloomlocalhost.txt
+/test_query.txt

@@ -1,0 +1,130 @@
+<section class="top-offenders" role="region" aria-label="Top offenders rankings">
+  <header class="offenders-header">
+    <div>
+      <h2 class="offenders-title">Top Offenders</h2>
+      <p class="offenders-subtitle">Highest-impact metrics across all exporters</p>
+    </div>
+    @if (!isLoading() && !loadError()) {
+      <span class="live-badge" role="status" aria-label="Auto-refreshing">
+        <span class="live-dot" aria-hidden="true"></span>
+        Live
+      </span>
+    }
+  </header>
+
+  @if (loadError()) {
+    <div class="offenders-error" role="alert">
+      <p>{{ loadError() }}</p>
+      <button
+        class="retry-btn"
+        (click)="load()"
+        [attr.aria-label]="'Retry loading rankings'"
+        type="button">
+        Retry
+      </button>
+    </div>
+  } @else if (isLoading()) {
+    <div class="rankings-grid">
+      @for (i of [1, 2, 3]; track i) {
+        <div class="ranking-card skeleton-card" role="status" aria-label="Loading rankings">
+          <div class="skeleton-block skeleton-heading"></div>
+          <div class="skeleton-row"></div>
+          <div class="skeleton-row"></div>
+          <div class="skeleton-row"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="rankings-grid">
+      <div class="ranking-card">
+        <h3 class="ranking-title">CPU Hotpaths</h3>
+        <p class="ranking-meta">Slowest instrumented methods</p>
+        @if (topHotpaths().length === 0) {
+          <p class="ranking-empty">No hotpath data yet</p>
+        } @else {
+          <ol class="ranking-list">
+            @for (entry of topHotpaths(); track entry.name) {
+              <li class="ranking-item">
+                <button
+                  class="ranking-button"
+                  (click)="onSelect(entry.name)"
+                  [attr.aria-label]="'View ' + entry.name + ' metric'"
+                  title="Open in Metrics Explorer"
+                  type="button">
+                  <div class="ranking-label">
+                    <span class="ranking-name">{{ entry.name }}</span>
+                    <span class="ranking-secondary">{{ entry.secondary }}</span>
+                  </div>
+                  <div class="ranking-value">{{ formatValue(entry.value, entry.unit) }}</div>
+                </button>
+                <div class="ranking-bar" aria-hidden="true">
+                  <span class="ranking-bar-fill" [style.width.%]="barWidth(entry)"></span>
+                </div>
+              </li>
+            }
+          </ol>
+        }
+      </div>
+
+      <div class="ranking-card">
+        <h3 class="ranking-title">Top Allocators</h3>
+        <p class="ranking-meta">Largest memory consumers</p>
+        @if (topAllocators().length === 0) {
+          <p class="ranking-empty">No allocation data yet</p>
+        } @else {
+          <ol class="ranking-list">
+            @for (entry of topAllocators(); track entry.name) {
+              <li class="ranking-item">
+                <button
+                  class="ranking-button"
+                  (click)="onSelect(entry.name)"
+                  [attr.aria-label]="'View ' + entry.name + ' metric'"
+                  title="Open in Metrics Explorer"
+                  type="button">
+                  <div class="ranking-label">
+                    <span class="ranking-name">{{ entry.name }}</span>
+                    <span class="ranking-secondary">{{ entry.secondary }}</span>
+                  </div>
+                  <div class="ranking-value">{{ formatValue(entry.value, entry.unit) }}</div>
+                </button>
+                <div class="ranking-bar" aria-hidden="true">
+                  <span class="ranking-bar-fill" [style.width.%]="barWidth(entry)"></span>
+                </div>
+              </li>
+            }
+          </ol>
+        }
+      </div>
+
+      <div class="ranking-card">
+        <h3 class="ranking-title">Thread Pressure</h3>
+        <p class="ranking-meta">Thread pool utilization</p>
+        @if (threadMetrics().length === 0) {
+          <p class="ranking-empty">No thread data yet</p>
+        } @else {
+          <ol class="ranking-list">
+            @for (entry of threadMetrics(); track entry.name) {
+              <li class="ranking-item">
+                <button
+                  class="ranking-button"
+                  (click)="onSelect(entry.name)"
+                  [attr.aria-label]="'View ' + entry.name + ' metric'"
+                  title="Open in Metrics Explorer"
+                  type="button">
+                  <div class="ranking-label">
+                    <span class="ranking-name">{{ entry.name }}</span>
+                    <span class="ranking-secondary">{{ entry.secondary }}</span>
+                  </div>
+                  <div class="ranking-value">{{ formatValue(entry.value, entry.unit) }}</div>
+                </button>
+                <div class="ranking-bar" aria-hidden="true">
+                  <span class="ranking-bar-fill" [style.width.%]="barWidth(entry)"></span>
+                </div>
+              </li>
+            }
+          </ol>
+        }
+      </div>
+    </div>
+  }
+</section>

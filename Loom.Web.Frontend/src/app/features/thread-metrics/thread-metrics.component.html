@@ -1,0 +1,54 @@
+
+<div class="thread-metrics">
+  <!-- Header -->
+  <div class="metric-header">
+    <h3 class="metric-title">Thread Activity</h3>
+    <div class="metric-value">
+      {{ totalThreads }}<span class="unit">threads</span>
+    </div>
+  </div>
+
+  <!-- Thread Stats Grid -->
+  <div class="thread-stats">
+    <div class="stat-item stat-item--active">
+      <span class="stat-label">Active</span>
+      <span class="stat-value">{{ activeThreads }}</span>
+    </div>
+    <div class="stat-item stat-item--blocked">
+      <span class="stat-label">Blocked</span>
+      <span class="stat-value">{{ blockedThreads }}</span>
+    </div>
+    <div class="stat-item stat-item--waiting">
+      <span class="stat-label">Waiting</span>
+      <span class="stat-value">{{ totalThreads - activeThreads - blockedThreads }}</span>
+    </div>
+  </div>
+
+  <!-- Chart Container -->
+  <div class="chart-container">
+    <div #chartElement class="chart-canvas"></div>
+  </div>
+
+  <!-- Thread Blockages -->
+  @if (topBlockages.length > 0) {
+    <div class="blockages-list">
+      <h4 class="blockages-title">Thread Blockages</h4>
+      <div class="blockage-items">
+        @for (blockage of topBlockages; track blockage.threadId) {
+          <div class="blockage-item">
+            <div class="blockage-header">
+              <span class="blockage-thread">
+                Thread #{{ blockage.threadId }}
+                @if (blockage.threadName) {
+                  <span class="blockage-name">({{ blockage.threadName }})</span>
+                }
+              </span>
+              <span class="blockage-duration">{{ blockage.blockedDurationMs | number:'1.1-1' }} ms</span>
+            </div>
+            <div class="blockage-reason">{{ blockage.blockedOn }}</div>
+          </div>
+        }
+      </div>
+    </div>
+  }
+</div>

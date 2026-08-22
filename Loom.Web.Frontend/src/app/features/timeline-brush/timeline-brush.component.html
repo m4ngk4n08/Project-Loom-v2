@@ -1,0 +1,19 @@
+<div class="timeline-brush">
+  <div class="brush-header">
+    <h3 class="brush-title">Timeline</h3>
+    <div class="brush-actions">
+      <button
+        class="brush-live-btn"
+        [class.active]="timeline.following()"
+        (click)="followLive()"
+      >
+        <span class="live-dot"></span> Live
+      </button>
+      <span class="brush-hint">Drag to zoom, edges to resize</span>
+    </div>
+  </div>
+
+  <div class="brush-chart">
+    <div #chartElement class="chart-canvas"></div>
+  </div>
+</div>

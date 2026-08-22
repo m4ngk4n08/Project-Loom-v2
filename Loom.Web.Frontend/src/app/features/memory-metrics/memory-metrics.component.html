@@ -1,0 +1,48 @@
+<div class="memory-metrics">
+  <!-- Header with current value -->
+  <div class="metric-header">
+    <h3 class="metric-title">Memory Usage</h3>
+    <div class="metric-value">
+      {{ currentMemoryUsage | number:'1.0-0' }}<span class="unit">MB</span>
+    </div>
+  </div>
+
+  <!-- Memory Bar (visual indicator) -->
+  <div class="memory-bar-container">
+    <div class="memory-bar" [style.width.%]="memoryPercentage"></div>
+  </div>
+  <div class="memory-info">
+    <span class="memory-used">{{ currentMemoryUsage | number:'1.0-0' }} MB used</span>
+    <span class="memory-total">{{ totalMemory | number:'1.0-0' }} MB total</span>
+  </div>
+
+  <!-- Chart Container -->
+  <div class="chart-container">
+    <div #chartElement class="chart-canvas"></div>
+  </div>
+
+  <!-- GC Statistics -->
+  @if (gcStats) {
+    <div class="gc-stats">
+      <h4 class="gc-title">Garbage Collection</h4>
+      <div class="gc-grid">
+        <div class="gc-item">
+          <span class="gc-label">Gen 0</span>
+          <span class="gc-value">{{ gcStats.gen0Collections | number }}</span>
+        </div>
+        <div class="gc-item">
+          <span class="gc-label">Gen 1</span>
+          <span class="gc-value">{{ gcStats.gen1Collections | number }}</span>
+        </div>
+        <div class="gc-item">
+          <span class="gc-label">Gen 2</span>
+          <span class="gc-value">{{ gcStats.gen2Collections | number }}</span>
+        </div>
+        <div class="gc-item gc-item--wide">
+          <span class="gc-label">Total GC Time</span>
+          <span class="gc-value">{{ gcStats.totalGcTimeMs | number:'1.1-1' }} ms</span>
+        </div>
+      </div>
+    </div>
+  }
+</div>

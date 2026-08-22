@@ -1,0 +1,37 @@
+<div class="cpu-metrics">
+  <!-- Header with current value -->
+  <div class="metric-header">
+    <h3 class="metric-title">CPU Usage</h3>
+    <div class="metric-value">
+      {{ currentCpuUsage | number:'1.1-1' }}<span class="unit">%</span>
+    </div>
+  </div>
+
+  <!-- Chart Container -->
+  <div class="chart-container">
+    <div #chartElement class="chart-canvas"></div>
+  </div>
+
+  <!-- Top Hotpaths -->
+  @if (topHotPaths.length > 0) {
+    <div class="hotpaths-list">
+      <h4 class="hotpaths-title">Top CPU Hotpaths</h4>
+      <div class="hotpath-items">
+        @for (hotpath of topHotPaths; track hotpath.methodName) {
+          <div class="hotpath-item">
+            <div class="hotpath-item-header">
+              <span class="hotpath-method">{{ hotpath.methodName }}</span>
+              <span class="hotpath-percent">{{ hotpath.cpuPercent | number:'1.1-1' }}%</span>
+            </div>
+            <span class="hotpath-detail">
+              {{ hotpath.averageTimeMs | number:'1.1-1' }}ms avg · {{ hotpath.invocationCount }} calls
+            </span>
+            <span class="hotpath-bar" aria-hidden="true">
+              <span class="hotpath-bar-fill" [style.width.%]="hotpath.cpuPercent"></span>
+            </span>
+          </div>
+        }
+      </div>
+    </div>
+  }
+</div>

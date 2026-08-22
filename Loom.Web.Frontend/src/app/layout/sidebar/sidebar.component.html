@@ -1,0 +1,84 @@
+<nav
+  class="sidebar"
+  [class.collapsed]="collapsed()"
+  role="navigation"
+  aria-label="Main navigation">
+
+  <!-- Brand -->
+  <div class="brand">
+    <div class="brand-logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 14l4-6 4 4 5-7 5 3" />
+        <path d="M2 20h20" />
+      </svg>
+    </div>
+    @if (!collapsed()) {
+      <div class="brand-text">
+        <span class="brand-name">Loom</span>
+        <span class="brand-tag">Diagnostics</span>
+      </div>
+    }
+
+    <button
+      class="collapse-toggle"
+      (click)="toggleCollapsed()"
+      [attr.aria-expanded]="!collapsed()"
+      [attr.aria-label]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+      type="button">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        [class.rotated]="collapsed()">
+        <path d="M15 18l-6-6 6-6" />
+      </svg>
+    </button>
+  </div>
+
+  <!-- Navigation -->
+  <div class="nav-scroll">
+    @for (group of navGroups; track group.label) {
+      <div class="nav-group">
+        @if (!collapsed()) {
+          <span class="nav-group-label">{{ group.label }}</span>
+        }
+        <ul class="nav-list" role="list">
+          @for (item of group.items; track item.path) {
+            <li class="nav-item">
+              <a
+                class="nav-link"
+                [routerLink]="item.path"
+                routerLinkActive="active"
+                [attr.aria-label]="item.ariaLabel"
+                [attr.data-tooltip]="item.label"
+                [attr.aria-current]="'page'">
+                <span class="nav-icon" role="img" [attr.aria-label]="item.label + ' icon'" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path [attr.d]="item.icon" />
+                  </svg>
+                </span>
+                @if (!collapsed()) {
+                  <span class="nav-label">{{ item.label }}</span>
+                }
+              </a>
+            </li>
+          }
+        </ul>
+      </div>
+    }
+  </div>
+
+  <!-- Footer -->
+  @if (!collapsed()) {
+    <div class="sidebar-footer">
+      <span class="footer-status">
+        <span class="footer-dot" aria-hidden="true"></span>
+        Connected
+      </span>
+      <span class="footer-version">v2.0</span>
+    </div>
+  }
+</nav>

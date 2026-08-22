@@ -1,0 +1,122 @@
+<section class="rankings-page" role="region" aria-label="Metrics rankings">
+  <header class="page-header">
+    <div>
+      <h1 class="page-title">Rankings</h1>
+      <p class="page-subtitle">Highest-impact metrics across all exporters, ranked and auto-refreshed</p>
+    </div>
+    <div class="header-actions">
+      @if (!isLoading() && !loadError()) {
+        <span class="live-badge" role="status" aria-label="Auto-refreshing">
+          <span class="live-dot" aria-hidden="true"></span>
+          Live
+        </span>
+      }
+      <span class="updated-at">Updated {{ formatTime(lastUpdated()) }}</span>
+    </div>
+  </header>
+
+  @if (loadError()) {
+    <div class="rankings-error" role="alert">
+      <p>{{ loadError() }}</p>
+      <button
+        class="retry-btn"
+        (click)="load()"
+        [attr.aria-label]="'Retry loading rankings'"
+        type="button">
+        Retry
+      </button>
+    </div>
+  } @else if (isLoading()) {
+    <div class="summary-strip">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="summary-card skeleton-block" role="status" aria-label="Loading summary">
+          <span class="skeleton-block" style="width: 40%; height: 12px;"></span>
+          <span class="skeleton-block" style="width: 60%; height: 20px;"></span>
+        </div>
+      }
+    </div>
+    @for (i of [1, 2, 3]; track i) {
+      <div class="ranking-section skeleton-block" role="status" aria-label="Loading rankings">
+        <span class="skeleton-block" style="width: 25%; height: 16px;"></span>
+      </div>
+    }
+  } @else {
+    <div class="summary-strip">
+      <div class="summary-card">
+        <span class="summary-label">Tracked Metrics</span>
+        <span class="summary-value">{{ totalMetrics() }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-label">CPU Hotpaths</span>
+        <span class="summary-value">{{ totalHotpaths() }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-label">Allocators</span>
+        <span class="summary-value">{{ totalAllocators() }}</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-label">Thread Metrics</span>
+        <span class="summary-value">{{ totalThreads() }}</span>
+      </div>
+    </div>
+
+    @for (category of categories; track category.key) {
+      @let entries = ranked()[category.key];
+      <div class="ranking-section">
+        <header class="section-header">
+          <div>
+            <h2 class="section-title">{{ category.title }}</h2>
+            <p class="section-meta">{{ category.meta }}</p>
+          </div>
+          <span class="section-count">{{ entries.length }} shown</span>
+        </header>
+
+        @if (entries.length === 0) {
+          <p class="section-empty">No data for this category yet</p>
+        } @else {
+          <div class="table-wrap">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th scope="col" class="col-rank">#</th>
+                  <th scope="col" class="col-name">Metric</th>
+                  <th scope="col" class="col-num">Latest</th>
+                  <th scope="col" class="col-num">Average</th>
+                  <th scope="col" class="col-num">Min</th>
+                  <th scope="col" class="col-num">Max</th>
+                  <th scope="col" class="col-num">p95</th>
+                  <th scope="col" class="col-num">Samples</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (entry of entries; track entry.name; let i = $index) {
+                  <tr class="ranking-row">
+                    <td class="col-rank">
+                      <span class="rank-badge" [class.rank-top]="i < 3">{{ i + 1 }}</span>
+                    </td>
+                    <td class="col-name">
+                      <button
+                        class="metric-link"
+                        (click)="onSelect(entry.name)"
+                        [attr.aria-label]="'View ' + entry.name + ' in Metrics Explorer'"
+                        title="Open in Metrics Explorer"
+                        type="button">
+                        {{ entry.name }}
+                      </button>
+                    </td>
+                    <td class="col-num">{{ formatValue(entry.latest, entry.unit) }}</td>
+                    <td class="col-num">{{ formatValue(entry.average, entry.unit) }}</td>
+                    <td class="col-num">{{ formatValue(entry.min, entry.unit) }}</td>
+                    <td class="col-num">{{ formatValue(entry.max, entry.unit) }}</td>
+                    <td class="col-num">{{ formatValue(entry.p95, entry.unit) }}</td>
+                    <td class="col-num">{{ entry.samples }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
+    }
+  }
+</section>

@@ -1,0 +1,74 @@
+<div class="dashboard-page">
+  <!-- Page Header -->
+  <header class="page-header">
+    <div class="page-header-row">
+      <div>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-subtitle">Real-time system diagnostics and performance metrics</p>
+      </div>
+
+      @if (sessionInfo()) {
+        <div class="target-badge" role="group" aria-label="Observed process">
+          <span class="target-dot" role="img" aria-hidden="true"></span>
+          <div class="target-info">
+            <span class="target-name">{{ sessionInfo()!.targetProcessName }}</span>
+            <span class="target-meta">
+              PID {{ sessionInfo()!.targetProcessId }} · {{ sessionInfo()!.metricCount }} metrics
+            </span>
+          </div>
+        </div>
+      }
+    </div>
+  </header>
+
+  <!-- Stat Tiles Row -->
+  <section class="stat-tiles" role="region" aria-label="Key performance indicators">
+    <app-stat-tile
+      label="CPU Usage"
+      [value]="cpuUsage()"
+      unit="%"
+      [trend]="stateService.cpuData() && stateService.cpuData()!.cpuUsagePercent > 70 ? 'up' : 'neutral'"
+    />
+
+    <app-stat-tile
+      label="Memory Usage"
+      [value]="memoryUsage()"
+      unit="%"
+      [trend]="stateService.memoryData() && (stateService.memoryData()!.usedMemoryMb / stateService.memoryData()!.totalMemoryMb) > 0.8 ? 'up' : 'neutral'"
+    />
+
+    <app-stat-tile
+      label="Total Threads"
+      [value]="threadCount()"
+    />
+
+    <app-stat-tile
+      label="Blocked Threads"
+      [value]="blockedThreads()"
+      [trend]="stateService.threadData() && stateService.threadData()!.blockedThreads > 0 ? 'up' : 'neutral'"
+    />
+  </section>
+
+  <!-- Shared Timeline (scrubs all charts) -->
+  <section class="timeline-card" role="region" aria-label="Shared time axis">
+    <app-timeline-brush />
+  </section>
+
+  <!-- Existing Charts -->
+  <section class="charts-grid" role="region" aria-label="Performance charts">
+    <article class="chart-card">
+      <app-cpu-metrics [data]="stateService.cpuData()" (pointClick)="onPointClick($event)" />
+    </article>
+
+    <article class="chart-card">
+      <app-memory-metrics [data]="stateService.memoryData()" (pointClick)="onPointClick($event)" />
+    </article>
+
+    <article class="chart-card chart-card--wide">
+      <app-thread-metrics [data]="stateService.threadData()" (pointClick)="onPointClick($event)" />
+    </article>
+  </section>
+
+  <!-- Top Offenders Rankings -->
+  <app-top-offenders />
+</div>

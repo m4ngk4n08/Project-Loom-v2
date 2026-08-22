@@ -139,7 +139,7 @@ dotnet loom dev
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/health` | Health check (status, uptime, memory) |
-| `GET /api/session` | Session/attach metadata |
+| `GET /api/session` | Session/attach metadata — **`Loom.Dashboard` only**, not served by `Loom.Web.Api` (see `Loom.Dashboard/Program.cs:106`) |
 | `GET /api/metrics/cpu` | CPU hotpath metrics |
 | `GET /api/metrics/memory` | Memory allocation & GC stats |
 | `GET /api/metrics/thread` | Thread activity & blockage analysis |
@@ -217,13 +217,21 @@ ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 ## Verification Checklist
 
 ```bash
-# 1. No trim/AOT warnings
-dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
+# 1. No trim/AOT warnings - scoped to the AOT target only. Running this against the
+#    whole solution (Loom.slnx) forces trim analysis onto Loom.Dashboard too, which
+#    deliberately has no IsAotCompatible (PackAsTool dev CLI on reflection-heavy
+#    diagnostics libraries) and will produce spurious IL2026 errors that are not a
+#    regression. Loom.Web.Api already sets EnableTrimAnalyzer in its own csproj.
+dotnet build Loom.Web.Api/Loom.Web.Api.csproj -c Release /p:TreatWarningsAsErrors=true
 
 # 2. Native AOT compiles
 dotnet publish Loom.Web.Api -c Release -r linux-x64 /p:PublishAot=true
 
-# 3. Binary size < 15 MB
+# 3. Binary size - the original <15 MB target covered only the Phases 0-4 diagnostic
+#    core, before the query parser, alerting engine, 4 exporters, and collector plugin
+#    system existed; that budget was retired (see BACKLOG.md §2.1). Last measured
+#    win-x64 AOT publish: 16.57 MB. Windows AOT binaries also run larger than linux-x64
+#    ones, so the two are not directly comparable - measure whichever RID you publish.
 ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 
 # 4. IL + AOT tests pass
@@ -251,9 +259,9 @@ dotnet-counters monitor --process-id $(pidof Loom.Web.Api) System.Runtime
 
 | Phase | System | Status | Description |
 |-------|--------|--------|-------------|
-| 5 | Source Generator | In Progress | `Loom.Telemetry.Generators` — compile-time instrumentation rewriting |
+| 5 | Source Generator | ✅ Complete | `Loom.Telemetry.Generators/LoomProfileGenerator.cs` — emits C# `[InterceptsLocation]` interceptors at compile time; covered by `GeneratorTests.cs` |
 | 6 | Custom Metrics API | ✅ Complete | `RecordMetric`/`Counter`/`Gauge`/`Histogram` + tags — `Loom.Telemetry/LoomMetrics.cs`, `MetricRecord.cs`, `MetricBuffer.cs` |
-| 7 | Attribute-Based Instrumentation | Planned | `[LoomProfile]`, `[LoomTrack]` via source gen (depends on Phase 5) |
+| 7 | Attribute-Based Instrumentation | ✅ Complete | `[LoomProfile]`, `[LoomTrack]` via source gen — used throughout `examples/SampleMonitoredApp` (`OrderService.cs`, `PaymentService.cs`); covered by `GeneratorTests.cs` and `PropertyTrackingTests.cs` |
 | 8 | Custom Collectors/Plugins | ✅ Complete | `ILoomCollector` — `Loom.Telemetry/LoomCollectors.cs`, `CollectorSnapshot.cs`, `CollectorTests.cs` |
 | 9 | Configuration-Driven Sampling | ✅ Complete | `Loom.Telemetry/LoomSampling.cs`, `SamplingTests.cs` |
 | 10 | Query Language | ✅ Complete | `Loom.Telemetry.Query/` (Tokenizer, Parser, Ast, Planner, Executor) + 4 test files |

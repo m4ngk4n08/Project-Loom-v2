@@ -143,7 +143,10 @@ api.MapPost("/metrics/ingest", (MetricIngestRequest request, IMetricStore store)
         };
 
         if (type is null)
-            return Results.BadRequest(new { error = $"Unknown metric type: {metric.Type}. Must be Counter, Gauge, or Histogram." });
+            return Results.Json(
+                new ErrorResponse { Error = $"Unknown metric type: {metric.Type}. Must be Counter, Gauge, or Histogram." },
+                LoomJsonSerializerContext.Default.ErrorResponse,
+                statusCode: 400);
 
         var record = new MetricRecord(
             metric.Name,

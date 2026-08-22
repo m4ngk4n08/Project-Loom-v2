@@ -39,6 +39,7 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(List<QueryValue>))]
 [JsonSerializable(typeof(QueryColumn))]
 [JsonSerializable(typeof(QueryErrorResponse))]
+[JsonSerializable(typeof(ErrorResponse))]
 [JsonSerializable(typeof(AlertWebhookPayload))]
 [JsonSerializable(typeof(AlertConfigDto))]
 [JsonSerializable(typeof(List<AlertConfigDto>))]

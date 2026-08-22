@@ -30,13 +30,13 @@ public static class MetricsCommand
         switch (category?.ToLowerInvariant())
         {
             case "cpu":
-                PrintFilteredMetrics(store, "CPU", names.Where(n => n.Contains("cpu") || n.Contains("elapsed") || n.Contains("duration")).ToList());
+                PrintFilteredMetrics(store, "CPU", names.Where(MetricCategoryFilter.IsCpu).ToList());
                 break;
             case "memory":
-                PrintFilteredMetrics(store, "Memory", names.Where(n => n.Contains("memory") || n.Contains("alloc") || n.Contains("gc") || n.Contains("heap")).ToList());
+                PrintFilteredMetrics(store, "Memory", names.Where(MetricCategoryFilter.IsMemory).ToList());
                 break;
             case "thread":
-                PrintFilteredMetrics(store, "Thread", names.Where(n => n.Contains("thread") || n.Contains("lock") || n.Contains("contention")).ToList());
+                PrintFilteredMetrics(store, "Thread", names.Where(MetricCategoryFilter.IsThread).ToList());
                 break;
             default:
                 PrintAllMetrics(store, names);

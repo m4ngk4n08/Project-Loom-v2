@@ -135,11 +135,8 @@ public static class MetricsLiveCommand
             "Heap", UnitFormatter.Format("gc-heap-size", heapSeries.Latest), heapSeries, narrow,
             "GC (0/1/2)", $"{gen0:F0}/{gen1:F0}/{gen2:F0}"));
 
-        var hotpathHeader = new Markup(
-            $"[{accent} bold]TOP HOTPATHS[/]{(category == "all" ? "" : $" [{dim}]({category})[/]")}");
-
-        var hotpaths = HotpathRanker.Rank(store, top: 3);
-        var hotpathTable = BuildHotpathTable(hotpaths, category, narrow);
+        var (lowerHeaderText, lowerBody) = BuildLowerSection(category, store, narrow);
+        var lowerHeader = new Markup($"[{accent} bold]{lowerHeaderText}[/]");
 
         var footer = new Markup(
             $"[{dim}]q[/] quit   [{dim}]c[/] cpu   [{dim}]m[/] memory   [{dim}]t[/] threads");
@@ -150,14 +147,46 @@ public static class MetricsLiveCommand
             ruleLine,
             metricsGrid,
             new Text(string.Empty),
-            hotpathHeader,
+            lowerHeader,
             ruleLine,
-            hotpathTable,
+            lowerBody,
             new Text(string.Empty),
             footer,
         };
 
         return new Rows(rows);
+    }
+
+    /// <summary>
+    /// The panel below the CPU/heap gauges. "all"/"cpu" show top hotpaths (already
+    /// duration-named, so there's nothing further to filter for "cpu" specifically);
+    /// "memory"/"thread" switch to a metrics table for that category, using the same
+    /// MetricCategoryFilter predicates as the static `metrics &lt;pid&gt; memory|thread`
+    /// command so the two views agree. Each category shows its own explicit empty state
+    /// rather than silently falling back to a different category's data.
+    /// </summary>
+    private static (string Header, IRenderable Body) BuildLowerSection(string category, IMetricStore store, bool narrow)
+    {
+        switch (category)
+        {
+            case "memory":
+            {
+                var names = store.GetMetricNames().Where(MetricCategoryFilter.IsMemory)
+                    .OrderBy(n => n, StringComparer.Ordinal).ToList();
+                return ("MEMORY METRICS", BuildMetricListTable(store, names, "memory", narrow));
+            }
+            case "thread":
+            {
+                var names = store.GetMetricNames().Where(MetricCategoryFilter.IsThread)
+                    .OrderBy(n => n, StringComparer.Ordinal).ToList();
+                return ("THREAD METRICS", BuildMetricListTable(store, names, "thread", narrow));
+            }
+            default:
+            {
+                var hotpaths = HotpathRanker.Rank(store, top: 3);
+                return ("TOP HOTPATHS", BuildHotpathTable(hotpaths, narrow));
+            }
+        }
     }
 
     private static IRenderable[] BuildMetricRow(
@@ -180,24 +209,12 @@ public static class MetricsLiveCommand
         return cells.ToArray();
     }
 
-    private static IRenderable BuildHotpathTable(IReadOnlyList<HotpathEntry> hotpaths, string category, bool narrow)
+    private static IRenderable BuildHotpathTable(IReadOnlyList<HotpathEntry> hotpaths, bool narrow)
     {
         if (hotpaths.Count == 0)
             return new Markup($"[{HexTag(LoomTheme.Dim)}](no instrumented methods observed yet)[/]");
 
-        var filtered = category switch
-        {
-            "cpu" => hotpaths.Where(h => h.Name.Contains("cpu", StringComparison.OrdinalIgnoreCase)
-                || h.Name.Contains("duration", StringComparison.OrdinalIgnoreCase)).ToList(),
-            "memory" => hotpaths.Where(h => h.Name.Contains("mem", StringComparison.OrdinalIgnoreCase)
-                || h.Name.Contains("alloc", StringComparison.OrdinalIgnoreCase)).ToList(),
-            "thread" => hotpaths.Where(h => h.Name.Contains("thread", StringComparison.OrdinalIgnoreCase)
-                || h.Name.Contains("lock", StringComparison.OrdinalIgnoreCase)).ToList(),
-            _ => hotpaths,
-        };
-        if (filtered.Count == 0) filtered = hotpaths.ToList();
-
-        var maxAvg = filtered.Max(h => h.AverageMs);
+        var maxAvg = hotpaths.Max(h => h.AverageMs);
         var grid = new Grid();
         grid.AddColumn();
         if (!narrow) grid.AddColumn();
@@ -205,7 +222,7 @@ public static class MetricsLiveCommand
         grid.AddColumn();
         grid.AddColumn();
 
-        foreach (var h in filtered)
+        foreach (var h in hotpaths)
         {
             var cells = new List<IRenderable>();
             if (!narrow)
@@ -218,6 +235,39 @@ public static class MetricsLiveCommand
             cells.Add(new Markup($"{h.AverageMs,8:F1}ms"));
             cells.Add(new Markup($"{h.P99Ms,8:F1}ms"));
             cells.Add(new Markup($"{h.SampleCount,8}"));
+            grid.AddRow(cells.ToArray());
+        }
+
+        return grid;
+    }
+
+    /// <summary>Metrics table for the memory/thread category panels - name, latest value, sparkline.</summary>
+    private static IRenderable BuildMetricListTable(IMetricStore store, List<string> names, string categoryLabel, bool narrow)
+    {
+        if (names.Count == 0)
+            return new Markup($"[{HexTag(LoomTheme.Dim)}](no {categoryLabel} metrics observed yet)[/]");
+
+        var grid = new Grid();
+        grid.AddColumn();
+        grid.AddColumn();
+        if (!narrow) grid.AddColumn();
+
+        foreach (var name in names)
+        {
+            var records = store.ReadRecent(name, SeriesCapacity);
+            if (records.Length == 0) continue;
+
+            var cells = new List<IRenderable>
+            {
+                new Markup(Markup.Escape(name)),
+                new Markup(UnitFormatter.Format(name, records[0].Value).PadLeft(10)),
+            };
+            if (!narrow)
+            {
+                var chronological = records.Select(r => r.Value).Reverse().ToArray();
+                var spark = Sparkline.Render(chronological, SparkWidth);
+                cells.Add(new Markup($"[{HexTag(LoomTheme.Accent)}]{Markup.Escape(spark)}[/]"));
+            }
             grid.AddRow(cells.ToArray());
         }
 

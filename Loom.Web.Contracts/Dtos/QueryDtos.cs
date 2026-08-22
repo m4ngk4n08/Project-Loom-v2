@@ -21,3 +21,8 @@ public sealed record QueryValue
 }
 
 public sealed record QueryColumn { public required string Name { get; init; } public required string Kind { get; init; } }
+
+/// <summary>Minimal-API error body for query endpoints. Not `Microsoft.AspNetCore.Mvc.ProblemDetails` -
+/// `Results.Problem(...)` serializes that type even from Minimal APIs, which would pull MVC's
+/// JSON metadata into this AOT contracts assembly (see ADR-1 / JsonContext.cs).</summary>
+public sealed record QueryErrorResponse { public required string Error { get; init; } }

@@ -176,7 +176,10 @@ api.MapPost("/query", async (QueryRequest request, IQueryExecutor executor, ILog
     catch (QuerySyntaxException ex)
     {
         logger.LogWarning("Query rejected: {Query} -> {Error}", request.Query, ex.Message);
-        return Results.Problem(ex.Message, statusCode: 400);
+        return Results.Json(
+            new QueryErrorResponse { Error = ex.Message },
+            LoomJsonSerializerContext.Default.QueryErrorResponse,
+            statusCode: 400);
     }
 });
 
@@ -194,7 +197,10 @@ api.MapGet("/query", async (string q, IQueryExecutor executor, ILoggerFactory lo
     catch (QuerySyntaxException ex)
     {
         logger.LogWarning("Query rejected: {Query} -> {Error}", q, ex.Message);
-        return Results.Problem(ex.Message, statusCode: 400);
+        return Results.Json(
+            new QueryErrorResponse { Error = ex.Message },
+            LoomJsonSerializerContext.Default.QueryErrorResponse,
+            statusCode: 400);
     }
 });
 
@@ -259,8 +265,14 @@ api.MapGet("/exporters/metrics/summary", (IMetricStore store) =>
     Results.Json(MetricSummaryBuilder.BuildAll(store), LoomJsonSerializerContext.Default.ListMetricSummaryDto));
 
 // Prometheus metrics endpoint - moved to /prometheus to avoid conflict with Angular /metrics route
-app.MapGet("/prometheus", (IMetricStore store) =>
-    Results.Text(PrometheusFormatter.Format(store), "text/plain; version=0.0.4; charset=utf-8"));
+app.MapGet("/prometheus", async (HttpContext context, IMetricStore store, CancellationToken ct) =>
+{
+    context.Response.ContentType = "text/plain; version=0.0.4; charset=utf-8";
+    // HttpResponse.BodyWriter is a PipeWriter, which implements
+    // IBufferWriter<byte> - write straight to it, no intermediate string.
+    PrometheusFormatter.Format(store, context.Response.BodyWriter);
+    await context.Response.BodyWriter.FlushAsync(ct);
+});
 
 // WebSocket endpoint — streams polymorphic MetricUpdate messages to the frontend
 app.Map("/ws/metrics", async (HttpContext context, IMetricStore store) =>

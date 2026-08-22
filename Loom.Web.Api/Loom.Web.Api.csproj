@@ -6,6 +6,7 @@
 
 		<!-- Native AOT Configuration -->
 		<PublishAot>true</PublishAot>
+		<IsAotCompatible>true</IsAotCompatible>
 		<IsTrimmable>true</IsTrimmable>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>

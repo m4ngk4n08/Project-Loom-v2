@@ -1,7 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Loom.Web.Contracts.Dtos;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Loom.Web.Contracts;
 
@@ -39,6 +38,7 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(QueryValue))]
 [JsonSerializable(typeof(List<QueryValue>))]
 [JsonSerializable(typeof(QueryColumn))]
+[JsonSerializable(typeof(QueryErrorResponse))]
 [JsonSerializable(typeof(AlertWebhookPayload))]
 [JsonSerializable(typeof(AlertConfigDto))]
 [JsonSerializable(typeof(List<AlertConfigDto>))]
@@ -60,7 +60,6 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(List<DiscoveredAppDto>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(List<string>))]
-[JsonSerializable(typeof(ProblemDetails))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

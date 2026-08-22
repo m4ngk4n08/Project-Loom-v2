@@ -35,6 +35,7 @@
 	  <ProjectReference Include="..\Loom.Telemetry.Alerting\Loom.Telemetry.Alerting.csproj" />
 	  <ProjectReference Include="..\Loom.Telemetry.Exporters\Loom.Telemetry.Exporters.csproj" />
 	  <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
+	  <ProjectReference Include="..\Loom.Web.Api\Loom.Web.Api.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

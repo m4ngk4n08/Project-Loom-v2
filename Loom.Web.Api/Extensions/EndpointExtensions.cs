@@ -148,7 +148,10 @@ namespace Loom.Web.Api.Extensions
                 }
                 catch (QuerySyntaxException ex)
                 {
-                    return Results.Problem(ex.Message, statusCode: 400);
+                    return Results.Json(
+                        new QueryErrorResponse { Error = ex.Message },
+                        LoomJsonSerializerContext.Default.QueryErrorResponse,
+                        statusCode: 400);
                 }
             })
             .WithName("GetQuery")
@@ -164,7 +167,10 @@ namespace Loom.Web.Api.Extensions
                 }
                 catch (QuerySyntaxException ex)
                 {
-                    return Results.Problem(ex.Message, statusCode: 400);
+                    return Results.Json(
+                        new QueryErrorResponse { Error = ex.Message },
+                        LoomJsonSerializerContext.Default.QueryErrorResponse,
+                        statusCode: 400);
                 }
             })
             .WithName("PostQuery")
@@ -319,10 +325,13 @@ namespace Loom.Web.Api.Extensions
 
         private static WebApplication MapPrometheusEndpoint(this WebApplication app)
         {
-            app.MapGet("/metrics", (IMetricStore store) =>
+            app.MapGet("/metrics", async (HttpContext context, IMetricStore store, CancellationToken ct) =>
             {
-                var metricsText = PrometheusFormatter.Format(store);
-                return Results.Text(metricsText, "text/plain; version=0.0.4; charset=utf-8");
+                context.Response.ContentType = "text/plain; version=0.0.4; charset=utf-8";
+                // HttpResponse.BodyWriter is a PipeWriter, which implements
+                // IBufferWriter<byte> - write straight to it, no intermediate string.
+                PrometheusFormatter.Format(store, context.Response.BodyWriter);
+                await context.Response.BodyWriter.FlushAsync(ct);
             })
             .WithName("PrometheusMetrics")
             .WithTags("Exporters")

@@ -70,6 +70,29 @@ public sealed class MetricBuffer
     }
 
     /// <summary>
+    /// Read recent metrics into a caller-provided span (zero-allocation snapshot).
+    /// Fills newest-first, writes no more than destination.Length entries.
+    /// Returns the number of records written.
+    /// </summary>
+    public int TryReadRecent(Span<MetricRecord> destination)
+    {
+        if (destination.Length == 0)
+            return 0;
+
+        var currentIndex = Interlocked.Read(ref _writeIndex);
+        var available = Math.Min(destination.Length, Math.Min((int)currentIndex, _buffer.Length));
+
+        for (int i = 0; i < available; i++)
+        {
+            var readIndex = currentIndex - 1 - i;
+            var slot = (int)(readIndex & _mask);
+            destination[i] = _buffer[slot];
+        }
+
+        return available;
+    }
+
+    /// <summary>
     /// Read all metrics written since a specific timestamp.
     /// </summary>
     public MetricRecord[] ReadSince(long timestampUtcTicks)

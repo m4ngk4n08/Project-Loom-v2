@@ -2,6 +2,7 @@
 using Loom.Web.Contracts.Dtos;
 using Loom.Storage;
 using Loom.Telemetry;
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
@@ -25,48 +26,104 @@ namespace Loom.Web.Api.Services
         /// </summary>
         public ValueTask<CpuMetricResponse> GetCpuMetricsAsync(CancellationToken ct = default)
         {
-            // Calculate real CPU usage
+            // Calculate real CPU usage (cumulative average since process start, not
+            // instantaneous). Environment.TickCount is milliseconds since system boot,
+            // not process start - using it here made a freshly started process on a
+            // long-uptime machine report ~0% forever, and it wraps negative at ~24.9
+            // days of uptime as an int.
             _currentProcess.Refresh();
-            var cpuPercent = _currentProcess.TotalProcessorTime.TotalMilliseconds /
-                           (Environment.ProcessorCount * Environment.TickCount) * 100.0;
+            var elapsedMs = (DateTime.UtcNow - _currentProcess.StartTime.ToUniversalTime()).TotalMilliseconds;
+            var cpuPercent = elapsedMs > 0
+                ? _currentProcess.TotalProcessorTime.TotalMilliseconds /
+                  (Environment.ProcessorCount * elapsedMs) * 100.0
+                : 0;
 
-            // Read hotpaths from ring buffer (instrumented method metrics only)
-            var hotpaths = new List<CpuHotpath>();
+            // Read hotpaths from ring buffer (instrumented method metrics only).
+            // Bounded top-3 insertion scan (O(n), 3 slots) instead of a full sort - a
+            // full sort to pick 3 items is the wrong algorithm regardless of allocation.
+            // totalMs still accumulates over every instrumented path (not just the top
+            // 3), since each path's reported share is of the FULL observed set.
             var buffers = _store.GetBuffers();
 
-            foreach (var kvp in buffers)
+            Span<string> topNames = new string[3];
+            Span<double> topAvgMs = stackalloc double[3];
+            Span<long> topInvocations = stackalloc long[3];
+            var topCount = 0;
+            double totalMs = 0;
+
+            var scratch = ArrayPool<MetricRecord>.Shared.Rent(10);
+            try
             {
-                if (!IsInstrumentedMethod(kvp.Key)) continue;
-                var recent = kvp.Value.ReadRecent(10);
-                if (recent.Length > 0)
+                var scratchSpan = scratch.AsSpan(0, 10);
+                foreach (var kvp in buffers)
                 {
-                    var avg = recent.Average(r => r.Value);
-                    hotpaths.Add(new CpuHotpath
-                    {
-                        MethodName = kvp.Key,
-                        CpuPercent = 0, // normalized below
-                        InvocationCount = recent.Length,
-                        AverageTimeMs = avg
-                    });
+                    if (!IsInstrumentedMethod(kvp.Key)) continue;
+
+                    var written = kvp.Value.TryReadRecent(scratchSpan);
+                    if (written == 0) continue;
+
+                    double sum = 0;
+                    for (var i = 0; i < written; i++) sum += scratchSpan[i].Value;
+                    var avg = sum / written;
+
+                    totalMs += avg;
+                    InsertTop3(topNames, topAvgMs, topInvocations, ref topCount, kvp.Key, avg, written);
                 }
             }
+            finally
+            {
+                ArrayPool<MetricRecord>.Shared.Return(scratch);
+            }
 
-            // Each path's share of total observed instrumented time.
-            var totalMs = hotpaths.Sum(h => h.AverageTimeMs);
-            hotpaths = hotpaths
-                .Select(h => h with { CpuPercent = totalMs > 0 ? h.AverageTimeMs / totalMs * 100 : 0 })
-                .OrderByDescending(h => h.AverageTimeMs)
-                .Take(3)
-                .ToList();
+            var hotpaths = new CpuHotpath[topCount];
+            for (var i = 0; i < topCount; i++)
+            {
+                hotpaths[i] = new CpuHotpath
+                {
+                    MethodName = topNames[i],
+                    CpuPercent = totalMs > 0 ? topAvgMs[i] / totalMs * 100 : 0,
+                    InvocationCount = topInvocations[i],
+                    AverageTimeMs = topAvgMs[i]
+                };
+            }
 
             var response = new CpuMetricResponse
             {
                 CpuUsagePercent = Math.Max(0, Math.Min(100, cpuPercent)),
-                Hotpaths = hotpaths.ToArray(),
+                Hotpaths = hotpaths,
                 Timestamp = DateTime.UtcNow
             };
 
             return ValueTask.FromResult(response);
+        }
+
+        /// <summary>
+        /// Inserts (name, avg, invocations) into the top-3 slots (descending by avg) if
+        /// it qualifies, shifting lower entries down and dropping the smallest on overflow.
+        /// </summary>
+        private static void InsertTop3(
+            Span<string> names, Span<double> avgMs, Span<long> invocations, ref int count,
+            string name, double avg, long invocationCount)
+        {
+            var insertAt = count;
+            for (var i = 0; i < count; i++)
+            {
+                if (avg > avgMs[i]) { insertAt = i; break; }
+            }
+            if (insertAt >= 3) return; // doesn't make the top 3
+
+            var shiftEnd = Math.Min(count, 2);
+            for (var i = shiftEnd; i > insertAt; i--)
+            {
+                names[i] = names[i - 1];
+                avgMs[i] = avgMs[i - 1];
+                invocations[i] = invocations[i - 1];
+            }
+
+            names[insertAt] = name;
+            avgMs[insertAt] = avg;
+            invocations[insertAt] = invocationCount;
+            if (count < 3) count++;
         }
 
         private static bool IsInstrumentedMethod(string name)

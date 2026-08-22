@@ -5,6 +5,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 
 		<!-- Native AOT Compatibility -->
+		<IsAotCompatible>true</IsAotCompatible>
 		<IsTrimmable>true</IsTrimmable>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>

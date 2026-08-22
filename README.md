@@ -61,39 +61,48 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 ## Project Structure
 
 ```
-Loom.sln
-├── Loom.Web.Api/                  → ASP.NET Core Minimal APIs (Native AOT host)
+Loom.slnx
+├── Loom.Web.Api/                  → ASP.NET Core Minimal APIs (Native AOT production host)
 ├── Loom.Web.Contracts/            → Shared DTOs + source-generated JSON (MANDATORY for AOT)
 ├── Loom.Web.RealTime/             → Zero-allocation WebSocket handlers
-├── Loom.Core/                     → SIMD math engine (AVX2/Neon)
-├── Loom.Storage/                  → Memory-mapped binary cache
-├── Loom.Host/                     → Bootstrap entry point
-├── Loom.Telemetry/                → Custom Metrics API runtime (RecordMetric, etc.)
+├── Loom.Storage/                  → Ring-buffer metric store (in-memory)
+├── Loom.Telemetry/                → Custom Metrics API runtime (RecordMetric, LoomCollectors, LoomSampling, etc.)
 ├── Loom.Telemetry.Generators/     → C# source generator ([LoomProfile] → instrumented code)
-├── Loom.Telemetry.Collectors/     → ILoomCollector interface + plugin registration
-├── Loom.Telemetry.Query/          → Query engine (SQL-like parser + fluent API)
+├── Loom.Telemetry.Query/          → Query engine (SQL-like tokenizer/parser/planner/executor)
 ├── Loom.Telemetry.Alerting/       → Alert rules, window conditions, notification dispatch
 ├── Loom.Telemetry.Exporters/      → Prometheus, Grafana Cloud, Elasticsearch, Console
 ├── Loom.DevTools/                 → `dotnet loom dev` CLI tool (local dev mode)
-├── Loom.Tests/                    → Unit & integration tests
-└── Loom.Benchmarks/               → BenchmarkDotNet performance benchmarks
+├── Loom.Telemetry.Tests/          → Unit & integration tests
+└── Loom.Dashboard/                → `loom-dashboard <pid>` dev-time CLI tool; embeds the Angular dashboard, attaches to a target process via EventPipe
 ```
 
-**Dependency flow:**
+> `Loom.Host/`, `Loom.Core/`, `Loom.Benchmarks/` from earlier design docs were never
+> implemented (empty scaffolding, since deleted). `Loom.Web.Api` is the real AOT host;
+> `Loom.Storage`'s ring buffers superseded the planned SIMD engine. `Loom.Telemetry.Collectors`
+> was folded directly into `Loom.Telemetry`.
+
+**Dependency flow (verified `ProjectReference` edges):**
 ```
-Loom.Host → Loom.Web.Api → Loom.Web.Contracts
-                         → Loom.Web.RealTime → Loom.Web.Contracts
-                         → Loom.Telemetry → Loom.Web.Contracts
-                         → Loom.Telemetry.Collectors → Loom.Telemetry
-                         → Loom.Telemetry.Query → Loom.Telemetry
-                         → Loom.Telemetry.Alerting → Loom.Telemetry.Query
-                         → Loom.Telemetry.Exporters → Loom.Telemetry
-                         → Loom.Core ← Loom.Storage
+Loom.Web.Api           → Loom.Storage, Loom.Telemetry.Exporters, Loom.Telemetry.Query,
+                          Loom.Telemetry.Alerting, Loom.Web.Contracts, Loom.Web.RealTime
+Loom.Web.RealTime       → Loom.Web.Contracts
+Loom.Storage            → Loom.Telemetry, Loom.Web.Contracts
+Loom.Telemetry           (no project refs; DI abstractions package only)
+Loom.Telemetry.Query    → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
+Loom.Telemetry.Alerting → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
+Loom.Telemetry.Exporters→ Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
+Loom.DevTools           → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
+Loom.Dashboard          → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
+                          Loom.Telemetry.Alerting, Loom.Telemetry.Exporters,
+                          Loom.Web.Contracts, Loom.Web.RealTime
 
 Loom.Telemetry.Generators (analyzer, referenced by consuming projects, no runtime dep)
-
-Loom.DevTools (standalone CLI, references Loom.Telemetry)
 ```
+
+`Loom.Web.Api` is the AOT production host; `Loom.Dashboard` is a separate dev-time CLI
+(`PackAsTool`, exempt from AOT constraints) that embeds the Angular frontend and attaches
+to a target PID via `EventPipeBridge.cs`. The two intentionally duplicate some endpoints —
+they are not rivals.
 
 ---
 
@@ -107,8 +116,8 @@ Loom.DevTools (standalone CLI, references Loom.Telemetry)
 ### Backend (development, fast iteration)
 
 ```bash
-dotnet test Loom.sln --configuration Debug
-dotnet watch run --project Loom.Host --no-hot-reload
+dotnet test Loom.slnx --configuration Debug
+dotnet watch run --project Loom.Web.Api --no-hot-reload
 ```
 
 The API listens on `http://localhost:5080` (HTTPS: `https://localhost:5443` in production).
@@ -130,6 +139,7 @@ dotnet loom dev
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/health` | Health check (status, uptime, memory) |
+| `GET /api/session` | Session/attach metadata |
 | `GET /api/metrics/cpu` | CPU hotpath metrics |
 | `GET /api/metrics/memory` | Memory allocation & GC stats |
 | `GET /api/metrics/thread` | Thread activity & blockage analysis |
@@ -141,7 +151,18 @@ dotnet loom dev
 |----------|-------------|
 | `POST /api/metrics/ingest` | Batch metric ingestion (Counter/Gauge/Histogram) |
 | `GET /api/exporters/metrics/names` | List registered metric names |
-| `GET /prometheus` | Prometheus scrape endpoint (OpenMetrics format) |
+| `GET /api/exporters/metrics/summary` | Summary stats for registered metrics |
+
+### Prometheus scrape endpoint — route differs by host
+
+The scrape route is intentionally **not** the same on both hosts:
+
+| Host | Route | Why |
+|------|-------|-----|
+| `Loom.Web.Api` (production API, no SPA) | `GET /metrics` | No conflicting route to avoid |
+| `Loom.Dashboard` (dev CLI, embeds the Angular SPA) | `GET /prometheus` | The Angular app owns a client-side `/metrics` page (`metrics-explorer`); its `MapFallback` serves `index.html` for unmatched routes, so mapping the scrape endpoint to `/metrics` here would shadow that route and break deep-link/refresh on the Angular page. See `Loom.Dashboard/Program.cs:261`. |
+
+Do not "fix" this into a single shared route — the divergence is required by the SPA routing, not an oversight.
 
 ### Query
 
@@ -165,7 +186,9 @@ dotnet loom dev
 |----------|-------------|
 | `GET /api/exporters/status` | Exporter health and throughput |
 | `GET /api/exporters/metrics/names` | List registered metric names |
-| `GET /prometheus` | Prometheus scrape endpoint (OpenMetrics format) |
+| `GET /api/exporters/metrics/summary` | Summary stats for registered metrics |
+
+Prometheus scrape route: see "Prometheus scrape endpoint — route differs by host" above.
 
 ### Sampling
 
@@ -176,17 +199,17 @@ Collectors and sampling are **library-level APIs** (via `LoomMetrics`, `LoomSamp
 ## Native AOT Production Build
 
 ```bash
-dotnet publish Loom.Host/Loom.Host.csproj \
+dotnet publish Loom.Web.Api/Loom.Web.Api.csproj \
   --configuration Release \
   -r linux-x64 \
   /p:PublishAot=true \
   /p:StripSymbols=true
 
 strip --strip-debug \
-  Loom.Host/bin/Release/net10.0/linux-x64/publish/Loom.Host
+  Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 
 # Verify the binary stays under 15 MB
-ls -lh Loom.Host/bin/Release/net10.0/linux-x64/publish/Loom.Host
+ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 ```
 
 ---
@@ -195,19 +218,19 @@ ls -lh Loom.Host/bin/Release/net10.0/linux-x64/publish/Loom.Host
 
 ```bash
 # 1. No trim/AOT warnings
-dotnet build Loom.sln -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
+dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
 
 # 2. Native AOT compiles
-dotnet publish Loom.Host -c Release -r linux-x64 /p:PublishAot=true
+dotnet publish Loom.Web.Api -c Release -r linux-x64 /p:PublishAot=true
 
 # 3. Binary size < 15 MB
-ls -lh Loom.Host/bin/Release/net10.0/linux-x64/publish/Loom.Host
+ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 
 # 4. IL + AOT tests pass
-dotnet test Loom.sln --configuration Debug
+dotnet test Loom.slnx --configuration Debug
 
 # 5. Zero allocations in hot paths
-dotnet-counters monitor --process-id $(pidof Loom.Host) System.Runtime
+dotnet-counters monitor --process-id $(pidof Loom.Web.Api) System.Runtime
 ```
 
 ---
@@ -218,7 +241,7 @@ dotnet-counters monitor --process-id $(pidof Loom.Host) System.Runtime
 
 | Phase | System | Status | Description |
 |-------|--------|--------|-------------|
-| 0 | Project Setup & Tooling | Done | SDK, solution structure, project scaffolding |
+| 0 | Project Setup & Tooling | Partial | SDK, solution structure; scaffolded `Loom.Host`/`Loom.Core`/`Loom.Benchmarks` were never implemented (removed) |
 | 1 | Contracts & JSON Serialization | Done | DTOs + LoomJsonSerializerContext |
 | 2 | Web API Core | Done | Minimal API, health endpoint, Kestrel config |
 | 3 | Core Metrics Endpoints | Done | CPU, Memory, Thread metric APIs |
@@ -229,14 +252,14 @@ dotnet-counters monitor --process-id $(pidof Loom.Host) System.Runtime
 | Phase | System | Status | Description |
 |-------|--------|--------|-------------|
 | 5 | Source Generator | In Progress | `Loom.Telemetry.Generators` — compile-time instrumentation rewriting |
-| 6 | Custom Metrics API | Planned | `RecordMetric`/`Counter`/`Gauge`/`Histogram` + tags |
+| 6 | Custom Metrics API | ✅ Complete | `RecordMetric`/`Counter`/`Gauge`/`Histogram` + tags — `Loom.Telemetry/LoomMetrics.cs`, `MetricRecord.cs`, `MetricBuffer.cs` |
 | 7 | Attribute-Based Instrumentation | Planned | `[LoomProfile]`, `[LoomTrack]` via source gen (depends on Phase 5) |
-| 8 | Custom Collectors/Plugins | Planned | `ILoomCollector`, `AddCollector<T>()` (depends on Phase 5) |
-| 9 | Configuration-Driven Sampling | Planned | `appsettings.json` sampling rules, path/duration overrides |
-| 10 | Query Language | Planned | SQL-like parser + fluent `Query()` API, `POST /api/query` |
-| 11 | Alerting/Thresholds | Planned | `AddAlert()`, window conditions, webhook/email targets |
+| 8 | Custom Collectors/Plugins | ✅ Complete | `ILoomCollector` — `Loom.Telemetry/LoomCollectors.cs`, `CollectorSnapshot.cs`, `CollectorTests.cs` |
+| 9 | Configuration-Driven Sampling | ✅ Complete | `Loom.Telemetry/LoomSampling.cs`, `SamplingTests.cs` |
+| 10 | Query Language | ✅ Complete | `Loom.Telemetry.Query/` (Tokenizer, Parser, Ast, Planner, Executor) + 4 test files |
+| 11 | Alerting/Thresholds | ✅ Complete | `Loom.Telemetry.Alerting/` + `Alerting/` tests + `PHASE-11-COMPLETE.md` |
 | 12 | Exporters | ✅ Complete | Prometheus, Grafana Cloud, Elasticsearch, Console |
-| 13 | Local Development Mode | Planned | `dotnet loom dev`, auto-discovery, zero-config |
+| 13 | Local Development Mode | ✅ Complete | `dotnet loom dev` — `Loom.DevTools/Commands/DevCommand.cs` |
 
 ### Production Hardening
 
@@ -272,36 +295,36 @@ All Phases 5-12 ─────────────→ Phase 13 (Dev Mode)
 All DTO types used by the 9 telemetry systems must be registered at compile time:
 
 ### Infrastructure (existing)
-- `HealthCheckResponse`, `CpuMetricResponse`, `CpuHotpath`
+- `HealthCheckResponse`, `SessionInfoResponse`, `CpuMetricResponse`, `CpuHotpath`
 - `MemoryMetricResponse`, `GarbageCollectionStats`, `MemoryAllocation`
 - `ThreadMetricResponse`, `ThreadBlockage`
 - `MetricUpdate`, `CpuMetricUpdate`, `MemoryMetricUpdate`, `ThreadMetricUpdate`
 - `DiagnosticSearchRequest`, `DiagnosticSearchResponse`, `SearchResult`
-- `TelemetryIngestRequest`
-
-### Custom Metrics API (Phase 6)
-- `MetricRecord`, `MetricTag`
-- `CounterValue`, `GaugeValue`, `HistogramValue`, `HistogramBucket`
-- `MetricBatch`, `MetricRegistration`
-
-### Collectors (Phase 8)
-- `CollectorSnapshot`, `CollectorRegistration`, `CollectorStatus`
+- `TelemetryIngestRequest`, `MetricIngestRequest`, `MetricIngestDto`
 
 ### Query (Phase 10)
-- `QueryRequest`, `QueryResponse`, `QueryResultRow`, `QueryColumn`
+- `QueryRequest`, `QueryResponse`, `QueryResultRow`, `QueryValue`, `QueryColumn`
 
 ### Alerting (Phase 11)
-- `AlertConfigDto`, `AlertConditionDto`, `AlertNotificationTarget`
-- `AlertStatusDto`, `AlertHistoryEntry`
+- `AlertConfigDto`, `AlertConditionDto`
+- `AlertStatusDto`, `AlertHistoryEntry`, `AlertWebhookPayload`
 
 ### Exporters (Phase 12)
-- `ExporterStatusDto`, `ExportBatchResult`
-
-### Sampling (Phase 9)
-- `SamplingConfigDto`, `SamplingRuleDto`
+- `ExporterStatusDto`, `MetricSummaryDto`
+- `GrafanaMetricPayload`, `GrafanaMetricSeries`, `GrafanaDataPoint`
 
 ### Dev Mode (Phase 13)
 - `DevModeStatusDto`, `DiscoveredAppDto`
+
+> The ingest DTO actually used on the wire is `MetricIngestRequest`/`MetricIngestDto`.
+> `TelemetryIngestRequest` is registered but unused.
+>
+> Not currently registered in `LoomJsonSerializerContext` (no live serialization need):
+> `MetricRecord`, `MetricTag`, `CounterValue`, `GaugeValue`, `HistogramValue`,
+> `HistogramBucket`, `MetricBatch`, `MetricRegistration`, `CollectorSnapshot`,
+> `CollectorRegistration`, `CollectorStatus`, `SamplingConfigDto`, `SamplingRuleDto`,
+> `ExportBatchResult`, `AlertNotificationTarget`. Register these before putting them on
+> any API/WebSocket payload.
 
 ---
 

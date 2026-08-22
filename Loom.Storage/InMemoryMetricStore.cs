@@ -13,8 +13,17 @@ namespace Loom.Storage;
 public sealed class InMemoryMetricStore : IMetricStore, IDisposable
 {
     private readonly ConcurrentDictionary<string, MetricBuffer> _buffers = new();
-    private readonly ConcurrentDictionary<ChannelWriter<MetricRecord>, ChannelReader<MetricRecord>> _subscribers = new();
     private readonly int _bufferCapacity;
+
+    // Subscribers are copy-on-write rather than a ConcurrentDictionary: the read side runs
+    // on every Write (the hottest path in the system) while the write side only runs on
+    // Subscribe/Unsubscribe, which is rare. ConcurrentDictionary.Keys acquires *all* of the
+    // dictionary's internal locks and allocates an array plus a ReadOnlyCollection wrapper
+    // on each access, so notifying subscribers was allocating and contending once per
+    // metric write - directly contradicting ADR-5's zero-allocation write guarantee.
+    // A volatile array read is a single field load: no locks, no allocation.
+    private readonly Lock _subscriberLock = new();
+    private volatile Channel<MetricRecord>[] _subscribers = [];
 
     public InMemoryMetricStore(int bufferCapacity = 8192)
     {
@@ -24,7 +33,12 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Write(in MetricRecord record)
     {
-        var buffer = _buffers.GetOrAdd(record.Name, _ => new MetricBuffer(_bufferCapacity));
+        // static lambda + the state-passing GetOrAdd overload: a capturing lambda would
+        // close over `this` for _bufferCapacity and allocate a closure on every write.
+        var buffer = _buffers.GetOrAdd(
+            record.Name,
+            static (_, capacity) => new MetricBuffer(capacity),
+            _bufferCapacity);
         buffer.Write(in record);
         NotifySubscribers(in record);
     }
@@ -69,7 +83,24 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
             .ToArray();
     }
 
-    public IReadOnlyCollection<string> GetMetricNames() => _buffers.Keys.ToList();
+    /// <summary>
+    /// Snapshot of the currently-known metric names.
+    /// Enumerates the dictionary directly instead of using .Keys/.Count - both of those
+    /// acquire every internal lock, briefly stalling all writers, and .Keys.ToList()
+    /// allocated three times over (array, ReadOnlyCollection wrapper, then the List).
+    /// Direct enumeration is lock-free and weakly consistent: a name added concurrently may
+    /// or may not appear. That is fine for a name listing, and is the documented way to
+    /// iterate a ConcurrentDictionary without blocking writers.
+    /// </summary>
+    public IReadOnlyCollection<string> GetMetricNames()
+    {
+        var names = new List<string>();
+        foreach (var kvp in _buffers)
+        {
+            names.Add(kvp.Key);
+        }
+        return names;
+    }
 
     public (double Value, DateTime Timestamp)[] Snapshot(string metricName)
     {
@@ -88,38 +119,74 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
             SingleWriter = false,
             SingleReader = true
         });
-        _subscribers.TryAdd(channel.Writer, channel.Reader);
+        lock (_subscriberLock)
+        {
+            var current = _subscribers;
+            var updated = new Channel<MetricRecord>[current.Length + 1];
+            Array.Copy(current, updated, current.Length);
+            updated[current.Length] = channel;
+            _subscribers = updated;
+        }
+
         return channel.Reader;
     }
 
     public void Unsubscribe(ChannelReader<MetricRecord> reader)
     {
-        foreach (var kvp in _subscribers)
+        Channel<MetricRecord> removed;
+
+        lock (_subscriberLock)
         {
-            if (ReferenceEquals(kvp.Value, reader))
+            var current = _subscribers;
+            var index = -1;
+            for (var i = 0; i < current.Length; i++)
             {
-                _subscribers.TryRemove(kvp.Key, out _);
-                kvp.Key.TryComplete();
-                return;
+                if (ReferenceEquals(current[i].Reader, reader))
+                {
+                    index = i;
+                    break;
+                }
             }
+
+            // Unknown reader, or already unsubscribed - no-op, as before.
+            if (index < 0) return;
+
+            removed = current[index];
+            var updated = new Channel<MetricRecord>[current.Length - 1];
+            Array.Copy(current, 0, updated, 0, index);
+            Array.Copy(current, index + 1, updated, index, current.Length - index - 1);
+            _subscribers = updated;
         }
+
+        // Complete outside the lock: TryComplete can run continuations inline.
+        removed.Writer.TryComplete();
     }
 
     public void Dispose()
     {
-        foreach (var writer in _subscribers.Keys)
+        Channel<MetricRecord>[] current;
+        lock (_subscriberLock)
         {
-            writer.TryComplete();
+            current = _subscribers;
+            _subscribers = [];
         }
-        _subscribers.Clear();
+
+        foreach (var channel in current)
+        {
+            channel.Writer.TryComplete();
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void NotifySubscribers(in MetricRecord record)
     {
-        foreach (var writer in _subscribers.Keys)
+        // Single volatile read of the current array, then an index loop: no lock taken and
+        // nothing allocated, so Write() stays allocation-free per ADR-5. A subscriber added
+        // or removed concurrently is picked up on the next write.
+        var subscribers = _subscribers;
+        for (var i = 0; i < subscribers.Length; i++)
         {
-            writer.TryWrite(record);
+            subscribers[i].Writer.TryWrite(record);
         }
     }
 }

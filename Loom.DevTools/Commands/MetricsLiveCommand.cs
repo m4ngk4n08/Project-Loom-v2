@@ -92,6 +92,11 @@ public static class MetricsLiveCommand
         }
         finally
         {
+            // Stop the collector's background write loop before disposing the store it
+            // writes into - disposing first left a window where a late Write() landed on
+            // a disposed store (harmless today since Dispose() only completes subscriber
+            // channels, but the ordering was backwards).
+            collector.Stop();
             store.Dispose();
         }
     }

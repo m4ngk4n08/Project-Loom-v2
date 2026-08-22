@@ -107,17 +107,22 @@ public static class DashboardCommand
             return;
         }
 
-        // Forward output
+        // Forward output. Loop on ReadLineAsync returning null rather than checking
+        // EndOfStream: that property blocks synchronously (CA2024), and it can also report
+        // false immediately before the stream ends, in which case the awaited read returns
+        // null and the old code printed a blank line at exit.
         _ = Task.Run(async () =>
         {
-            while (!dashboard.StandardOutput.EndOfStream)
-                Console.WriteLine(await dashboard.StandardOutput.ReadLineAsync());
+            string? line;
+            while ((line = await dashboard.StandardOutput.ReadLineAsync()) is not null)
+                Console.WriteLine(line);
         });
 
         _ = Task.Run(async () =>
         {
-            while (!dashboard.StandardError.EndOfStream)
-                Console.Error.WriteLine(await dashboard.StandardError.ReadLineAsync());
+            string? line;
+            while ((line = await dashboard.StandardError.ReadLineAsync()) is not null)
+                Console.Error.WriteLine(line);
         });
 
         await dashboard.WaitForExitAsync();

@@ -184,7 +184,12 @@ public static class MetricsLiveCommand
             default:
             {
                 var hotpaths = HotpathRanker.Rank(store, top: 3);
-                return ("TOP HOTPATHS", BuildHotpathTable(hotpaths, narrow));
+                // "cpu" and "all" show the same data (hotpaths are already duration-named,
+                // so there's nothing left to filter for "cpu" specifically) - but the
+                // header still needs to change on 'c', or the key looks inert even though
+                // it correctly reset the category away from memory/thread.
+                var header = category == "cpu" ? "TOP HOTPATHS (cpu)" : "TOP HOTPATHS";
+                return (header, BuildHotpathTable(hotpaths, narrow));
             }
         }
     }

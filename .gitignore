@@ -73,3 +73,8 @@ logs/
 /commitmsg.txt
 /buildprojectloomlocalhost.txt
 /test_query.txt
+
+# ============================================================
+# Local dev convenience scripts
+# ============================================================
+/Loom.DevTools/reinstall-loom.ps1

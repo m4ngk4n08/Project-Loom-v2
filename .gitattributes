@@ -1,0 +1,21 @@
+# Default: normalize line endings to LF in the repo, checkout using OS default
+* text=auto
+
+# Unix shell scripts must use LF
+*.sh text eol=lf
+
+# Windows-only scripts must use CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binaries
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.snk binary
+*.pfx binary

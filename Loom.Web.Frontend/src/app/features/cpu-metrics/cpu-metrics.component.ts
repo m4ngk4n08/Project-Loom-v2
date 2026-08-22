@@ -1,12 +1,10 @@
 import { CommonModule } from "@angular/common";
 import { Component, ElementRef, Input, Output, EventEmitter, ViewChild, AfterViewInit, OnDestroy, inject, effect } from "@angular/core";
-import { Chart, ChartConfiguration, registerables } from "chart.js";
+import * as echarts from 'echarts';
+import type { EChartsOption } from 'echarts';
 import { DashboardTimelineService } from "../../core/services/dashboard-timeline.service";
-import { createChartWithCrosshair, syncCrosshairOnHover } from "../../shared/chart-sync/chart-crosshair.plugin";
-
-
-// Register Chart.js component
-Chart.register(...registerables);
+import { DASHBOARD_CHART_GROUP, connectDashboardChartGroup } from "../../shared/echarts/dashboard-chart-group";
+import { LOOM_DARK_THEME_NAME, registerLoomDarkTheme, isLightTheme } from "../../shared/echarts/loom-theme";
 
 @Component({
     selector: 'app-cpu-metrics',
@@ -18,9 +16,10 @@ Chart.register(...registerables);
 export class CpuMetricsComponent implements AfterViewInit, OnDestroy {
     @Input() data: any = null;
     @Output() pointClick = new EventEmitter<{ timestamp: Date; method: string }>();
-    @ViewChild('chartCanvas', { static: false }) chartCanvas!: ElementRef<HTMLCanvasElement>;
+    @ViewChild('chartElement', { static: false }) chartElement!: ElementRef<HTMLDivElement>;
 
-    private chart: Chart | null = null;
+    private chart: echarts.ECharts | null = null;
+    private resizeObserver?: ResizeObserver;
     private timeline = inject(DashboardTimelineService);
 
     // Color pallete
@@ -46,7 +45,6 @@ export class CpuMetricsComponent implements AfterViewInit, OnDestroy {
       this.timeline.ticks();
       this.timeline.windowStart();
       this.timeline.windowEnd();
-      this.timeline.crosshairIndex();
       if (this.chart) this.updateChart();
     });
   }
@@ -57,131 +55,100 @@ export class CpuMetricsComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if(this.chart) {
-        this.chart.destroy();
-    }
+    this.resizeObserver?.disconnect();
+    this.chart?.dispose();
+  }
+
+  private get colors() {
+    return isLightTheme() ? this.COLORS.light : this.COLORS.dark;
   }
 
   private initChart(): void {
-    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const colors = isDark ? this.COLORS.dark : this.COLORS.light;
+    registerLoomDarkTheme();
+    this.chart = echarts.init(this.chartElement.nativeElement, LOOM_DARK_THEME_NAME);
+    // Linking .group + connect() gives synced tooltips/crosshairs across the
+    // CPU/Memory/Thread charts natively - no custom draw plugin needed.
+    this.chart.group = DASHBOARD_CHART_GROUP;
+    connectDashboardChartGroup();
 
-    const config: ChartConfiguration = {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [{
-          label: 'CPU Usage %',
-          data: [],
-          borderColor: colors.series1,
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHoverRadius: 5,
-          pointBackgroundColor: colors.series1,
-          pointBorderColor: colors.surface,
-          pointBorderWidth: 2,
-          tension: 0.4,
-          fill: false,
-          spanGaps: true
-        }]
+    const colors = this.colors;
+
+    // Static shape set once - per-tick updates only touch xAxis.data/series.data
+    // via a merging setOption (default), so the tooltip/axisPointer components
+    // are never torn down and re-created on every ~1s tick.
+    const baseOption: EChartsOption = {
+      backgroundColor: 'transparent',
+      grid: { left: 8, right: 8, top: 8, bottom: 24, containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: [],
+        axisLine: { lineStyle: { color: colors.gridline } },
+        axisLabel: { color: colors.textSecondary, fontSize: 11 },
+        splitLine: { show: false }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: {
-          duration: 300
-        },
-        onHover: syncCrosshairOnHover(this.timeline),
-        interaction: {
-          mode: 'index',
-          intersect: false
-        },
-        onClick: (_event: any, elements: any[]) => {
-          if (elements.length > 0) {
-            const globalIndex = this.timeline.windowStart() + elements[0].index;
-            const tick = this.timeline.ticks()[globalIndex];
-            if (tick) {
-              this.pointClick.emit({ timestamp: tick.timestamp, method: 'cpu-usage' });
-            }
-          }
-        },
-        scales: {
-          x: {
-            display: true,
-            grid: {
-              color: colors.gridline,
-              lineWidth: 1
-            },
-            ticks: {
-              color: colors.textSecondary,
-              font: {
-                size: 11
-              },
-              maxRotation: 0,
-              autoSkip: true,
-              maxTicksLimit: 6
-            }
-          },
-          y: {
-            display: true,
-            min: 0,
-            max: 100,
-            grid: {
-              color: colors.gridline,
-              lineWidth: 1
-            },
-            ticks: {
-              color: colors.textSecondary,
-              font: {
-                size: 11
-              },
-              callback: (value: number | string) => `${value}%`
-            }
-          }
-        },
-        plugins: {
-          legend: {
-            display: false // No legend for single series
-          },
-          tooltip: {
-            enabled: true,
-            backgroundColor: colors.surface,
-            titleColor: colors.textPrimary,
-            bodyColor: colors.textSecondary,
-            borderColor: colors.gridline,
-            borderWidth: 1,
-            padding: 12,
-            displayColors: false,
-            callbacks: {
-              label: (context: any) => {
-                    return `CPU: ${context.parsed.y?.toFixed(1)}%`;
-                }
-            }
-          }
+      yAxis: {
+        type: 'value',
+        min: 0,
+        max: 100,
+        axisLabel: { color: colors.textSecondary, fontSize: 11, formatter: '{value}%' },
+        splitLine: { lineStyle: { color: colors.gridline } }
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: colors.surface,
+        borderColor: colors.gridline,
+        textStyle: { color: colors.textPrimary },
+        formatter: (params: any) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          if (p.value == null) return 'CPU: no sample';
+          return `CPU: ${Number(p.value).toFixed(1)}%`;
         }
-      }
+      },
+      series: [{
+        type: 'line',
+        data: [],
+        showSymbol: false,
+        smooth: true,
+        connectNulls: true,
+        lineStyle: { color: colors.series1, width: 2 },
+        itemStyle: { color: colors.series1 },
+        animationDuration: 300,
+        animationEasing: 'cubicOut'
+      }]
     };
+    this.chart.setOption(baseOption);
 
-    this.chart = createChartWithCrosshair(this.chartCanvas.nativeElement, config, this.timeline);
+    this.chart.on('click', (params: any) => {
+      if (params.componentType !== 'series' || params.dataIndex == null) return;
+      const globalIndex = this.timeline.windowStart() + params.dataIndex;
+      const tick = this.timeline.ticks()[globalIndex];
+      if (tick) {
+        this.pointClick.emit({ timestamp: tick.timestamp, method: 'cpu-usage' });
+      }
+    });
+
+    this.resizeObserver = new ResizeObserver(() => this.chart?.resize());
+    this.resizeObserver.observe(this.chartElement.nativeElement);
   }
 
   private updateChart(): void {
-    if(!this.chart) return;
+    if (!this.chart) return;
 
     const ticks = this.timeline.ticks().slice(
       this.timeline.windowStart(),
       this.timeline.windowEnd()
     );
-    this.chart.data.labels = ticks.map(t => t.timestamp.toLocaleTimeString());
-    this.chart.data.datasets[0].data = ticks.map(t => t.cpu);
-    this.chart.update('none') // 'none' = no animation for real-time updates
+
+    this.chart.setOption({
+      xAxis: { data: ticks.map(t => t.timestamp.toLocaleTimeString()) },
+      series: [{ data: ticks.map(t => t.cpu) }]
+    });
   }
 
   get currentCpuUsage(): number {
     return this.data?.cpuUsagePercent ?? 0;
   }
-  
+
   get topHotPaths(): any[] {
     return this.data?.hotpaths?.slice(0, 3) ?? [];
   }

@@ -2,6 +2,7 @@ import { Component, Input, OnInit, OnDestroy, signal, effect, ViewChild, Element
 import { CommonModule } from '@angular/common';
 import * as echarts from 'echarts';
 import type { EChartsOption } from 'echarts';
+import { LOOM_DARK_THEME_NAME, registerLoomDarkTheme } from '../echarts/loom-theme';
 
 export type ChartType = 'line' | 'bar' | 'area' | 'gauge' | 'heatmap';
 
@@ -141,29 +142,8 @@ export class MetricChartComponent implements OnInit, OnDestroy {
   }
 
   private initChart(): void {
-    // Register dark theme
-    echarts.registerTheme('loom-dark', {
-      backgroundColor: 'transparent',
-      textStyle: {
-        color: '#94a3b8' // --text-secondary
-      },
-      line: {
-        smooth: true
-      },
-      grid: {
-        borderColor: 'rgba(255, 255, 255, 0.04)'
-      },
-      categoryAxis: {
-        axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-        splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.04)' } }
-      },
-      valueAxis: {
-        axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-        splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.04)' } }
-      }
-    });
-
-    this.chart = echarts.init(this.chartElement.nativeElement, 'loom-dark');
+    registerLoomDarkTheme();
+    this.chart = echarts.init(this.chartElement.nativeElement, LOOM_DARK_THEME_NAME);
     this.updateChart();
   }
 

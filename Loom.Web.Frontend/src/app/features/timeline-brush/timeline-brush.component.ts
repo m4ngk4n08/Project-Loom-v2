@@ -6,16 +6,12 @@ import {
   AfterViewInit,
   OnDestroy,
   inject,
-  signal,
   effect
 } from '@angular/core';
-import { Chart, ChartConfiguration, registerables } from 'chart.js';
+import * as echarts from 'echarts';
+import type { EChartsOption } from 'echarts';
 import { DashboardTimelineService } from '../../core/services/dashboard-timeline.service';
-import { createChartWithCrosshair, syncCrosshairOnHover } from '../../shared/chart-sync/chart-crosshair.plugin';
-
-Chart.register(...registerables);
-
-type DragMode = 'move' | 'resize-left' | 'resize-right' | 'create' | null;
+import { LOOM_DARK_THEME_NAME, registerLoomDarkTheme, isLightTheme } from '../../shared/echarts/loom-theme';
 
 @Component({
   selector: 'app-timeline-brush',
@@ -25,22 +21,15 @@ type DragMode = 'move' | 'resize-left' | 'resize-right' | 'create' | null;
   styleUrls: ['./timeline-brush.component.scss']
 })
 export class TimelineBrushComponent implements AfterViewInit, OnDestroy {
-  @ViewChild('brushCanvas', { static: false }) brushCanvas!: ElementRef<HTMLCanvasElement>;
-  @ViewChild('brushOverlay', { static: false }) brushOverlay!: ElementRef<HTMLDivElement>;
+  @ViewChild('chartElement', { static: false }) chartElement!: ElementRef<HTMLDivElement>;
 
   timeline = inject(DashboardTimelineService);
 
-  // Band geometry (pixels, relative to the chart plot area)
-  readonly bandLeft = signal(0);
-  readonly bandWidth = signal(0);
-  readonly overlayTop = signal(0);
-  readonly overlayHeight = signal(0);
-
-  private chart: Chart | null = null;
-  private dragMode: DragMode = null;
-  private dragAnchorIndex = 0;
-  private dragStartWindowStart = 0;
-  private dragStartWindowEnd = 0;
+  private chart: echarts.ECharts | null = null;
+  private resizeObserver?: ResizeObserver;
+  // Guards against the 'datazoom' event firing when WE push the range (from
+  // timeline state), so it only reacts to the user actually dragging the slider.
+  private applyingServiceState = false;
 
   private readonly COLORS = {
     light: {
@@ -74,89 +63,102 @@ export class TimelineBrushComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if (this.chart) this.chart.destroy();
+    this.resizeObserver?.disconnect();
+    this.chart?.dispose();
   }
 
   followLive(): void {
     this.timeline.followLive();
   }
 
+  private get colors() {
+    return isLightTheme() ? this.COLORS.light : this.COLORS.dark;
+  }
+
   private initChart(): void {
-    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const colors = isDark ? this.COLORS.dark : this.COLORS.light;
+    registerLoomDarkTheme();
+    this.chart = echarts.init(this.chartElement.nativeElement, LOOM_DARK_THEME_NAME);
 
-    const config: ChartConfiguration = {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [{
-          label: 'CPU Usage %',
-          data: [],
-          borderColor: colors.series1,
-          backgroundColor: 'transparent',
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          tension: 0.3,
-          fill: false,
-          spanGaps: true
-        }]
+    const colors = this.colors;
+
+    // Static shape set once. Per-tick data updates use a merging setOption
+    // (default) and range sync uses dispatchAction rather than setOption -
+    // both avoid tearing down the dataZoom slider's zrender elements, which a
+    // notMerge:true setOption would do on every tick, aborting an in-progress
+    // drag under the user's pointer.
+    const baseOption: EChartsOption = {
+      backgroundColor: 'transparent',
+      animation: false,
+      grid: { left: 8, right: 8, top: 8, bottom: 32, containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: [],
+        axisLine: { lineStyle: { color: colors.gridline } },
+        axisLabel: { show: false },
+        splitLine: { show: false }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: { duration: 0 },
-        onHover: syncCrosshairOnHover(this.timeline, () => 0),
-        scales: {
-          x: {
-            type: 'linear',
-            min: -0.5,
-            max: 0.5,
-            display: true,
-            grid: { display: false },
-            ticks: {
-              color: colors.textSecondary,
-              font: { size: 10 },
-              maxRotation: 0,
-              autoSkip: true,
-              maxTicksLimit: 8,
-              callback: (value: number | string) => {
-                const index = Math.round(Number(value) + 0.5);
-                const ticks = this.timeline.ticks();
-                return (index >= 0 && index < ticks.length)
-                  ? ticks[index].timestamp.toLocaleTimeString()
-                  : '';
-              }
-            }
-          },
-          y: {
-            display: false,
-            min: 0,
-            max: 100
-          }
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            enabled: true,
-            mode: 'index',
-            intersect: false,
-            backgroundColor: colors.surface,
-            titleColor: colors.textPrimary,
-            bodyColor: colors.textSecondary,
-            borderColor: colors.gridline,
-            borderWidth: 1,
-            padding: 10,
-            displayColors: false,
-            callbacks: {
-              label: (context: any) => `CPU: ${context.parsed.y?.toFixed(1)}%`
-            }
-          }
+      yAxis: {
+        type: 'value',
+        min: 0,
+        max: 100,
+        show: false
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: colors.surface,
+        borderColor: colors.gridline,
+        textStyle: { color: colors.textPrimary },
+        formatter: (params: any) => {
+          const p = Array.isArray(params) ? params[0] : params;
+          if (p.value == null) return 'CPU: no sample';
+          return `CPU: ${Number(p.value).toFixed(1)}%`;
         }
-      }
+      },
+      dataZoom: [
+        {
+          type: 'slider',
+          start: 0,
+          end: 100,
+          height: 20,
+          bottom: 4,
+          handleSize: '100%',
+          borderColor: colors.gridline,
+          fillerColor: 'rgba(20, 184, 166, 0.15)',
+          dataBackground: {
+            lineStyle: { color: colors.series1 },
+            areaStyle: { color: colors.series1, opacity: 0.1 }
+          },
+          textStyle: { color: colors.textSecondary, fontSize: 10 }
+        }
+      ],
+      series: [{
+        type: 'line',
+        data: [],
+        showSymbol: false,
+        smooth: true,
+        connectNulls: true,
+        lineStyle: { color: colors.series1, width: 1.5 },
+        itemStyle: { color: colors.series1 }
+      }]
     };
+    this.chart.setOption(baseOption);
 
-    this.chart = createChartWithCrosshair(this.brushCanvas.nativeElement, config, this.timeline, () => 0);
+    this.chart.on('datazoom', () => {
+      if (this.applyingServiceState || !this.chart) return;
+      const option = this.chart.getOption() as any;
+      const dz = option.dataZoom?.[0];
+      if (!dz) return;
+      const count = this.timeline.ticks().length;
+      if (count <= 1) return;
+      // dataZoom percentages map onto the category axis's index domain
+      // [0, count - 1], not [0, count] - matches the write side in updateChart().
+      const startIdx = Math.round((dz.start / 100) * (count - 1));
+      const endIdx = Math.round((dz.end / 100) * (count - 1)) + 1;
+      this.timeline.setWindow(startIdx, endIdx);
+    });
+
+    this.resizeObserver = new ResizeObserver(() => this.chart?.resize());
+    this.resizeObserver.observe(this.chartElement.nativeElement);
   }
 
   private updateChart(): void {
@@ -164,105 +166,20 @@ export class TimelineBrushComponent implements AfterViewInit, OnDestroy {
 
     const ticks = this.timeline.ticks();
     const count = ticks.length;
-    const xScale = this.chart.scales['x'] as any;
-    if (xScale && xScale.options) {
-      xScale.options.min = -0.5;
-      xScale.options.max = Math.max(0.5, count - 0.5);
-    }
+    const startPct = count > 1 ? (this.timeline.windowStart() / (count - 1)) * 100 : 0;
+    const endPct = count > 1 ? ((this.timeline.windowEnd() - 1) / (count - 1)) * 100 : 100;
 
-    this.chart.data.labels = ticks.map(t => t.timestamp.toLocaleTimeString());
-    this.chart.data.datasets[0].data = ticks.map(t => t.cpu);
-    this.chart.update('none');
+    // Data update: merging setOption (no notMerge) leaves the dataZoom
+    // component instance - and any in-progress drag on it - intact.
+    this.chart.setOption({
+      xAxis: { data: ticks.map(t => t.timestamp.toLocaleTimeString()) },
+      series: [{ data: ticks.map(t => t.cpu) }]
+    });
 
-    this.updateBand();
-  }
-
-  private updateBand(): void {
-    if (!this.chart) return;
-    const area = this.chart.chartArea;
-    const start = this.timeline.windowStart();
-    const end = this.timeline.windowEnd();
-
-    this.overlayTop.set(area.top);
-    this.overlayHeight.set(area.bottom - area.top);
-
-    const xScale = this.chart.scales['x'] as any;
-    const leftPx = xScale.getPixelForValue(start);
-    const rightPx = xScale.getPixelForValue(Math.max(end - 1, start));
-    this.bandLeft.set(leftPx - area.left);
-    this.bandWidth.set(Math.max(rightPx - leftPx, 8));
-  }
-
-  private pixelToIndex(clientX: number): number {
-    const rect = this.brushOverlay.nativeElement.getBoundingClientRect();
-    const xScale = this.chart?.scales['x'] as any;
-    if (!xScale) return 0;
-    const pixel = clientX - rect.left;
-    const value = xScale.getValueForPixel(pixel);
-    return Math.round(value + 0.5);
-  }
-
-  onPointerDown(event: PointerEvent): void {
-    const target = event.target as HTMLElement;
-    const handle = target.closest('.brush-handle');
-    const band = target.closest('.brush-band');
-
-    this.dragAnchorIndex = this.pixelToIndex(event.clientX);
-    this.dragStartWindowStart = this.timeline.windowStart();
-    this.dragStartWindowEnd = this.timeline.windowEnd();
-
-    if (handle) {
-      this.dragMode = handle.classList.contains('brush-handle--left')
-        ? 'resize-left'
-        : 'resize-right';
-    } else if (band) {
-      this.dragMode = 'move';
-    } else {
-      this.dragMode = 'create';
-    }
-
-    event.preventDefault();
-    this.brushOverlay.nativeElement.setPointerCapture?.(event.pointerId);
-  }
-
-  onPointerMove(event: PointerEvent): void {
-    if (!this.dragMode || !this.chart) return;
-
-    const count = this.timeline.ticks().length;
-    const index = this.pixelToIndex(event.clientX);
-
-    switch (this.dragMode) {
-      case 'create': {
-        const anchor = this.dragAnchorIndex;
-        const start = Math.max(0, Math.min(anchor, index));
-        const end = Math.min(count, Math.max(anchor, index) + 1);
-        this.timeline.setWindow(start, end);
-        break;
-      }
-      case 'move': {
-        const delta = index - this.dragAnchorIndex;
-        const width = this.dragStartWindowEnd - this.dragStartWindowStart;
-        const start = Math.max(0, Math.min(this.dragStartWindowStart + delta, count - width));
-        this.timeline.setWindow(start, start + width);
-        break;
-      }
-      case 'resize-left': {
-        const end = this.dragStartWindowEnd;
-        const start = Math.max(0, Math.min(index, end - 1));
-        this.timeline.setWindow(start, end);
-        break;
-      }
-      case 'resize-right': {
-        const start = this.dragStartWindowStart;
-        const end = Math.min(count, Math.max(index + 1, start + 1));
-        this.timeline.setWindow(start, end);
-        break;
-      }
-    }
-  }
-
-  onPointerUp(event: PointerEvent): void {
-    this.dragMode = null;
-    this.brushOverlay.nativeElement.releasePointerCapture?.(event.pointerId);
+    // Range sync: dispatchAction updates the slider's displayed range without
+    // recreating it, unlike passing dataZoom.start/end through setOption.
+    this.applyingServiceState = true;
+    this.chart.dispatchAction({ type: 'dataZoom', start: startPct, end: endPct });
+    this.applyingServiceState = false;
   }
 }

@@ -17,9 +17,9 @@ export const DEFAULT_WINDOW = 30;
 export const MAX_TICKS = 180;
 
 /** Single source of truth for the dashboard charts' shared time axis.
- *  Owns the aligned tick buffer, the visible window, and the synced crosshair so
- *  all three charts correlate: brushing the overview scrubs every chart, and
- *  hovering one chart draws a vertical line on all of them. */
+ *  Owns the aligned tick buffer and the visible window so all three charts
+ *  correlate: brushing the overview scrubs every chart. Cross-chart hover
+ *  crosshair sync is handled natively by ECharts (echarts.connect group). */
 @Injectable({ providedIn: 'root' })
 export class DashboardTimelineService {
   private state = inject(DashboardStateService);
@@ -28,7 +28,6 @@ export class DashboardTimelineService {
   readonly windowStart = signal(0);
   readonly windowEnd = signal(0);
   readonly following = signal(true);
-  readonly crosshairIndex = signal<number | null>(null);
 
   constructor() {
     effect(() => {
@@ -105,9 +104,5 @@ export class DashboardTimelineService {
     this.windowStart.set(Math.max(0, len - DEFAULT_WINDOW));
     this.windowEnd.set(len);
     this.following.set(true);
-  }
-
-  setCrosshair(index: number | null): void {
-    this.crosshairIndex.set(index);
   }
 }

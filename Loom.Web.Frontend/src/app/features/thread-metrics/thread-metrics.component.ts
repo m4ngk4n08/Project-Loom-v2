@@ -1,10 +1,10 @@
 import { Component, Input, Output, EventEmitter, ViewChild, ElementRef, AfterViewInit, OnDestroy, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Chart, ChartConfiguration, registerables } from 'chart.js';
+import * as echarts from 'echarts';
+import type { EChartsOption } from 'echarts';
 import { DashboardTimelineService } from '../../core/services/dashboard-timeline.service';
-import { createChartWithCrosshair, syncCrosshairOnHover } from '../../shared/chart-sync/chart-crosshair.plugin';
-
-Chart.register(...registerables);
+import { DASHBOARD_CHART_GROUP, connectDashboardChartGroup } from '../../shared/echarts/dashboard-chart-group';
+import { LOOM_DARK_THEME_NAME, registerLoomDarkTheme, isLightTheme } from '../../shared/echarts/loom-theme';
 
 @Component({
   selector: 'app-thread-metrics',
@@ -16,9 +16,10 @@ Chart.register(...registerables);
 export class ThreadMetricsComponent implements AfterViewInit, OnDestroy {
   @Input() data: any = null;
   @Output() pointClick = new EventEmitter<{ timestamp: Date; method: string }>();
-  @ViewChild('chartCanvas', { static: false }) chartCanvas!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('chartElement', { static: false }) chartElement!: ElementRef<HTMLDivElement>;
 
-  private chart: Chart | null = null;
+  private chart: echarts.ECharts | null = null;
+  private resizeObserver?: ResizeObserver;
   private timeline = inject(DashboardTimelineService);
 
   // Color palette (validated from dataviz skill - categorical)
@@ -48,7 +49,6 @@ export class ThreadMetricsComponent implements AfterViewInit, OnDestroy {
       this.timeline.ticks();
       this.timeline.windowStart();
       this.timeline.windowEnd();
-      this.timeline.crosshairIndex();
       if (this.chart) this.updateChart();
     });
   }
@@ -59,130 +59,97 @@ export class ThreadMetricsComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if (this.chart) {
-      this.chart.destroy();
-    }
+    this.resizeObserver?.disconnect();
+    this.chart?.dispose();
+  }
+
+  private get colors() {
+    return isLightTheme() ? this.COLORS.light : this.COLORS.dark;
   }
 
   private initChart(): void {
-    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const colors = isDark ? this.COLORS.dark : this.COLORS.light;
+    registerLoomDarkTheme();
+    this.chart = echarts.init(this.chartElement.nativeElement, LOOM_DARK_THEME_NAME);
+    this.chart.group = DASHBOARD_CHART_GROUP;
+    connectDashboardChartGroup();
 
-    const config: ChartConfiguration = {
-      type: 'bar',
-      data: {
-        labels: [],
-        datasets: [
-          {
-            label: 'Active',
-            data: [],
-            backgroundColor: colors.active,
-            borderWidth: 0,
-            borderRadius: 4,
-            borderSkipped: false
-          },
-          {
-            label: 'Blocked',
-            data: [],
-            backgroundColor: colors.blocked,
-            borderWidth: 0,
-            borderRadius: 4,
-            borderSkipped: false
-          },
-          {
-            label: 'Waiting',
-            data: [],
-            backgroundColor: colors.waiting,
-            borderWidth: 0,
-            borderRadius: 4,
-            borderSkipped: false
-          }
-        ]
+    const colors = this.colors;
+
+    // Static shape set once - per-tick updates only touch xAxis.data/series[].data
+    // via a merging setOption (default), so tooltip/legend/axisPointer aren't torn
+    // down and re-created on every ~1s tick.
+    const baseOption: EChartsOption = {
+      backgroundColor: 'transparent',
+      grid: { left: 8, right: 8, top: 8, bottom: 48, containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: [],
+        axisLine: { show: false },
+        axisLabel: { color: colors.textSecondary, fontSize: 11 },
+        splitLine: { show: false }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: {
-          duration: 300
-        },
-        onHover: syncCrosshairOnHover(this.timeline),
-        interaction: {
-          mode: 'index',
-          intersect: false
-        },
-        onClick: (_event: any, elements: any[]) => {
-          if (elements.length > 0) {
-            const globalIndex = this.timeline.windowStart() + elements[0].index;
-            const tick = this.timeline.ticks()[globalIndex];
-            if (tick) {
-              this.pointClick.emit({ timestamp: tick.timestamp, method: 'threadpool-thread-count' });
-            }
-          }
-        },
-        scales: {
-          x: {
-            stacked: true,
-            display: true,
-            grid: {
-              display: false
-            },
-            ticks: {
-              color: colors.textSecondary,
-              font: {
-                size: 11
-              },
-              maxRotation: 0,
-              autoSkip: true,
-              maxTicksLimit: 6
-            }
-          },
-          y: {
-            stacked: true,
-            display: true,
-            grid: {
-              color: colors.gridline,
-              lineWidth: 1
-            },
-            ticks: {
-              color: colors.textSecondary,
-              font: {
-                size: 11
-              },
-              stepSize: 5
-            }
-          }
-        },
-        plugins: {
-          legend: {
-            display: true,
-            position: 'bottom',
-            labels: {
-              color: colors.textPrimary,
-              font: {
-                size: 12
-              },
-              padding: 12,
-              usePointStyle: true,
-              pointStyle: 'circle'
-            }
-          },
-          tooltip: {
-            enabled: true,
-            backgroundColor: colors.surface,
-            titleColor: colors.textPrimary,
-            bodyColor: colors.textSecondary,
-            borderColor: colors.gridline,
-            borderWidth: 1,
-            padding: 12,
-            callbacks: {
-              label: (context: any) => `${context.dataset.label}: ${context.parsed.y} threads`
-            }
-          }
+      yAxis: {
+        type: 'value',
+        axisLabel: { color: colors.textSecondary, fontSize: 11 },
+        splitLine: { lineStyle: { color: colors.gridline } }
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: colors.surface,
+        borderColor: colors.gridline,
+        textStyle: { color: colors.textPrimary },
+        formatter: (params: any) => {
+          const list = Array.isArray(params) ? params : [params];
+          return list
+            .map((p: any) => p.value == null
+              ? `${p.seriesName}: no sample`
+              : `${p.seriesName}: ${p.value} threads`)
+            .join('<br/>');
         }
-      }
+      },
+      legend: {
+        bottom: 0,
+        textStyle: { color: colors.textPrimary, fontSize: 12 },
+        itemWidth: 10,
+        itemHeight: 10
+      },
+      series: [
+        {
+          name: 'Active',
+          type: 'bar',
+          stack: 'threads',
+          data: [],
+          itemStyle: { color: colors.active, borderRadius: 0 }
+        },
+        {
+          name: 'Blocked',
+          type: 'bar',
+          stack: 'threads',
+          data: [],
+          itemStyle: { color: colors.blocked, borderRadius: 0 }
+        },
+        {
+          name: 'Waiting',
+          type: 'bar',
+          stack: 'threads',
+          data: [],
+          itemStyle: { color: colors.waiting, borderRadius: 0 }
+        }
+      ]
     };
+    this.chart.setOption(baseOption);
 
-    this.chart = createChartWithCrosshair(this.chartCanvas.nativeElement, config, this.timeline);
+    this.chart.on('click', (params: any) => {
+      if (params.componentType !== 'series' || params.dataIndex == null) return;
+      const globalIndex = this.timeline.windowStart() + params.dataIndex;
+      const tick = this.timeline.ticks()[globalIndex];
+      if (tick) {
+        this.pointClick.emit({ timestamp: tick.timestamp, method: 'threadpool-thread-count' });
+      }
+    });
+
+    this.resizeObserver = new ResizeObserver(() => this.chart?.resize());
+    this.resizeObserver.observe(this.chartElement.nativeElement);
   }
 
   private updateChart(): void {
@@ -192,11 +159,15 @@ export class ThreadMetricsComponent implements AfterViewInit, OnDestroy {
       this.timeline.windowStart(),
       this.timeline.windowEnd()
     );
-    this.chart.data.labels = ticks.map(t => t.timestamp.toLocaleTimeString());
-    this.chart.data.datasets[0].data = ticks.map(t => t.active);
-    this.chart.data.datasets[1].data = ticks.map(t => t.blocked);
-    this.chart.data.datasets[2].data = ticks.map(t => t.waiting);
-    this.chart.update('none');
+
+    this.chart.setOption({
+      xAxis: { data: ticks.map(t => t.timestamp.toLocaleTimeString()) },
+      series: [
+        { data: ticks.map(t => t.active) },
+        { data: ticks.map(t => t.blocked) },
+        { data: ticks.map(t => t.waiting) }
+      ]
+    });
   }
 
   get totalThreads(): number {

@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import * as echarts from 'echarts';
 import type { EChartsOption } from 'echarts';
 import { ChartDataPoint } from '../metric-chart/metric-chart.component';
+import { LOOM_DARK_THEME_NAME, registerLoomDarkTheme } from '../echarts/loom-theme';
 
 export interface ComparisonSeries {
   name: string;
@@ -94,22 +95,8 @@ export class ComparisonChartComponent implements OnDestroy {
   }
 
   private initChart(): void {
-    echarts.registerTheme('loom-dark', {
-      backgroundColor: 'transparent',
-      textStyle: { color: '#94a3b8' },
-      legend: { textStyle: { color: '#94a3b8' } },
-      grid: { borderColor: 'rgba(255, 255, 255, 0.04)' },
-      categoryAxis: {
-        axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-        splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.04)' } }
-      },
-      valueAxis: {
-        axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-        splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.04)' } }
-      }
-    });
-
-    this.chart = echarts.init(this.chartElement.nativeElement, 'loom-dark');
+    registerLoomDarkTheme();
+    this.chart = echarts.init(this.chartElement.nativeElement, LOOM_DARK_THEME_NAME);
     if (this.series().length > 0) {
       this.updateChart();
     }

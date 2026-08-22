@@ -29,6 +29,9 @@ switch (args)
     case ["metrics", var pidArg] when int.TryParse(pidArg, out var metricsPid):
         await MetricsCommand.RunAsync(metricsPid, null, cts.Token);
         break;
+    case ["metrics", var pidArg, "--live"] when int.TryParse(pidArg, out var livePid):
+        await MetricsLiveCommand.RunAsync(livePid, cts.Token);
+        break;
     case ["metrics", var pidArg, var category] when int.TryParse(pidArg, out var metricsPid2):
         await MetricsCommand.RunAsync(metricsPid2, category, cts.Token);
         break;

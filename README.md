@@ -272,7 +272,7 @@ dotnet-counters monitor --process-id $(pidof Loom.Web.Api) System.Runtime
 
 | Phase | System | Status | Description |
 |-------|--------|--------|-------------|
-| 16 | Dashboard Modernization | 🚧 In Progress | Angular 21 + Apache ECharts, dark theme with teal accent, multi-page SPA |
+| 16 | Dashboard Modernization | Implementation complete, pending browser verification | Angular 21 + Apache ECharts, dark theme with teal accent, multi-page SPA. HTTP/WS surface (routes, `/prometheus`, WebSocket upgrade) smoke-tested; visual/UX checks (contrast, responsive breakpoints, chart rendering, keyboard nav) require a browser and have not been run |
 
 ### Dependency Graph (Telemetry Phases)
 

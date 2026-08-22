@@ -18,7 +18,10 @@ switch (args)
         await DashboardCommand.RunAsync(dpid, cts.Token);
         break;
     case ["watch", var pidArg] when int.TryParse(pidArg, out var watchPid):
-        await WatchCommand.RunAsync(watchPid, cts.Token);
+        await WatchCommand.RunAsync(watchPid, raw: false, cts.Token);
+        break;
+    case ["watch", var pidArg, "--raw"] when int.TryParse(pidArg, out var watchRawPid):
+        await WatchCommand.RunAsync(watchRawPid, raw: true, cts.Token);
         break;
     case ["explore", var pidArg] when int.TryParse(pidArg, out var explorePid):
         await ExploreCommand.RunAsync(explorePid, cts.Token);

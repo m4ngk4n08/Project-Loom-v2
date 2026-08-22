@@ -40,11 +40,12 @@ switch (args)
         break;
     default:
         Console.WriteLine("Usage:");
-        Console.WriteLine("  loom dev [--all]              Discover Loom-instrumented processes");
-        Console.WriteLine("  loom dev --dashboard          Launch dashboard (requires Loom.Dashboard)");
-        Console.WriteLine("  loom watch <pid>              Stream raw metric events");
-        Console.WriteLine("  loom explore <pid>            List all metrics and latest values");
+        Console.WriteLine("  loom dev [--all]                        Discover Loom-instrumented processes");
+        Console.WriteLine("  loom dev --dashboard                    Launch dashboard (requires Loom.Dashboard)");
+        Console.WriteLine("  loom watch <pid> [--raw]                Stream formatted metric events (--raw for unformatted payload dump)");
+        Console.WriteLine("  loom explore <pid>                      List all metrics and latest values");
         Console.WriteLine("  loom metrics <pid> [cpu|memory|thread]  Show formatted metrics");
-        Console.WriteLine("  loom query <pid> \"SELECT...\"  Execute LoomQL query");
+        Console.WriteLine("  loom metrics <pid> --live               Live-refreshing terminal dashboard (requires an interactive terminal)");
+        Console.WriteLine("  loom query <pid> \"SELECT...\"            Execute LoomQL query");
         break;
 }

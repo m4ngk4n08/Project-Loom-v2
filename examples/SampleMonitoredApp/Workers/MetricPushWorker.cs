@@ -16,13 +16,19 @@ public class MetricPushWorker : BackgroundService
     public MetricPushWorker(ILogger<MetricPushWorker> logger)
     {
         _logger = logger;
-        _httpClient = new HttpClient { BaseAddress = new Uri("http://localhost:5209") };
+        // Same env var Loom.Dashboard reads for its explicit --port/LOOM_DASHBOARD_PORT
+        // override, so one variable keeps both sides pointed at the same instance.
+        // Without this, a dashboard that fell back off 5209 would leave this client
+        // silently POSTing metrics into whatever else is listening on 5209 instead.
+        var port = Environment.GetEnvironmentVariable("LOOM_DASHBOARD_PORT") ?? "5209";
+        var baseAddress = new Uri($"http://localhost:{port}");
+        _httpClient = new HttpClient { BaseAddress = baseAddress };
         _lastPushTicks = DateTime.UtcNow.Ticks;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("MetricPushWorker started — pushing to http://localhost:5209/api/metrics/ingest");
+        _logger.LogInformation("MetricPushWorker started — pushing to {BaseAddress}api/metrics/ingest", _httpClient.BaseAddress);
 
         // Wait briefly for other workers to start generating metrics
         await Task.Delay(2000, stoppingToken);

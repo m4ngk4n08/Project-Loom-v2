@@ -29,6 +29,7 @@ namespace Loom.Dashboard.Extensions
             api.MapMetricsEndpoints(metricsBuilder);
             api.MapMetricIngestEndpoint();
             api.MapQueryEndpoints();
+            api.MapLogEndpoints();
             api.MapAlertEndpoints();
             api.MapExporterEndpoints();
 
@@ -175,6 +176,67 @@ namespace Loom.Dashboard.Extensions
 
             return api;
         }
+
+        private static RouteGroupBuilder MapLogEndpoints(this RouteGroupBuilder api)
+        {
+            api.MapGet("/logs", (int? count, string? category, ILogStore store) =>
+            {
+                var clampedCount = Math.Clamp(count ?? 100, 1, 1000);
+                var records = category is null
+                    ? store.ReadRecent(clampedCount)
+                    : store.ReadRecent(category, clampedCount);
+
+                return Results.Json(records.Select(ToDto).ToArray(), LoomJsonSerializerContext.Default.LogEntryDtoArray);
+            })
+            .WithName("GetLogs")
+            .Produces<LogEntryDto[]>(200);
+
+            api.MapGet("/logs/categories", (ILogStore store) =>
+                Results.Json(store.GetCategories().ToList(), LoomJsonSerializerContext.Default.ListString))
+            .WithName("GetLogCategories")
+            .Produces<List<string>>(200);
+
+            api.MapGet("/logs/tail", (long? after, int? count, ILogStore store) =>
+            {
+                var afterSequence = after ?? 0;
+                var clampedCount = Math.Clamp(count ?? 100, 1, 1000);
+                var result = store.ReadAfter(afterSequence);
+
+                // ReadAfter can hand back up to the buffer's whole capacity in one
+                // page; clamp the response, but the cursor MUST advance only past
+                // what was actually returned - if we trimmed to clampedCount but
+                // still reported result.NextSequence (the buffer's true head), the
+                // client would skip every record between the trim point and the
+                // head on its next poll. Same class of bug as the ReadSince ">" vs
+                // ">=" cursor bug this whole fix started from.
+                var entries = result.Records.Length > clampedCount
+                    ? result.Records[..clampedCount]
+                    : result.Records;
+                var nextSequence = afterSequence + entries.Length;
+
+                return Results.Json(new LogTailResponse
+                {
+                    Entries = entries.Select(ToDto).ToArray(),
+                    NextSequence = nextSequence,
+                    DroppedCount = result.DroppedCount
+                }, LoomJsonSerializerContext.Default.LogTailResponse);
+            })
+            .WithName("GetLogTail")
+            .Produces<LogTailResponse>(200);
+
+            return api;
+        }
+
+        private static LogEntryDto ToDto(LogRecord record) => new()
+        {
+            Message = record.Message,
+            Category = record.Category,
+            Level = record.Level.ToString(),
+            TimestampUtc = record.TimestampUtc,
+            EventId = record.EventId,
+            ExceptionType = record.ExceptionType,
+            ExceptionMessage = record.ExceptionMessage
+        };
 
         private static RouteGroupBuilder MapAlertEndpoints(this RouteGroupBuilder api)
         {

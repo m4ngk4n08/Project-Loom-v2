@@ -61,6 +61,9 @@ namespace Loom.Web.Contracts;
 [JsonSerializable(typeof(List<DiscoveredAppDto>))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(List<string>))]
+[JsonSerializable(typeof(LogEntryDto))]
+[JsonSerializable(typeof(LogEntryDto[]))]
+[JsonSerializable(typeof(LogTailResponse))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

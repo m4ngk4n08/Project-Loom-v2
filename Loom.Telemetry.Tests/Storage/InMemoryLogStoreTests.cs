@@ -150,6 +150,40 @@ public sealed class InMemoryLogStoreTests
     }
 
     [Fact]
+    public void ReadAfter_ClampedToCount_NextCursorReflectsOnlyRecordsActuallyReturned()
+    {
+        // Mirrors the /api/logs/tail clamping logic: trimming ReadAfter's page to a
+        // caller-supplied count must derive the next cursor from what was actually
+        // handed back (afterSequence + entries.Length), never from the buffer's true
+        // head (result.NextSequence) - otherwise the client's next poll would skip
+        // every record between the trim point and the head.
+        using var store = new InMemoryLogStore(bufferCapacity: 64);
+        for (var i = 1; i <= 10; i++) store.Write(Record($"m{i}", "cat", Base + i));
+
+        const int pageSize = 4;
+        long cursor = 0;
+
+        var firstPage = store.ReadAfter(cursor);
+        var firstEntries = firstPage.Records.Length > pageSize ? firstPage.Records[..pageSize] : firstPage.Records;
+        var firstNext = cursor + firstEntries.Length;
+
+        Assert.Equal(new[] { "m1", "m2", "m3", "m4" }, firstEntries.Select(r => r.Message));
+        Assert.NotEqual(firstPage.NextSequence, firstNext); // the bug this guards against: these must differ here
+        cursor = firstNext;
+
+        var secondPage = store.ReadAfter(cursor);
+        var secondEntries = secondPage.Records.Length > pageSize ? secondPage.Records[..pageSize] : secondPage.Records;
+        var secondNext = cursor + secondEntries.Length;
+
+        Assert.Equal(0, secondPage.DroppedCount);
+        Assert.Equal(new[] { "m5", "m6", "m7", "m8" }, secondEntries.Select(r => r.Message));
+
+        // No gaps, no duplicates across the two pages.
+        var combined = firstEntries.Concat(secondEntries).Select(r => r.Message).ToArray();
+        Assert.Equal(new[] { "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8" }, combined);
+    }
+
+    [Fact]
     public void ReadRecent_ByCategory_CountMuchSmallerThanCapacity_StillFiltersCorrectly()
     {
         using var store = new InMemoryLogStore(); // default capacity 8192

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Loom.Storage;
 using Loom.Telemetry.Exporters.Prometheus;
 using Xunit;
@@ -168,6 +169,72 @@ public sealed class PrometheusFormatterTests : IDisposable
         var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
         Assert.Contains(sanitizedName, result);
         Assert.Contains($"{sanitizedName} 8.00", result);
+    }
+
+    [Fact]
+    public void Format_TagValueContainingSeparatorCharacters_DoesNotCollideWithDistinctTagSet()
+    {
+        // Arrange - a="b,c=d" (one tag, value contains ',' and '=') and {a="b", c="d"}
+        // (two tags) previously serialized to the same "a=b,c=d" canonical key and
+        // merged into one series with a summed value under the wrong label set.
+        var metricName = $"test.counter.{Guid.NewGuid()}";
+        LoomMetrics.RecordCounter(metricName, 100.0, new MetricTag("a", "b,c=d"));
+        LoomMetrics.RecordCounter(metricName, 5.0, new MetricTag("a", "b"), new MetricTag("c", "d"));
+
+        // Act
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
+
+        // Assert - two distinct series lines, each with its own value.
+        var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
+        Assert.Contains($"{sanitizedName}{{a=\"b,c=d\"}} 100.00", result);
+        Assert.Contains($"{sanitizedName}{{a=\"b\",c=\"d\"}} 5.00", result);
+
+        // Neither value equals the sum of both (105) - confirms they were not merged.
+        Assert.DoesNotContain("105.00", result);
+        var lineCount = result.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Count(line => line.StartsWith(sanitizedName + "{"));
+        Assert.Equal(2, lineCount);
+    }
+
+    [Fact]
+    public void Format_GaugeWithMultipleValues_OutputsNewestValueNotZero()
+    {
+        // Arrange - guards against Values no longer being populated for gauges: the
+        // "newest value" tracking must not silently regress to always-0.
+        var metricName = $"test.gauge.{Guid.NewGuid()}";
+        LoomMetrics.RecordGauge(metricName, 10.0);
+        LoomMetrics.RecordGauge(metricName, 20.0);
+        LoomMetrics.RecordGauge(metricName, 30.0); // last written
+
+        // Act
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
+
+        // Assert
+        var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
+        Assert.Contains($"{sanitizedName} 30.00", result);
+        Assert.DoesNotContain($"{sanitizedName} 0.00", result);
+    }
+
+    [Fact]
+    public void Format_HistogramMetric_QuantilesStillCorrectAfterValuesChange()
+    {
+        // Arrange
+        var metricName = $"test.histogram.{Guid.NewGuid()}";
+        for (int i = 1; i <= 100; i++)
+        {
+            LoomMetrics.RecordHistogram(metricName, i);
+        }
+
+        // Act
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
+
+        // Assert
+        var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
+        Assert.Contains($"{sanitizedName}_count 100", result);
+        Assert.Contains($"{sanitizedName}_sum 5050.00", result);
+        Assert.Contains($"{sanitizedName}{{quantile=\"0.5\"}} 51.00", result);
+        Assert.Contains($"{sanitizedName}{{quantile=\"0.95\"}} 96.00", result);
+        Assert.Contains($"{sanitizedName}{{quantile=\"0.99\"}} 100.00", result);
     }
 
     [Fact]

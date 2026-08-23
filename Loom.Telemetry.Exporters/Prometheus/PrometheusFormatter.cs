@@ -8,7 +8,9 @@ namespace Loom.Telemetry.Exporters.Prometheus;
 /// <summary>
 /// Hand-written formatter for the Prometheus text exposition format (version 0.0.4).
 /// Zero reflection. Writes UTF-8 directly into an IBufferWriter&lt;byte&gt; - no
-/// StringBuilder for the wire output, no per-metric string allocation, no LINQ.
+/// StringBuilder, no allocation, no LINQ on the wire-writing path. Grouping records
+/// by label set ahead of that (Dictionary, per-series canonical key, sorted key
+/// list) does allocate, once per scrape - see GroupByLabelSet.
 /// This is NOT OpenMetrics: OpenMetrics requires a trailing "# EOF" marker and a
 /// different content type. The /prometheus endpoint serves
 /// "text/plain; version=0.0.4", so no "# EOF" is emitted here - adding one would
@@ -55,7 +57,7 @@ public static class PrometheusFormatter
                 WriteUtf8(writer, prometheusType);
                 WriteNewLine(writer);
 
-                var groups = GroupByLabelSet(records);
+                var groups = GroupByLabelSet(records, metricType);
                 var orderedKeys = new List<string>(groups.Keys);
                 orderedKeys.Sort(StringComparer.Ordinal);
 
@@ -170,12 +172,28 @@ public static class PrometheusFormatter
         public double Sum;
 
         /// <summary>First record's value seen while scanning newest-first - the gauge's
-        /// current value.</summary>
-        public double NewestValue;
+        /// current value. Tracked via <see cref="_newestValueSet"/> rather than
+        /// "Values.Count == 1", since Values is no longer populated for
+        /// Counter/Gauge series (see GroupByLabelSet).</summary>
+        public double NewestValue { get; private set; }
+        private bool _newestValueSet;
 
         /// <summary>Every retained record's value - used for histogram/summary count
-        /// and quantiles.</summary>
+        /// and quantiles. Left empty for Counter/Gauge series, which only need Sum
+        /// and NewestValue: populating this for every record on a full 8192-record
+        /// buffer was ~64 KB of List&lt;double&gt; per series, grown by repeated
+        /// reallocation and immediately discarded.</summary>
         public List<double> Values { get; } = [];
+
+        public void Observe(double value)
+        {
+            Sum += value;
+            if (!_newestValueSet)
+            {
+                NewestValue = value;
+                _newestValueSet = true;
+            }
+        }
     }
 
     /// <summary>
@@ -188,9 +206,13 @@ public static class PrometheusFormatter
     /// correct fix needs a monotonic accumulator maintained by the store itself rather
     /// than derived from buffer contents - see BACKLOG.md § 4.
     /// </summary>
-    private static Dictionary<string, LabelGroup> GroupByLabelSet(ReadOnlySpan<MetricRecord> records)
+    private static Dictionary<string, LabelGroup> GroupByLabelSet(ReadOnlySpan<MetricRecord> records, MetricType metricType)
     {
         var groups = new Dictionary<string, LabelGroup>(StringComparer.Ordinal);
+        // Values (the per-record list used for histogram count/sum/quantiles) is only
+        // needed for Histogram/MethodExecution - Counter/Gauge only ever read Sum and
+        // NewestValue, so skip growing a list nobody reads for those.
+        var needsValues = metricType is MetricType.Histogram or MetricType.MethodExecution;
 
         foreach (var record in records)
         {
@@ -203,10 +225,9 @@ public static class PrometheusFormatter
                 groups[key] = group;
             }
 
-            group.Sum += record.Value;
-            group.Values.Add(record.Value);
-            if (group.Values.Count == 1)
-                group.NewestValue = record.Value;
+            group.Observe(record.Value);
+            if (needsValues)
+                group.Values.Add(record.Value);
         }
 
         return groups;
@@ -222,6 +243,16 @@ public static class PrometheusFormatter
         return sorted;
     }
 
+    /// <summary>
+    /// Builds a canonical grouping key from sorted tags. Length-prefixes each key and
+    /// value (<c>len:key</c>, <c>len:value</c>) rather than just joining with '=' and
+    /// ','. Without the prefixes, a tag VALUE containing those separator characters
+    /// can forge another tag set's key - e.g. {a="b,c=d"} and {a="b", c="d"} both
+    /// serialize to the same "a=b,c=d" string, silently merging two distinct series
+    /// and summing their values under the wrong label set. The length prefix makes
+    /// each field's boundary unambiguous regardless of what characters it contains,
+    /// so do not "simplify" this back to plain '='/',' joining.
+    /// </summary>
     private static string BuildCanonicalKey(MetricTag[] sortedTags)
     {
         if (sortedTags.Length == 0) return string.Empty;
@@ -230,7 +261,9 @@ public static class PrometheusFormatter
         for (var i = 0; i < sortedTags.Length; i++)
         {
             if (i > 0) sb.Append(',');
-            sb.Append(sortedTags[i].Key).Append('=').Append(sortedTags[i].Value);
+            var tag = sortedTags[i];
+            sb.Append(tag.Key.Length).Append(':').Append(tag.Key)
+              .Append(tag.Value.Length).Append(':').Append(tag.Value);
         }
         return sb.ToString();
     }

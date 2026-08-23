@@ -23,7 +23,7 @@ public sealed class LoomMetricsStoreAdapter : IMetricStore
         LoomMetrics.QueryMetrics(metricName, TimeSpan.FromHours(1))
             .Where(r => r.TimestampUtcTicks >= timestampUtcTicks).ToArray();
 
-    public MetricRecord[] ReadAll(int limit = 1000) => LoomMetrics.GetRecentMetrics(limit);
+    public MetricRecord[] ReadAll(int limit = 1000) => ReadRecent(limit);
 
     public IReadOnlyCollection<string> GetMetricNames() => GetStaticBuffers().Keys.ToList();
 

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
+using Loom.Telemetry.Alerting.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 

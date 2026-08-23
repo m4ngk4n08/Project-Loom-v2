@@ -1,4 +1,5 @@
 using System;
+using Loom.Telemetry.Interfaces;
 
 namespace Loom.Telemetry;
 

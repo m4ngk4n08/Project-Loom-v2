@@ -5,6 +5,7 @@ using Loom.Web.RealTime;
 using Loom.Storage;
 using Loom.Telemetry.Query;
 using Loom.Telemetry.Alerting;
+using Loom.Telemetry.Alerting.Interfaces;
 using Loom.Telemetry.Exporters;
 using Loom.Telemetry.Exporters.Prometheus;
 using System.Diagnostics;

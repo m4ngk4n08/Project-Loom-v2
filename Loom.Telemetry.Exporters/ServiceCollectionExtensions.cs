@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
+using Loom.Telemetry.Exporters.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Loom.Telemetry.Exporters;

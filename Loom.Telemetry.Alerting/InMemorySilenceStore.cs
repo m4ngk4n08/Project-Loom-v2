@@ -1,13 +1,7 @@
 using System.Collections.Concurrent;
+using Loom.Telemetry.Alerting.Interfaces;
 
 namespace Loom.Telemetry.Alerting;
-
-public interface ISilenceStore
-{
-    void Silence(string alertName, DateTime until);
-    bool IsSilenced(string alertName);
-    DateTime? GetSilencedUntil(string alertName);
-}
 
 public sealed class InMemorySilenceStore : ISilenceStore
 {

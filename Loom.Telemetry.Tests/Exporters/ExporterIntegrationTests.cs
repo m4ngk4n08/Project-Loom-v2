@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 using Loom.Storage;
 using Loom.Telemetry.Exporters;
+using Loom.Telemetry.Exporters.Interfaces;
 using Xunit;
 
 namespace Loom.Telemetry.Tests.Exporters;

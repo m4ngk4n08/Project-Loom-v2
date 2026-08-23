@@ -1,12 +1,8 @@
+using Loom.Telemetry.Alerting.Interfaces;
 using Loom.Web.Contracts;
 using System.Net.Http.Json;
 
 namespace Loom.Telemetry.Alerting;
-
-public interface IAlertTarget
-{
-    Task NotifyAsync(AlertNotification notification, CancellationToken ct);
-}
 
 public sealed class WebhookAlertTarget(HttpClient httpClient, string webhookUrl) : IAlertTarget
 {
@@ -43,5 +39,3 @@ public sealed class ConsoleAlertTarget : IAlertTarget
         return Task.CompletedTask;
     }
 }
-
-public interface IEmailSender { Task SendAsync(string to, string subject, string body, CancellationToken ct); }

@@ -1,6 +1,6 @@
 using System;
 
-namespace Loom.Telemetry;
+namespace Loom.Telemetry.Interfaces;
 
 /// <summary>
 /// Interface for sampling rules that determine whether a metric should be recorded.

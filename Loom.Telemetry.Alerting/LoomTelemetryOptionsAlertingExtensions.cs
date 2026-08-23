@@ -1,4 +1,5 @@
 using Loom.Telemetry;
+using Loom.Telemetry.Alerting.Interfaces;
 
 namespace Loom.Telemetry.Alerting;
 

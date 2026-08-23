@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Loom.Telemetry.Alerting.Interfaces;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 

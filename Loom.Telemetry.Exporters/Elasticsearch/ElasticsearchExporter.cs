@@ -1,4 +1,5 @@
 using System.Text;
+using Loom.Telemetry.Exporters.Interfaces;
 
 namespace Loom.Telemetry.Exporters.Elasticsearch;
 

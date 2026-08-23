@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Loom.Telemetry.Alerting;
+using Loom.Telemetry.Alerting.Interfaces;
 using Xunit;
 
 namespace Loom.Telemetry.Tests.Alerting;

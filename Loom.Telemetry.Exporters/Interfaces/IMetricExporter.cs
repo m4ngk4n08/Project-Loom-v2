@@ -1,4 +1,6 @@
-namespace Loom.Telemetry.Exporters;
+using Loom.Telemetry.Exporters;
+
+namespace Loom.Telemetry.Exporters.Interfaces;
 
 /// <summary>
 /// Interface for metric exporters that push or expose metrics to external systems.

@@ -50,7 +50,18 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
         return buffer.ReadRecent(count);
     }
 
-    public MetricRecord[] ReadRecent(int count)
+    public MetricRecord[] ReadRecent(int count) => ReadRecentAcrossBuffers(count);
+
+    public MetricRecord[] ReadSince(string metricName, long timestampUtcTicks)
+    {
+        if (!_buffers.TryGetValue(metricName, out var buffer))
+            return Array.Empty<MetricRecord>();
+        return buffer.ReadSince(timestampUtcTicks);
+    }
+
+    public MetricRecord[] ReadAll(int limit = 1000) => ReadRecentAcrossBuffers(limit);
+
+    private MetricRecord[] ReadRecentAcrossBuffers(int count)
     {
         var allRecords = new List<MetricRecord>();
         foreach (var buffer in _buffers.Values)
@@ -60,26 +71,6 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
         return allRecords
             .OrderByDescending(r => r.TimestampUtcTicks)
             .Take(count)
-            .ToArray();
-    }
-
-    public MetricRecord[] ReadSince(string metricName, long timestampUtcTicks)
-    {
-        if (!_buffers.TryGetValue(metricName, out var buffer))
-            return Array.Empty<MetricRecord>();
-        return buffer.ReadSince(timestampUtcTicks);
-    }
-
-    public MetricRecord[] ReadAll(int limit = 1000)
-    {
-        var allRecords = new List<MetricRecord>();
-        foreach (var buffer in _buffers.Values)
-        {
-            allRecords.AddRange(buffer.ReadRecent(limit));
-        }
-        return allRecords
-            .OrderByDescending(r => r.TimestampUtcTicks)
-            .Take(limit)
             .ToArray();
     }
 

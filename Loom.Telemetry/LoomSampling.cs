@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using Loom.Telemetry.Interfaces;
 using Loom.Telemetry.Sampling;
 
 namespace Loom.Telemetry;

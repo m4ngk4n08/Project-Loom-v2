@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Loom.Telemetry.Interfaces;
 
 namespace Loom.Telemetry.Sampling;
 

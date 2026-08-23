@@ -1,3 +1,4 @@
+using Loom.Telemetry.Exporters.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace Loom.Telemetry.Exporters.Console;

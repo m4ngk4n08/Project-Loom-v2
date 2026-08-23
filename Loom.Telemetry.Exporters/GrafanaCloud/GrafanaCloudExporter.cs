@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Loom.Telemetry.Exporters.Interfaces;
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 

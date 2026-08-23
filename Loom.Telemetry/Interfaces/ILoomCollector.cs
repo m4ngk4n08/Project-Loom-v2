@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Loom.Telemetry;
+namespace Loom.Telemetry.Interfaces;
 
 /// <summary>
 /// Plugin interface for custom metric collectors.

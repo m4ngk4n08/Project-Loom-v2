@@ -229,32 +229,15 @@ this is specifically about the endpoint's own clamping wrapper)
 
 ## 4. Code Quality & Maintainability
 
-### 4.1 LINQ in PrometheusFormatter Cold Path 🟢 LOW
+### 4.1 LINQ in PrometheusFormatter Cold Path 🟢 LOW (COMPLETED)
 
-**Issue:** `PrometheusFormatter.cs` uses LINQ in formatting logic
+**Issue:** `PrometheusFormatter.cs` was claimed to use LINQ in formatting logic
 
-**Location:** Lines 47-52
-```csharp
-var values = snapshot.Select(s => s.Value).ToArray();
-var sorted = values.OrderBy(v => v).ToArray();
-```
+**Status:** ✅ **RESOLVED** - stale by the time this was checked. `PrometheusFormatter.cs`
+was rewritten (see § 4.3) between when this entry was filed and now; it contains zero
+LINQ. There was nothing to fold this into by the time § 4.3's fix landed.
 
-**Impact:**
-- Allocations during Prometheus scraping (2.4 MB per scrape)
-- Acceptable for cold path (scrapes every 15-60 seconds)
-- Not performance-critical
-
-**Proposed Fix (Optional):**
-```csharp
-// Replace LINQ with for loops
-Span<double> values = stackalloc double[snapshot.Length];
-for (int i = 0; i < snapshot.Length; i++)
-    values[i] = snapshot[i].Value;
-values.Sort(); // In-place sort
-```
-
-**Effort:** 1-2 hours  
-**Priority:** 🟢 LOW (cold path, not worth optimizing yet)
+**No further action needed.**
 
 ---
 
@@ -272,34 +255,81 @@ values.Sort(); // In-place sort
 
 ---
 
-### 4.3 PrometheusFormatter Emits Invalid Prometheus Output 🟡 MEDIUM
+### 4.3 PrometheusFormatter Emits Invalid Prometheus Output 🟡 MEDIUM (COMPLETED)
 
-**Issue:** `PrometheusFormatter` produces output that violates the OpenMetrics/Prometheus
-exposition format in three ways:
+**Issue:** `PrometheusFormatter` produced output that violated the Prometheus text
+exposition format (0.0.4) in three ways:
 
-1. **Line endings:** `NewLineBytes` is built from `Environment.NewLine`, which is
-   CRLF on Windows. The exposition format requires LF-only line endings; a scraper
-   fed CRLF output can fail to parse it depending on the client library.
-2. **Tags dropped:** `MetricRecord.Tags` are never written as Prometheus labels.
-   Every series with distinct tag values collapses into a single untagged line —
-   dimensional data (e.g. per-route, per-status-code breakdowns) is silently lost on
-   export.
-3. **Counters aren't cumulative:** for `MetricType.Counter`, the formatter emits
-   `snapshot[0].Value` — the single most recent recorded value — rather than a
-   running total. Prometheus counters are defined as monotonically increasing
-   cumulative totals; PromQL's `rate()`/`increase()` over this output is meaningless
-   because the exposed number isn't a counter in the Prometheus sense at all.
+1. **Line endings:** `NewLineBytes` was built from `Environment.NewLine`, which is
+   CRLF on Windows. The exposition format requires LF-only line endings.
+2. **Tags dropped:** `MetricRecord.Tags` were never written as Prometheus labels.
+   Every series with distinct tag values collapsed into a single untagged line.
+3. **Counters weren't cumulative:** for `MetricType.Counter`, the formatter emitted
+   the single most recent recorded value rather than a running total.
 
-**Context:** `PrometheusFormatterEquivalenceTests` currently pins today's (incorrect)
-behavior — CRLF, no labels, latest-value-as-counter — so fixing this changes that test
-file too, not just `PrometheusFormatter.cs`.
+**Status:** ✅ **RESOLVED**
 
-**Cross-reference:** § 4.1 (LINQ in the same file's histogram/summary path) touches
-the same file and should be folded into this same pass rather than done separately.
+**Fix:**
+- Line endings hardcoded to `"\n"u8`; the stale `NewLineBytes`/`Environment.NewLine`
+  field is gone.
+- Records are now read via `MetricBuffer.TryReadRecent` into a pooled
+  `MetricRecord[]` (not `Snapshot()`, which discards `Tags`), grouped by a canonical
+  tag-set key (tags sorted by key ordinal, so `{a,b}` and `{b,a}` merge into one
+  series), and emitted as `name{k="v",...} value` with label names sanitized the
+  same way metric names are and label values escaped per spec
+  (`\` → `\\`, `"` → `\"`, newline → `\n`). A series with no tags emits no braces.
+- Counters now sum every retained record in their label-set group instead of using
+  the newest one; gauges keep newest-value semantics. Histogram/summary `_count`,
+  `_sum`, and quantile lines are computed per label set, with quantile merged into
+  the same brace group as any user labels (`name{env="prod",quantile="0.5"}`).
+- `# HELP` now precedes `# TYPE` (both still once per metric name). The class doc
+  comment no longer calls this an OpenMetrics formatter — it targets the Prometheus
+  text exposition format 0.0.4 specifically, which the `/prometheus` endpoint's
+  content type already declared; no trailing `# EOF` is emitted.
+- `PrometheusFormatterEquivalenceTests` goldens updated from `\r\n` to `\n` (the
+  format requires LF regardless of host OS - these were never meaningfully
+  OS-dependent captures), plus new coverage for multi-series grouping, tag-order
+  merging, cumulative counters, label escaping, and merged summary+label output.
 
-**Effort:** 3-5 hours (three behavior changes + updating the pinned equivalence tests)  
-**Priority:** 🟡 MEDIUM (exported metrics are currently misleading, not just
-inefficient)
+**Known limitation kept (not fixed here):** counters are still summed from the
+*retained* records in a bounded ring buffer (8192 by default). Once a counter's
+buffer wraps, older increments are gone and the reported total stops growing even
+though the real cumulative count keeps increasing. See DEBT-016 below.
+
+**Cross-reference:** § 4.1 (LINQ in this file) was checked while fixing this and
+found to already be stale — the file had been rewritten with zero LINQ before this
+fix landed, so there was nothing to fold in.
+
+**No further action needed** (beyond DEBT-016, tracked separately).
+
+---
+
+### 4.4 Prometheus Counters Stop Growing Once Their Buffer Wraps 🟡 MEDIUM
+
+**Issue:** `PrometheusFormatter` (§ 4.3) computes a counter's exported total by
+summing every `MetricRecord` currently retained in that metric's `MetricBuffer`.
+`MetricBuffer` is a bounded ring buffer (8192 records by default) — once a
+high-frequency counter's buffer wraps, the oldest increments are overwritten and
+no longer part of the sum. From that point on, the exported total only reflects the
+records still retained, not the true lifetime cumulative count; it can even appear
+to shrink relative to a scrape taken before the wrap, which PromQL's
+`rate()`/`increase()` will read as a counter reset.
+
+**Root Cause:** The buffer is a recency window designed for the dashboard's "recent
+values" queries, not an accumulator. Deriving a Prometheus counter total from it
+conflates two different jobs.
+
+**Proposed Fix:** A monotonic accumulator maintained by the metric store itself
+(e.g. a running `double`/`long` total updated atomically on every `RecordCounter`
+call for a given name+tag-set), independent of what the ring buffer currently
+retains. The formatter would read that accumulator instead of summing buffer
+contents.
+
+**Effort:** 4-6 hours (store-level accumulator keyed by name+tag-set, plus updating
+the formatter to read it and updating the § 4.3 tests that assert sum-of-retained
+behavior)  
+**Priority:** 🟡 MEDIUM (only manifests under sustained high-frequency counter
+usage that outlives the buffer window - low severity today, but silently wrong)
 
 ---
 
@@ -572,22 +602,21 @@ items this document ever tracked, are both completed.
 ### Medium Priority (Post-1.0)
 1. 🟡 Binary size documentation (§ 5.1) - 30 minutes
 2. 🟡 Test reset automation (§ 6.1) - 4-6 hours
-3. 🟡 PrometheusFormatter emits invalid Prometheus output (§ 4.3) - 3-5 hours
-4. 🟡 Alerting has no resolution notifications (§ 6.5) - 4-8 hours
+3. 🟡 Alerting has no resolution notifications (§ 6.5) - 4-8 hours
+4. 🟡 Prometheus counters stop growing once their buffer wraps (§ 4.4) - 4-6 hours
 
-**Total Medium Priority Work:** ~12-20 hours
+**Total Medium Priority Work:** ~13-21 hours
 
 ---
 
 ### Low Priority (Backlog)
-1. 🟢 PrometheusFormatter LINQ (§ 4.1) - 1-2 hours (fold into § 4.3's pass over the same file)
-2. 🟢 Search endpoint decision (§ 3.2) - 1 hour (decision only)
-3. 🟢 Benchmark suite (§ 6.3) - 8-12 hours
-4. 🟢 Deferred log-capture design questions (§ 6.4) - 1-2 hours (decisions only, blocked)
-5. 🟢 No test coverage for `/api/logs/tail` clamping (§ 1.4) - 1-2 hours
-6. 🟢 Alerting README documents a call that throws (§ 5.3) - 15 min - 2 hours
+1. 🟢 Search endpoint decision (§ 3.2) - 1 hour (decision only)
+2. 🟢 Benchmark suite (§ 6.3) - 8-12 hours
+3. 🟢 Deferred log-capture design questions (§ 6.4) - 1-2 hours (decisions only, blocked)
+4. 🟢 No test coverage for `/api/logs/tail` clamping (§ 1.4) - 1-2 hours
+5. 🟢 Alerting README documents a call that throws (§ 5.3) - 15 min - 2 hours
 
-**Total Low Priority Work:** ~12-19 hours (§ 6.4 excluded - blocked on dependencies)
+**Total Low Priority Work:** ~11-18 hours (§ 6.4 excluded - blocked on dependencies)
 
 ---
 
@@ -599,17 +628,18 @@ items this document ever tracked, are both completed.
 | ~~DEBT-002~~ | ~~Flaky timer tests~~ | ~~🟡 MEDIUM~~ | ~~4-6h~~ | ✅ Completed | - | § 1.2 |
 | DEBT-003 | Binary size docs | 🟡 MEDIUM | 30m | Open | - | Phase 13 |
 | DEBT-004 | Test automation | 🟡 MEDIUM | 4-6h | Open | - | Post-1.0 |
-| DEBT-005 | LINQ optimization | 🟢 LOW | 1-2h | Open | - | Fold into DEBT-012 |
+| ~~DEBT-005~~ | ~~LINQ optimization~~ | ~~🟢 LOW~~ | ~~1-2h~~ | ✅ Completed (stale) | - | § 4.1 |
 | DEBT-006 | Search endpoint | 🟢 LOW | 1h | Open | - | Backlog |
 | ~~DEBT-007~~ | ~~Parallel tests~~ | ~~🟢 LOW~~ | ~~30m~~ | ❌ Rejected | - | See § 6.2, § 9 |
 | DEBT-008 | Benchmarks | 🟢 LOW | 8-12h | Open | - | Backlog |
 | ~~DEBT-009~~ | ~~Ingest endpoint~~ | ~~🔴 HIGH~~ | ~~4h~~ | ✅ Completed | - | Phase 12 |
 | ~~DEBT-010~~ | ~~Anonymous type~~ | ~~🟢 LOW~~ | ~~5m~~ | ✅ Completed | - | Phase 12 |
 | DEBT-011 | Log-capture deferrals | 🟢 LOW | 1-2h | Deferred | - | See § 6.4 triggers |
-| DEBT-012 | PrometheusFormatter invalid output | 🟡 MEDIUM | 3-5h | Open | - | Backlog |
+| ~~DEBT-012~~ | ~~PrometheusFormatter invalid output~~ | ~~🟡 MEDIUM~~ | ~~3-5h~~ | ✅ Completed | - | § 4.3 |
 | DEBT-013 | `/api/logs/tail` test coverage | 🟢 LOW | 1-2h | Open | - | Backlog |
 | DEBT-014 | Alerting README broken example | 🟢 LOW | 15m-2h | Open | - | Backlog |
 | DEBT-015 | Alerting resolution notifications | 🟡 MEDIUM | 4-8h | Open | - | Backlog |
+| DEBT-016 | Prometheus counters stop growing past buffer wrap | 🟡 MEDIUM | 4-6h | Open | - | Backlog |
 
 ---
 

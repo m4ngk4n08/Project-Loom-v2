@@ -6,107 +6,134 @@ using Loom.Storage;
 namespace Loom.Telemetry.Exporters.Prometheus;
 
 /// <summary>
-/// Hand-written OpenMetrics text formatter for Prometheus scraping.
+/// Hand-written formatter for the Prometheus text exposition format (version 0.0.4).
 /// Zero reflection. Writes UTF-8 directly into an IBufferWriter&lt;byte&gt; - no
-/// StringBuilder, no per-metric string allocation, no LINQ.
+/// StringBuilder for the wire output, no per-metric string allocation, no LINQ.
+/// This is NOT OpenMetrics: OpenMetrics requires a trailing "# EOF" marker and a
+/// different content type. The /prometheus endpoint serves
+/// "text/plain; version=0.0.4", so no "# EOF" is emitted here - adding one would
+/// break clients expecting 0.0.4.
 /// </summary>
 public static class PrometheusFormatter
 {
     /// <summary>
-    /// Format all metrics from the store as OpenMetrics text, writing UTF-8 directly
-    /// into <paramref name="writer"/> (e.g. an HTTP response's PipeWriter).
+    /// Format all metrics from the store as Prometheus text exposition format,
+    /// writing UTF-8 directly into <paramref name="writer"/> (e.g. an HTTP response's
+    /// PipeWriter).
     /// </summary>
     public static void Format(IMetricStore store, IBufferWriter<byte> writer)
     {
         var buffers = store.GetBuffers();
-        // MetricRecord holds reference fields (Tags, ExceptionType), so it can't be
-        // stackalloc'd - rent one scratch slot for the whole call instead of once per
-        // metric name.
-        var typePeekBuffer = new MetricRecord[1];
 
         foreach (var (metricName, buffer) in buffers)
         {
-            var snapshot = buffer.Snapshot();
-            if (snapshot.Length == 0) continue;
-
-            // Determine metric type from buffer content.
-            if (buffer.TryReadRecent(typePeekBuffer) == 0) continue;
-
-            var metricType = typePeekBuffer[0].Type;
-            var prometheusType = MapToPrometheusTypeUtf8(metricType);
-
-            WriteUtf8(writer, "# TYPE "u8);
-            WriteSanitizedName(writer, metricName);
-            WriteUtf8(writer, " "u8);
-            WriteUtf8(writer, prometheusType);
-            WriteNewLine(writer);
-
-            WriteUtf8(writer, "# HELP "u8);
-            WriteSanitizedName(writer, metricName);
-            WriteUtf8(writer, " Loom telemetry metric"u8);
-            WriteNewLine(writer);
-
-            // For counter/gauge: output most recent value.
-            if (metricType is MetricType.Counter or MetricType.Gauge)
+            var capacity = buffer.Capacity;
+            // MetricRecord holds reference fields (Tags, ExceptionType), so it can't be
+            // stackalloc'd - rent one scratch array sized to the buffer's capacity and
+            // read every currently-retained record in one call.
+            var rented = ArrayPool<MetricRecord>.Shared.Rent(capacity);
+            try
             {
-                // Snapshot() returns newest-first, so [0] is the most recent record.
-                var latest = snapshot[0];
+                var recordCount = buffer.TryReadRecent(rented.AsSpan(0, capacity));
+                if (recordCount == 0) continue;
+
+                // Newest-first, per TryReadRecent's contract.
+                var records = rented.AsSpan(0, recordCount);
+                var metricType = records[0].Type;
+                var prometheusType = MapToPrometheusTypeUtf8(metricType);
+
+                // HELP before TYPE - the conventional Prometheus exposition order. Both
+                // are emitted once per metric NAME, not per label-set series.
+                WriteUtf8(writer, "# HELP "u8);
+                WriteSanitizedName(writer, metricName);
+                WriteUtf8(writer, " Loom telemetry metric"u8);
+                WriteNewLine(writer);
+
+                WriteUtf8(writer, "# TYPE "u8);
                 WriteSanitizedName(writer, metricName);
                 WriteUtf8(writer, " "u8);
-                WriteF2(writer, latest.Value);
+                WriteUtf8(writer, prometheusType);
+                WriteNewLine(writer);
+
+                var groups = GroupByLabelSet(records);
+                var orderedKeys = new List<string>(groups.Keys);
+                orderedKeys.Sort(StringComparer.Ordinal);
+
+                if (metricType is MetricType.Counter or MetricType.Gauge)
+                {
+                    foreach (var key in orderedKeys)
+                    {
+                        var group = groups[key];
+                        // Counters are cumulative totals: RecordCounter writes each call
+                        // as an increment, so the series total is the sum of every
+                        // retained record - not the most recent one. Gauges are
+                        // point-in-time, so they keep the newest record's value (the
+                        // first one seen while scanning newest-first).
+                        var value = metricType == MetricType.Counter ? group.Sum : group.NewestValue;
+
+                        WriteSanitizedName(writer, metricName);
+                        WriteLabels(writer, group.SortedTags, quantile: default);
+                        WriteUtf8(writer, " "u8);
+                        WriteF2(writer, value);
+                        WriteNewLine(writer);
+                    }
+                }
+                else
+                {
+                    // Histogram / MethodExecution: summary statistics per label set.
+                    foreach (var key in orderedKeys)
+                    {
+                        var group = groups[key];
+                        var values = group.Values;
+                        values.Sort();
+                        var count = values.Count;
+                        var p50 = values[count / 2];
+                        var p95 = values[(int)(count * 0.95)];
+                        var p99 = values[(int)(count * 0.99)];
+
+                        WriteSanitizedName(writer, metricName);
+                        WriteUtf8(writer, "_count"u8);
+                        WriteLabels(writer, group.SortedTags, quantile: default);
+                        WriteUtf8(writer, " "u8);
+                        WriteLong(writer, count);
+                        WriteNewLine(writer);
+
+                        WriteSanitizedName(writer, metricName);
+                        WriteUtf8(writer, "_sum"u8);
+                        WriteLabels(writer, group.SortedTags, quantile: default);
+                        WriteUtf8(writer, " "u8);
+                        WriteF2(writer, group.Sum);
+                        WriteNewLine(writer);
+
+                        WriteSanitizedName(writer, metricName);
+                        WriteLabels(writer, group.SortedTags, "0.5"u8);
+                        WriteUtf8(writer, " "u8);
+                        WriteF2(writer, p50);
+                        WriteNewLine(writer);
+
+                        WriteSanitizedName(writer, metricName);
+                        WriteLabels(writer, group.SortedTags, "0.95"u8);
+                        WriteUtf8(writer, " "u8);
+                        WriteF2(writer, p95);
+                        WriteNewLine(writer);
+
+                        WriteSanitizedName(writer, metricName);
+                        WriteLabels(writer, group.SortedTags, "0.99"u8);
+                        WriteUtf8(writer, " "u8);
+                        WriteF2(writer, p99);
+                        WriteNewLine(writer);
+                    }
+                }
+
                 WriteNewLine(writer);
             }
-            // For histogram/method execution: output summary statistics.
-            else
+            finally
             {
-                var count = snapshot.Length;
-                var scratch = ArrayPool<double>.Shared.Rent(count);
-                try
-                {
-                    var values = scratch.AsSpan(0, count);
-                    double sum = 0;
-                    for (var i = 0; i < count; i++)
-                    {
-                        values[i] = snapshot[i].Value;
-                        sum += snapshot[i].Value;
-                    }
-                    values.Sort();
-                    var p50 = values[count / 2];
-                    var p95 = values[(int)(count * 0.95)];
-                    var p99 = values[(int)(count * 0.99)];
-
-                    WriteSanitizedName(writer, metricName);
-                    WriteUtf8(writer, "_count "u8);
-                    WriteLong(writer, count);
-                    WriteNewLine(writer);
-
-                    WriteSanitizedName(writer, metricName);
-                    WriteUtf8(writer, "_sum "u8);
-                    WriteF2(writer, sum);
-                    WriteNewLine(writer);
-
-                    WriteSanitizedName(writer, metricName);
-                    WriteUtf8(writer, "{quantile=\"0.5\"} "u8);
-                    WriteF2(writer, p50);
-                    WriteNewLine(writer);
-
-                    WriteSanitizedName(writer, metricName);
-                    WriteUtf8(writer, "{quantile=\"0.95\"} "u8);
-                    WriteF2(writer, p95);
-                    WriteNewLine(writer);
-
-                    WriteSanitizedName(writer, metricName);
-                    WriteUtf8(writer, "{quantile=\"0.99\"} "u8);
-                    WriteF2(writer, p99);
-                    WriteNewLine(writer);
-                }
-                finally
-                {
-                    ArrayPool<double>.Shared.Return(scratch);
-                }
+                // clearArray: true - MetricRecord holds string references (Name isn't
+                // ours to worry about here, but Tags/ExceptionType are), so a pooled
+                // array left dirty would keep them alive until the pool reuses the slot.
+                ArrayPool<MetricRecord>.Shared.Return(rented, clearArray: true);
             }
-
-            WriteNewLine(writer);
         }
     }
 
@@ -129,9 +156,138 @@ public static class PrometheusFormatter
         }
     }
 
-    private static readonly byte[] NewLineBytes = Encoding.UTF8.GetBytes(Environment.NewLine);
+    /// <summary>
+    /// One label-set series within a metric name: every retained record sharing the
+    /// same tags (compared by key, ignoring declaration order).
+    /// </summary>
+    private sealed class LabelGroup
+    {
+        public required MetricTag[] SortedTags { get; init; }
 
-    private static void WriteNewLine(IBufferWriter<byte> writer) => WriteUtf8(writer, NewLineBytes);
+        /// <summary>Sum of every retained record's value - the counter total, and
+        /// reused as the histogram's _sum (both are "sum of every value in the
+        /// group").</summary>
+        public double Sum;
+
+        /// <summary>First record's value seen while scanning newest-first - the gauge's
+        /// current value.</summary>
+        public double NewestValue;
+
+        /// <summary>Every retained record's value - used for histogram/summary count
+        /// and quantiles.</summary>
+        public List<double> Values { get; } = [];
+    }
+
+    /// <summary>
+    /// Groups records (newest-first) into one LabelGroup per distinct tag set. Tag
+    /// sets are compared by (key, value) pairs sorted by key ordinal, so {a,b} and
+    /// {b,a} land in the same group.
+    /// KNOWN LIMITATION: the ring buffer is bounded (8192 records by default), so once
+    /// a counter's buffer wraps, only the retained records are summed and the reported
+    /// total stops growing even though the real cumulative count keeps increasing. A
+    /// correct fix needs a monotonic accumulator maintained by the store itself rather
+    /// than derived from buffer contents - see BACKLOG.md § 4.
+    /// </summary>
+    private static Dictionary<string, LabelGroup> GroupByLabelSet(ReadOnlySpan<MetricRecord> records)
+    {
+        var groups = new Dictionary<string, LabelGroup>(StringComparer.Ordinal);
+
+        foreach (var record in records)
+        {
+            var sortedTags = SortTags(record.Tags);
+            var key = BuildCanonicalKey(sortedTags);
+
+            if (!groups.TryGetValue(key, out var group))
+            {
+                group = new LabelGroup { SortedTags = sortedTags };
+                groups[key] = group;
+            }
+
+            group.Sum += record.Value;
+            group.Values.Add(record.Value);
+            if (group.Values.Count == 1)
+                group.NewestValue = record.Value;
+        }
+
+        return groups;
+    }
+
+    private static MetricTag[] SortTags(MetricTag[]? tags)
+    {
+        if (tags is null || tags.Length == 0)
+            return [];
+
+        var sorted = (MetricTag[])tags.Clone();
+        Array.Sort(sorted, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
+        return sorted;
+    }
+
+    private static string BuildCanonicalKey(MetricTag[] sortedTags)
+    {
+        if (sortedTags.Length == 0) return string.Empty;
+
+        var sb = new StringBuilder();
+        for (var i = 0; i < sortedTags.Length; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(sortedTags[i].Key).Append('=').Append(sortedTags[i].Value);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Writes a label brace group: {k1="v1",k2="v2",quantile="0.X"}. Omits the braces
+    /// entirely when there are no tags and no quantile - "name value", not "name{} value".
+    /// </summary>
+    private static void WriteLabels(IBufferWriter<byte> writer, MetricTag[] sortedTags, ReadOnlySpan<byte> quantile)
+    {
+        if (sortedTags.Length == 0 && quantile.IsEmpty)
+            return;
+
+        WriteUtf8(writer, "{"u8);
+        for (var i = 0; i < sortedTags.Length; i++)
+        {
+            if (i > 0) WriteUtf8(writer, ","u8);
+            WriteSanitizedName(writer, sortedTags[i].Key);
+            WriteUtf8(writer, "=\""u8);
+            WriteEscapedLabelValue(writer, sortedTags[i].Value);
+            WriteUtf8(writer, "\""u8);
+        }
+
+        if (!quantile.IsEmpty)
+        {
+            if (sortedTags.Length > 0) WriteUtf8(writer, ","u8);
+            WriteUtf8(writer, "quantile=\""u8);
+            WriteUtf8(writer, quantile);
+            WriteUtf8(writer, "\""u8);
+        }
+
+        WriteUtf8(writer, "}"u8);
+    }
+
+    /// <summary>
+    /// Escapes a label value per the exposition format: backslash -&gt; \\, double-quote
+    /// -&gt; \", newline -&gt; \n. Cold path (label values are rare and short), so this
+    /// builds the escaped string and encodes once rather than writing byte-by-byte.
+    /// Order matters: backslashes are escaped first, so backslashes introduced by the
+    /// quote/newline escapes are never re-escaped.
+    /// </summary>
+    private static void WriteEscapedLabelValue(IBufferWriter<byte> writer, string value)
+    {
+        var escaped = value.IndexOfAny(['\\', '"', '\n']) < 0
+            ? value
+            : value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
+
+        var maxBytes = Encoding.UTF8.GetMaxByteCount(escaped.Length);
+        Span<byte> encoded = maxBytes <= 256 ? stackalloc byte[256] : new byte[maxBytes];
+        var byteCount = Encoding.UTF8.GetBytes(escaped, encoded);
+
+        var dest = writer.GetSpan(byteCount);
+        encoded[..byteCount].CopyTo(dest);
+        writer.Advance(byteCount);
+    }
+
+    private static void WriteNewLine(IBufferWriter<byte> writer) => WriteUtf8(writer, "\n"u8);
 
     private static void WriteUtf8(IBufferWriter<byte> writer, ReadOnlySpan<byte> literal)
     {
@@ -155,8 +311,9 @@ public static class PrometheusFormatter
     }
 
     /// <summary>
-    /// Writes the metric name UTF-8-encoded, with '.' and '-' replaced by '_' -
-    /// transforms bytes in place instead of building an intermediate sanitized string.
+    /// Writes a name (metric name or label key) UTF-8-encoded, with '.' and '-'
+    /// replaced by '_' - transforms bytes in place instead of building an
+    /// intermediate sanitized string.
     /// </summary>
     private static void WriteSanitizedName(IBufferWriter<byte> writer, string name)
     {

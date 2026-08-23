@@ -152,22 +152,22 @@ public sealed class PrometheusFormatterTests : IDisposable
     }
 
     [Fact]
-    public void Format_CounterWithMultipleValues_OutputsMostRecentValue()
+    public void Format_CounterWithMultipleValues_OutputsCumulativeSum()
     {
-        // Arrange
+        // Arrange - RecordCounter writes each call as an increment; the exposed
+        // counter must be the running total (1 + 2 + 5 = 8), not the last increment.
         var metricName = $"test.counter.{Guid.NewGuid()}";
         LoomMetrics.RecordCounter(metricName, 1.0);
         LoomMetrics.RecordCounter(metricName, 2.0);
-        LoomMetrics.RecordCounter(metricName, 5.0);  // Most recent
+        LoomMetrics.RecordCounter(metricName, 5.0);
 
         // Act
         var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
 
-        // Assert - should contain the most recent value
+        // Assert
         var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
         Assert.Contains(sanitizedName, result);
-        // The exact value might vary due to formatting, but it should be close to 5
-        Assert.Contains("5", result);
+        Assert.Contains($"{sanitizedName} 8.00", result);
     }
 
     [Fact]

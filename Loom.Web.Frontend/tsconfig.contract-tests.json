@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/contract-tests",
+    "types": []
+  },
+  "include": [
+    "src/contract-tests/**/*.ts"
+  ]
+}

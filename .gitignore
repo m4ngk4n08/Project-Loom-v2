@@ -38,10 +38,16 @@ out-tsc/
 .vite/
 
 # ============================================================
-# Markdown files (excluded, except README.md)
+# Markdown files (excluded, except a few authoritative docs)
 # ============================================================
 *.md
 !README.md
+!SMOKE-TEST.md
+!CLAUDE.md
+!IMPLEMENTATION-METHODOLOGY.md
+!wiggly-noodling-hoare.md
+!BACKLOG.md
+!TESTING.md
 
 # ============================================================
 # Environment / secrets

@@ -269,7 +269,7 @@ Loom.slnx                      (12 projects)
 │                                stores, ILoggerProvider capture.
 ├── Loom.Telemetry.Query/      → SQL-like query language (tokenizer/parser/executor).
 ├── Loom.Telemetry.Alerting/   → Alert rules, evaluation, dispatch, targets.
-├── Loom.Telemetry.Exporters/  → Console/Elasticsearch/GrafanaCloud + Prometheus formatter.
+├── Loom.Telemetry.Exporters/  → Console exporter + Prometheus formatter.
 ├── Loom.Web.RealTime/         → WebSocket handlers (zero-allocation).
 ├── Loom.Web.Api/              → ASP.NET Core Minimal APIs. **The Native AOT
 │                                publish target** (PublishAot/PublishTrimmed/

@@ -15,7 +15,7 @@ Loom is not just a profiler. It's a **telemetry platform** you embed into .NET a
 - **Custom Collectors** — `ILoomCollector` plugin interface for third-party integrations (Redis, RabbitMQ, etc.)
 - **Query Language** — SQL-like telemetry queries + fluent code-based `Query()` API
 - **Alerting** — `AddAlert()` with window-based conditions, webhook/email notifications
-- **Exporters** — Prometheus, Grafana Cloud, Elasticsearch, Console interoperability
+- **Exporters** — Prometheus, Console interoperability
 - **Source Generator** — zero-allocation instrumentation resolved entirely at compile time (no reflection)
 - **Sampling** — configuration-driven sampling rules (path-based, duration-based)
 - **Local Dev Mode** — `dotnet loom dev` for zero-config live metrics during development
@@ -70,7 +70,7 @@ Loom.slnx
 ├── Loom.Telemetry.Generators/     → C# source generator ([LoomProfile] → instrumented code)
 ├── Loom.Telemetry.Query/          → Query engine (SQL-like tokenizer/parser/planner/executor)
 ├── Loom.Telemetry.Alerting/       → Alert rules, window conditions, notification dispatch
-├── Loom.Telemetry.Exporters/      → Prometheus, Grafana Cloud, Elasticsearch, Console
+├── Loom.Telemetry.Exporters/      → Prometheus, Console
 ├── Loom.DevTools/                 → `dotnet loom dev` CLI tool (local dev mode)
 ├── Loom.Telemetry.Tests/          → Unit & integration tests
 └── Loom.Dashboard/                → `loom-dashboard <pid>` dev-time CLI tool; embeds the Angular dashboard, attaches to a target process via EventPipe
@@ -266,7 +266,7 @@ dotnet-counters monitor --process-id $(pidof Loom.Web.Api) System.Runtime
 | 9 | Configuration-Driven Sampling | ✅ Complete | `Loom.Telemetry/LoomSampling.cs`, `SamplingTests.cs` |
 | 10 | Query Language | ✅ Complete | `Loom.Telemetry.Query/` (Tokenizer, Parser, Ast, Planner, Executor) + 4 test files |
 | 11 | Alerting/Thresholds | ✅ Complete | `Loom.Telemetry.Alerting/` + `Alerting/` tests + `PHASE-11-COMPLETE.md` |
-| 12 | Exporters | ✅ Complete | Prometheus, Grafana Cloud, Elasticsearch, Console |
+| 12 | Exporters | ✅ Complete | Prometheus, Console. Grafana Cloud and Elasticsearch were removed as non-functional dead code — see BACKLOG.md § 9 |
 | 13 | Local Development Mode | ✅ Complete | `dotnet loom dev` — `Loom.DevTools/Commands/DevCommand.cs` |
 
 ### Production Hardening
@@ -319,7 +319,6 @@ All DTO types used by the 9 telemetry systems must be registered at compile time
 
 ### Exporters (Phase 12)
 - `ExporterStatusDto`, `MetricSummaryDto`
-- `GrafanaMetricPayload`, `GrafanaMetricSeries`, `GrafanaDataPoint`
 
 ### Dev Mode (Phase 13)
 - `DevModeStatusDto`, `DiscoveredAppDto`

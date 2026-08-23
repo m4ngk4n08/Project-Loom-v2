@@ -118,10 +118,8 @@ All tests follow xUnit conventions and existing Loom test patterns:
 | ConsoleExporter | ✅ Dedicated test file |
 | PrometheusFormatter | ✅ Dedicated test file |
 | ServiceCollectionExtensions | ⚠️ Tested via integration (DI registration not unit tested) |
-| GrafanaCloudExporter | ❌ Not tested (requires HttpClient mocking) |
-| ElasticsearchExporter | ❌ Not tested (requires HttpClient mocking) |
 
-**Note:** GrafanaCloud and Elasticsearch exporters would benefit from integration tests against real or containerized instances. Unit testing HTTP exporters requires complex HttpClient mocking which is deferred.
+**Note:** GrafanaCloudExporter and ElasticsearchExporter were removed as non-functional dead code (never registered in any host) — see BACKLOG.md § 9.
 
 ## Verification
 

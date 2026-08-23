@@ -608,7 +608,7 @@ Before committing Phase N:
 - [ ] All endpoints respond correctly
 - [ ] WebSocket streaming works
 - [ ] Query language executes correctly
-- [ ] Exporters functional (Prometheus, Grafana, Elasticsearch, Console)
+- [ ] Exporters functional (Prometheus, Console)
 - [ ] Alerts trigger correctly
 - [ ] No crashes under load
 

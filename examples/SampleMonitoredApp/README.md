@@ -151,8 +151,6 @@ Configure an alert for high failure rates:
 ### Test Exporters
 Run the app and verify metrics appear in:
 - Prometheus scrape endpoint
-- Grafana Cloud (if configured)
-- Elasticsearch (if configured)
 - Console logs
 
 ### Test Sampling
@@ -194,7 +192,7 @@ SampleMonitoredApp
 ✅ Phase 9: Sampling (configurable via appsettings.json)
 ✅ Phase 10: Query Language (via Loom.Web.Api queries)
 ✅ Phase 11: Alerting (configurable thresholds)
-✅ Phase 12: Exporters (Prometheus, Grafana, Elasticsearch, Console)
+✅ Phase 12: Exporters (Prometheus, Console)
 ✅ Phase 13: Local Dev Mode (`loom dev` discovery)
 
 This is the **end-to-end validation** of the entire Loom telemetry platform!

@@ -16,12 +16,17 @@ export interface QueryRow {
   values: QueryValue[];
 }
 
-export type QueryValue =
-  | { text: string }
-  | { number: number }
-  | { boolean: boolean }
-  | { timestamp: string }
-  | { null: null };
+/**
+ * Mirrors Loom.Web.Contracts.Dtos.QueryValue: a flat record where at most one
+ * field is populated. JSON serialization uses WhenWritingNull, so unset fields
+ * are omitted rather than sent as null — a SQL NULL cell therefore arrives as
+ * an empty object `{}`. Callers must handle the no-key case.
+ */
+export interface QueryValue {
+  text?: string;
+  number?: number;
+  timestamp?: string;
+}
 
 @Injectable({
   providedIn: 'root'

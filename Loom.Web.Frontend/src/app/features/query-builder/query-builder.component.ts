@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { QueryService, QueryResponse } from '../../core/services/query.service';
+import { QueryService, QueryResponse, QueryValue } from '../../core/services/query.service';
 import { QueryHistoryService } from '../../core/services/query-history.service';
 import { MetricsExplorerService } from '../../core/services/metrics-explorer.service';
 import { DataTableComponent, TableColumn, TableRow } from '../../shared/data-table/data-table.component';
@@ -953,12 +953,12 @@ export class QueryBuilderComponent implements OnInit {
     this.tableData.set(rows);
   }
 
-  private formatValue(value: any): string {
-    if ('text' in value) return value.text;
-    if ('number' in value) return value.number.toFixed(2);
-    if ('boolean' in value) return value.boolean.toString();
-    if ('timestamp' in value) return new Date(value.timestamp).toLocaleString();
-    if ('null' in value) return '-';
-    return String(value);
+  private formatValue(value: QueryValue | undefined): string {
+    if (!value) return '-';
+    if (value.text !== undefined) return value.text;
+    if (value.number !== undefined) return value.number.toFixed(2);
+    if (value.timestamp !== undefined) return new Date(value.timestamp).toLocaleString();
+    // No populated field: a NULL cell, serialized as `{}` by WhenWritingNull.
+    return '-';
   }
 }

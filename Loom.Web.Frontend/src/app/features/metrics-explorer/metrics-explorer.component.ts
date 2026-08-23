@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MetricsExplorerService, MetricSummary } from '../../core/services/metrics-explorer.service';
+import { QueryValue } from '../../core/services/query.service';
 import { ExplorerPersistenceService } from '../../core/services/explorer-persistence.service';
 import { MetricChartComponent, ChartDataPoint } from '../../shared/metric-chart/metric-chart.component';
 import { ComparisonChartComponent, ComparisonSeries } from '../../shared/comparison-chart/comparison-chart.component';
@@ -748,19 +749,19 @@ export class MetricsExplorerComponent implements OnInit, OnDestroy {
     return unit ? `${formatted} ${unit}` : formatted;
   }
 
-  private extractText(value: any): string {
-    if (value && 'text' in value) return value.text;
+  private extractText(value: QueryValue | undefined): string {
+    if (value && value.text !== undefined) return value.text;
     return String(value ?? '-');
   }
 
-  private extractTimestamp(value: any): string {
-    if (value && 'timestamp' in value) return value.timestamp;
+  private extractTimestamp(value: QueryValue | undefined): string {
+    if (value && value.timestamp !== undefined) return value.timestamp;
     return new Date().toISOString();
   }
 
-  private extractNumber(value: any): number {
-    if (value && 'number' in value) return value.number;
-    if (value && 'text' in value) return parseFloat(value.text);
+  private extractNumber(value: QueryValue | undefined): number {
+    if (value && value.number !== undefined) return value.number;
+    if (value && value.text !== undefined) return parseFloat(value.text);
     return NaN;
   }
 }

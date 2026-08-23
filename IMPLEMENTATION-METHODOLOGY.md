@@ -8,6 +8,29 @@
 
 ---
 
+> ### ⚠️ Structural corrections (2026-08-24)
+>
+> This document is a **build narrative** — it records the plan and the phase-by-phase
+> sequence as authored. The delivered solution diverged from it in three ways. The
+> phase text below is left intact as the historical record; these corrections override
+> it for anything present-tense.
+>
+> 1. **The solution file is `Loom.slnx`**, not `Loom.sln` (§ Phase 0, L195).
+>    `dotnet build/test Loom.sln` fails with `MSBUILD : error MSB1009`.
+> 2. **`Loom.Core` and `Loom.Host` were never built.** Phase 0 creates both directories
+>    (L163, L165) and later phases forward-reference them (L256, L1444, L1477, L1599,
+>    L4828, L4872), but neither project exists. There is no separate bootstrap host:
+>    `Loom.Web.Api` is the Native AOT publish target, and `Loom.Dashboard`
+>    (`loom-dashboard`) and `Loom.DevTools` (`loom`) are the packaged dotnet tools.
+>    The Phase 7 "integrate with `Loom.Core` SIMD engine" work never happened.
+> 3. **`Loom.Storage` is in-memory only** — no memory-mapped binary cache, no RAG
+>    ingestor, despite those appearing in the planned structure.
+>
+> For the current project graph, see `CLAUDE.md` → **Project Structure (Actual)**,
+> which is authoritative on structure and build commands.
+
+---
+
 ## Overview
 
 This document provides a **complete, step-by-step methodology** for implementing Project Loom v2 from scratch — the diagnostic core (CPU/memory/thread metrics, WebSocket streaming) **plus the full customizable telemetry platform**: custom metrics, attribute-based instrumentation, collectors/plugins, a query language, alerting, exporters, configuration-driven sampling, and a local dev mode. Every phase includes:

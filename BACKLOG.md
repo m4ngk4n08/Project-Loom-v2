@@ -425,6 +425,57 @@ public class MetricRecordingBenchmarks
 
 ---
 
+### 6.4 Deferred Log-Capture Design Questions 🟢 LOW
+
+**Issue:** Three behaviors in the log capture layer (added in `59e0009`) are deliberate
+deferrals, not defects. Each depends on work that doesn't exist yet, so deciding now
+would be guessing. Recorded here so the triggers aren't lost.
+
+**Context:** Reviewed at the time of `59e0009`. None of these affect correctness of the
+current code; all three are stable, documented behavior.
+
+---
+
+**(a) `LoomLogger.BeginScope` returns `null` — scope state is discarded**
+
+Scopes are where correlation IDs and request IDs live, which is exactly the context that
+makes log search useful. Capturing them means `LogRecord` gains a structured-properties
+field — a schema change, not a bugfix.
+
+*Revisit when:* the RAG corpus design is settled. The corpus determines what shape the
+properties field needs, so the schema decision follows it rather than leading it.
+
+---
+
+**(b) `InMemoryLogStore._categories` never evicts**
+
+The ring buffer overwrites records; the category dictionary keeps names for the process
+lifetime. `GetCategories()` will therefore list categories whose lines have all aged out.
+Not an unbounded-growth risk in practice — categories are logger names, which are
+finite — unless a caller generates them dynamically, which nothing does today.
+
+*Revisit when:* the dashboard log view exists. Whether an empty category should appear in
+the filter list is a UI question, and the answer determines whether eviction is wanted.
+
+---
+
+**(c) `LoomLogger` is `public` with a public constructor**
+
+The `"Loom."` prefix guard lives in `LoomLoggerProvider.CreateLogger`, so direct
+construction bypasses it. Making the class `internal` would close that, but nothing
+outside `Loom.Storage` constructs one, and the change risks breaking test construction
+for no present benefit.
+
+*Revisit when:* something outside `Loom.Storage` needs to construct a `LoomLogger`.
+No trigger today.
+
+---
+
+**Effort:** 1-2 hours (decisions only; implementation cost depends on the outcome)  
+**Priority:** 🟢 LOW (blocked on dependencies, not on effort)
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)
@@ -449,8 +500,9 @@ public class MetricRecordingBenchmarks
 2. 🟢 Search endpoint decision (§ 3.2) - 1 hour (decision only)
 3. 🟢 Parallel test execution (§ 6.2) - 30 minutes
 4. 🟢 Benchmark suite (§ 6.3) - 8-12 hours
+5. 🟢 Deferred log-capture design questions (§ 6.4) - 1-2 hours (decisions only, blocked)
 
-**Total Low Priority Work:** ~10-15 hours
+**Total Low Priority Work:** ~10-15 hours (§ 6.4 excluded - blocked on dependencies)
 
 ---
 
@@ -468,6 +520,7 @@ public class MetricRecordingBenchmarks
 | DEBT-008 | Benchmarks | 🟢 LOW | 8-12h | Open | - | Backlog |
 | ~~DEBT-009~~ | ~~Ingest endpoint~~ | ~~🔴 HIGH~~ | ~~4h~~ | ✅ Completed | - | Phase 12 |
 | ~~DEBT-010~~ | ~~Anonymous type~~ | ~~🟢 LOW~~ | ~~5m~~ | ✅ Completed | - | Phase 12 |
+| DEBT-011 | Log-capture deferrals | 🟢 LOW | 1-2h | Deferred | - | See § 6.4 triggers |
 
 ---
 
@@ -500,6 +553,23 @@ public class MetricRecordingBenchmarks
 - Better than introducing dependency injection just for tests
 
 **Alternative Considered:** DI-based buffer factory (rejected - too invasive)
+
+---
+
+### 2026-08-24: Defer Log-Capture Design Questions
+
+**Decision:** Ship `BeginScope` returning `null`, no category eviction, and a `public`
+`LoomLogger`. Revisit each when its dependency lands (see § 6.4).
+
+**Rationale:**
+- All three depend on work that doesn't exist yet (dashboard log UI, RAG corpus schema)
+- Deciding now means guessing at requirements, then likely reworking
+- None affects correctness of the shipped code - each is stable, documented behavior
+- Recording the revisit triggers costs nothing; a wrong early decision costs rework
+
+**Alternative Considered:** Resolve all three during the `59e0009` follow-up fix commit
+(rejected - a bugfix commit carrying schema changes conflates two kinds of risk, and
+`LogRecord` gaining a properties field is a schema change)
 
 ---
 

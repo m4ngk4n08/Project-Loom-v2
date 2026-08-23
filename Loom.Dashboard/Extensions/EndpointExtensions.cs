@@ -208,11 +208,15 @@ namespace Loom.Dashboard.Extensions
                 // still reported result.NextSequence (the buffer's true head), the
                 // client would skip every record between the trim point and the
                 // head on its next poll. Same class of bug as the ReadSince ">" vs
-                // ">=" cursor bug this whole fix started from.
+                // ">=" cursor bug this whole fix started from. The cursor must also
+                // advance past whatever ReadAfter itself skipped (DroppedCount) -
+                // otherwise, when the caller's cursor has fallen out of the live
+                // window, the returned records start higher than afterSequence + 1
+                // and the next poll re-delivers records the client already got.
                 var entries = result.Records.Length > clampedCount
                     ? result.Records[..clampedCount]
                     : result.Records;
-                var nextSequence = afterSequence + entries.Length;
+                var nextSequence = afterSequence + result.DroppedCount + entries.Length;
 
                 return Results.Json(new LogTailResponse
                 {

@@ -27,6 +27,13 @@ public sealed class LogBuffer
     public int Capacity => _buffer.Length;
 
     /// <summary>
+    /// Monotonic write sequence: the number of records written so far. Pass this (as
+    /// captured in a LogReadResult.NextSequence) back into ReadAfter to resume a tail
+    /// read from this point.
+    /// </summary>
+    public long CurrentSequence => Interlocked.Read(ref _writeIndex);
+
+    /// <summary>
     /// Write a log record to the buffer (lock-free, wait-free).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -50,7 +57,11 @@ public sealed class LogBuffer
             return Array.Empty<LogRecord>();
 
         var currentIndex = Interlocked.Read(ref _writeIndex);
-        var available = Math.Min(count, Math.Min((int)currentIndex, _buffer.Length));
+        // Clamp in long space before casting to int - currentIndex can exceed
+        // int.MaxValue (~2.4 days at 10k writes/sec) and a truncating cast would go
+        // negative, making the subsequent Math.Min/array allocation blow up.
+        var live = (int)Math.Min(currentIndex, _buffer.Length);
+        var available = Math.Min(count, live);
 
         if (available == 0)
             return Array.Empty<LogRecord>();
@@ -79,7 +90,8 @@ public sealed class LogBuffer
             return 0;
 
         var currentIndex = Interlocked.Read(ref _writeIndex);
-        var available = Math.Min(destination.Length, Math.Min((int)currentIndex, _buffer.Length));
+        var live = (int)Math.Min(currentIndex, _buffer.Length);
+        var available = Math.Min(destination.Length, live);
 
         for (int i = 0; i < available; i++)
         {
@@ -92,17 +104,18 @@ public sealed class LogBuffer
     }
 
     /// <summary>
-    /// Read all logs written since a specific timestamp.
-    /// Strict greater-than (unlike MetricBuffer.ReadSince, which uses >=): logs are
-    /// commonly re-polled by a tailing client using the last-seen record's own
-    /// timestamp as the next cursor, and >= would hand that boundary record back on
-    /// every poll. Metric polling doesn't have that repeated-boundary caller today, so
-    /// MetricBuffer was left as-is rather than risk changing its behavior.
+    /// Read all logs timestamped at or after a specific instant (inclusive "since",
+    /// like MetricBuffer.ReadSince). This is a TIME-RANGE query - "logs in the last 5
+    /// minutes" - not a tail cursor: DateTime.UtcNow.Ticks has coarse resolution (on
+    /// .NET 10, ~79% of ticks collide under tight-loop logging), so polling this with
+    /// the last-seen record's own timestamp as the next "since" value silently drops
+    /// every other record sharing that tick. For resumable tailing, use the sequence
+    /// cursor (CurrentSequence / ReadAfter) instead, which is exact.
     /// </summary>
     public LogRecord[] ReadSince(long timestampUtcTicks)
     {
         var currentIndex = Interlocked.Read(ref _writeIndex);
-        var maxRead = Math.Min((int)currentIndex, _buffer.Length);
+        var maxRead = (int)Math.Min(currentIndex, _buffer.Length);
 
         if (maxRead == 0)
             return Array.Empty<LogRecord>();
@@ -117,7 +130,7 @@ public sealed class LogBuffer
             var slot = (int)(readIndex & _mask);
             var record = _buffer[slot];
 
-            if (record.TimestampUtcTicks > timestampUtcTicks)
+            if (record.TimestampUtcTicks >= timestampUtcTicks)
             {
                 temp[matchCount++] = record;
             }
@@ -130,6 +143,52 @@ public sealed class LogBuffer
         var result = new LogRecord[matchCount];
         Array.Copy(temp, result, matchCount);
         return result;
+    }
+
+    /// <summary>
+    /// Read all logs written after a specific sequence cursor (exclusive), oldest
+    /// first - the resumable-tail counterpart to ReadSince's time-range query.
+    /// Sequence numbers are exact (derived from the write-index counter), so unlike
+    /// timestamp-based polling this cannot silently coalesce or drop same-tick
+    /// records. If the caller's cursor has fallen behind the buffer's live window,
+    /// the missed records are reported via DroppedCount rather than silently skipped.
+    /// </summary>
+    public LogReadResult ReadAfter(long afterSequence)
+    {
+        if (afterSequence < 0)
+            afterSequence = 0;
+
+        var currentIndex = Interlocked.Read(ref _writeIndex);
+
+        if (afterSequence >= currentIndex)
+            return new LogReadResult(Array.Empty<LogRecord>(), currentIndex, 0);
+
+        // Oldest sequence number still live in the buffer (1-based; sequence s lives
+        // at slot (s - 1) & mask). Everything older than this has been overwritten.
+        var oldestLiveSequence = currentIndex > _buffer.Length
+            ? currentIndex - _buffer.Length + 1
+            : 1L;
+
+        var droppedCount = 0;
+        var effectiveAfter = afterSequence;
+        if (effectiveAfter < oldestLiveSequence - 1)
+        {
+            droppedCount = (int)Math.Min(oldestLiveSequence - 1 - effectiveAfter, int.MaxValue);
+            effectiveAfter = oldestLiveSequence - 1;
+        }
+
+        var count = (int)Math.Min(currentIndex - effectiveAfter, _buffer.Length);
+        var result = new LogRecord[count];
+
+        // Oldest first: natural replay order for a tail reader.
+        for (var i = 0; i < count; i++)
+        {
+            var seq = effectiveAfter + 1 + i;
+            var slot = (int)((seq - 1) & _mask);
+            result[i] = _buffer[slot];
+        }
+
+        return new LogReadResult(result, currentIndex, droppedCount);
     }
 
     private static int RoundUpToPowerOfTwo(int value)

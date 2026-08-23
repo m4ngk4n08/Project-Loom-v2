@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
@@ -47,23 +48,43 @@ public sealed class InMemoryLogStore : ILogStore, IDisposable
         if (count <= 0)
             return Array.Empty<LogRecord>();
 
-        // Scan the whole buffer (newest first) for matches, then cap at count -
-        // the global buffer isn't partitioned by category, so filtering has to
-        // happen at read time.
-        var candidates = _buffer.ReadRecent(_buffer.Capacity);
-        var result = new List<LogRecord>(Math.Min(count, candidates.Length));
-        foreach (var record in candidates)
+        // Scan the whole buffer (newest first) for matches, then cap at count - the
+        // global buffer isn't partitioned by category, so filtering has to happen at
+        // read time. Uses the pooled-span overload rather than ReadRecent(Capacity)
+        // so scanning the full buffer doesn't allocate a full-capacity array (~48
+        // bytes/record) on every call regardless of how small count is.
+        var capacity = _buffer.Capacity;
+        var pooled = ArrayPool<LogRecord>.Shared.Rent(capacity);
+        try
         {
-            if (result.Count == count)
-                break;
-            if (record.Category == category)
-                result.Add(record);
-        }
+            var span = pooled.AsSpan(0, capacity);
+            var available = _buffer.TryReadRecent(span);
 
-        return result.ToArray();
+            var result = new List<LogRecord>(Math.Min(count, available));
+            for (var i = 0; i < available; i++)
+            {
+                if (result.Count == count)
+                    break;
+                if (span[i].Category == category)
+                    result.Add(span[i]);
+            }
+
+            return result.ToArray();
+        }
+        finally
+        {
+            // clearArray: true - LogRecord holds string references (Message,
+            // Category, exception text); a pooled array left dirty would keep dead
+            // log messages alive until the pool happens to reuse or drop the slot.
+            ArrayPool<LogRecord>.Shared.Return(pooled, clearArray: true);
+        }
     }
 
     public LogRecord[] ReadSince(long timestampUtcTicks) => _buffer.ReadSince(timestampUtcTicks);
+
+    public LogReadResult ReadAfter(long afterSequence) => _buffer.ReadAfter(afterSequence);
+
+    public long CurrentSequence => _buffer.CurrentSequence;
 
     /// <summary>
     /// Snapshot of the currently-known log categories.

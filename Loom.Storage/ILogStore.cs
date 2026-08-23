@@ -19,6 +19,10 @@ public interface ILogStore
 
     LogRecord[] ReadSince(long timestampUtcTicks);
 
+    LogReadResult ReadAfter(long afterSequence);
+
+    long CurrentSequence { get; }
+
     IReadOnlyCollection<string> GetCategories();
 
     ChannelReader<LogRecord> Subscribe();

@@ -76,6 +76,8 @@ public sealed class LoomLogger : ILogger
         LogLevel.Warning => LoomLogLevel.Warning,
         LogLevel.Error => LoomLogLevel.Error,
         LogLevel.Critical => LoomLogLevel.Critical,
-        _ => throw new ArgumentOutOfRangeException(nameof(logLevel), logLevel, null)
+        // A logger must never throw - an unrecognized value (e.g. a raw cast like
+        // (LogLevel)99) falls back to Information rather than crashing the caller.
+        _ => LoomLogLevel.Information
     };
 }

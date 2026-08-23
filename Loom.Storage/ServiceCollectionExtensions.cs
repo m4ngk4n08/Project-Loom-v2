@@ -9,4 +9,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMetricStore>(new InMemoryMetricStore(bufferCapacity));
         return services;
     }
+
+    public static IServiceCollection AddLoomLogStorage(this IServiceCollection services, int bufferCapacity = 8192)
+    {
+        services.AddSingleton<ILogStore>(new InMemoryLogStore(bufferCapacity));
+        return services;
+    }
 }

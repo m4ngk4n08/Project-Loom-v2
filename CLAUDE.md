@@ -394,6 +394,58 @@ dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r win-x64
 **Performance Benchmarks:** no benchmark project exists yet — see `BACKLOG.md` §6.3.
 Do not reference `Loom.Benchmarks`; it has never been created.
 
+## PowerShell BOM Trap
+
+**`Set-Content -Encoding utf8` on PowerShell 5.1 prepends a BOM: `EF BB BF`.** Three
+invisible bytes at the start of the file. Editors, `Get-Content`, and the terminal all
+hide them, so the file *looks* correct and is three bytes longer than it should be.
+
+Everything it breaks, breaks silently, and always because a tool reads the **start** of
+the text:
+
+- `git commit -F msg.txt` — git copies the file byte-for-byte, so the BOM becomes the
+  first character of the subject line. Subject-prefix linters (`^(feat|fix|docs):`),
+  `git log --grep '^Word'`, and CI rules like "skip if subject starts with WIP" all stop
+  matching. This actually happened on commit `bf78569` and had to be amended.
+- A BOM before `#!/bin/bash` breaks the shebang.
+- Some JSON parsers reject a leading BOM; CSV readers fold it into the first header name.
+
+**The trap is that the obvious alternatives are worse.** Omitting `-Encoding` entirely
+makes `Set-Content` default to the legacy Windows ANSI codepage, which mangles every
+non-ASCII character. `-Encoding ascii` drops the BOM but turns em-dashes and accents into
+`?`. `utf8NoBOM` does not exist until PowerShell 6.
+
+**Fix — use the .NET API; `$false` means "no BOM":**
+```powershell
+[System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
+```
+
+**Detect:**
+```powershell
+# 239,187,191 = BOM present. This machine has no xxd/od/hexdump.
+[System.IO.File]::ReadAllBytes($path)[0..2] -join ','
+```
+On Linux/WSL, `xxd -l 3 <file>` shows `efbb bf` instead.
+
+**Optional guard.** For commit messages the hook is `commit-msg`, not `pre-commit` —
+`pre-commit` runs before the message exists and never sees it. Save as
+`.git/hooks/commit-msg`, make it executable:
+```sh
+#!/bin/sh
+# Reject a UTF-8 BOM at the start of the commit message.
+if head -c 3 "$1" | grep -q $'\xef\xbb\xbf'; then
+  echo "commit-msg: message file starts with a UTF-8 BOM. Rewrite it with" >&2
+  echo "  [System.IO.File]::WriteAllText(path, text, (New-Object System.Text.UTF8Encoding(\$false)))" >&2
+  exit 1
+fi
+```
+Not installed by default — hooks are local-only and never travel with a clone, so anyone
+working this repo would have to add it themselves.
+
+Prefer the Write tool over `Set-Content` whenever a file will be parsed by another tool.
+
+---
+
 ## Key Implementation Patterns
 
 ### JSON Serialization (Native AOT)
@@ -757,7 +809,9 @@ claimed pass rate.
 **Environment facts (verified; do not rediscover):**
 - Solution file is `Loom.slnx`, **not** `Loom.sln` — `dotnet test Loom.sln` fails MSB1009.
 - The Bash tool has no coreutils here (`cat`, `ls` exit 127). Use PowerShell.
-- PowerShell here-strings break `git commit -m`; use `git commit -F <file>`.
+- PowerShell here-strings break `git commit -m`; use `git commit -F <file>` — and write
+  that file with `[System.IO.File]::WriteAllText`, not `Set-Content -Encoding utf8`,
+  which adds a BOM to the subject line. See **PowerShell BOM Trap** above.
 - `Loom.Core`, `Loom.Host`, and `Loom.Benchmarks` do not exist. `IMPLEMENTATION-METHODOLOGY.md`
   still references the first two; the Project Structure section above is authoritative.
 - `.gitignore:43` ignores `*.md`; lines 44-50 un-ignore the seven authoritative docs.

@@ -1,7 +1,7 @@
 # Project Loom v2 - Technical Debt & Backlog
 
-**Document Version:** 1.0  
-**Last Updated:** 2026-08-18  
+**Document Version:** 1.1  
+**Last Updated:** 2026-08-24  
 **Current Phase:** Phase 12 Complete, Phase 13 Ready
 
 ---
@@ -19,114 +19,94 @@ This document tracks known issues, technical debt, and improvement opportunities
 
 ## 1. Testing Infrastructure
 
-### 1.1 Test Isolation Issues 🔴 HIGH
+### 1.1 Test Isolation Issues 🔴 HIGH (COMPLETED)
 
-**Issue:** 3 unit tests fail due to shared global state in `LoomMetrics`
+**Issue:** 3 unit tests failed due to shared global state in `LoomMetrics` and related
+static telemetry singletons.
 
-**Failing Tests:**
+**Formerly Failing Tests (now passing):**
 1. `PropertyTrackingTests.TrackedProperty_RecordsMultipleChanges`
 2. `ExporterIntegrationTests.FullPipeline_ContinuousMetrics_CollectsNewRecordsOnly`
 3. `ExportCollectionTests.ExportCollectionHostedService_CollectsOnlyNewRecordsSinceLastCollection`
 
-**Root Cause:**
-- `LoomMetrics.Buffers` is a static `ConcurrentDictionary` that persists across tests
-- Tests assume clean state but inherit metrics from previous tests
-- No reset mechanism exists for test isolation
+**Status:** ✅ **RESOLVED**
 
-**Impact:**
-- Tests pass individually but fail when run in suite
-- 97.7% pass rate instead of 100%
-- False negatives during CI/CD
+**Root Cause (confirmed):** Loom's telemetry surface is deliberately static and
+process-global (`LoomMetrics.Buffers`, `LoomSampling` rules, `LoomCollectors`, the
+alerting rule registry — see ADR-5). Most test classes already reset that state in
+their own constructor/`Dispose`, but xUnit runs test *classes* in parallel by default,
+so the cleanup itself became the race: one class's `Buffers.Clear()` wiped records
+another class was mid-assertion on.
 
-**Proposed Fix:**
+**Actual Fix (neither of the two options this entry originally proposed):**
+`[assembly: CollectionBehavior(DisableTestParallelization = true)]` in
+`Loom.Telemetry.Tests/AssemblyInfo.cs`. Serializing the whole assembly makes the
+existing per-class resets sufficient — no `ResetForTesting()` API was added, and no
+DI-based buffer factory was introduced. The suite is small and I/O-light, so running
+serially has negligible wall-clock cost against a source of non-deterministic
+failures.
 
-**File:** `Loom.Telemetry\LoomMetrics.cs`
-
-```csharp
-/// <summary>
-/// FOR TESTING ONLY: Clears all metric buffers.
-/// DO NOT use in production code.
-/// </summary>
-#if DEBUG
-public static void ResetForTesting()
-{
-    Buffers.Clear();
-}
-#endif
-```
-
-**File:** Test base class or individual test constructors
-
-```csharp
-public class MyTestClass
-{
-    public MyTestClass()
-    {
-        // Reset global state before each test
-        LoomMetrics.ResetForTesting();
-    }
-    
-    // ... tests
-}
-```
-
-**Effort:** 2-4 hours  
-**Priority:** 🔴 HIGH (affects test reliability)
+**No further action needed.**
 
 ---
 
-### 1.2 Flaky PeriodicTimer Tests 🟡 MEDIUM
+### 1.2 Flaky PeriodicTimer Tests 🟡 MEDIUM (COMPLETED)
 
-**Issue:** 2 tests skipped due to timing sensitivity
+**Issue:** 2 tests were disabled with `[Fact(Skip = "...")]` due to apparent timing
+sensitivity.
 
-**Skipped Tests:**
+**Formerly Skipped Tests (now plain `[Fact]`, passing):**
 1. `ExportCollectionTests.ExportCollectionHostedService_WithMetrics_CollectsAndWritesBatch`
 2. `ExporterIntegrationTests.FullPipeline_RecordMetrics_ExportersReceiveBatches`
 
-**Root Cause:**
-- Tests depend on `PeriodicTimer` firing at specific intervals
-- CI/CD environments have variable latency
-- `await Task.Delay()` assumptions don't hold under load
+**Status:** ✅ **RESOLVED**
 
-**Impact:**
-- Reduced test coverage for export pipeline
-- Manual testing required for these scenarios
+**Root Cause (confirmed):** Not `PeriodicTimer` flakiness — the same cross-class
+parallelism race as § 1.1. Once the assembly serialized (§ 1.1's fix), the timing
+premise for skipping these tests no longer held, and both were re-enabled as plain
+`[Fact]`s. Zero real `[Fact(Skip = ...)]` remain in the suite; the only "Skip ="
+text left in the repo is the explanatory comment in
+`Loom.Telemetry.Tests/AssemblyInfo.cs`.
 
-**Proposed Fix:**
-
-**Option A: Dependency Injection for Timer (Recommended)**
-```csharp
-public interface IPeriodicTimerFactory
-{
-    IPeriodicTimer Create(TimeSpan interval);
-}
-
-// Test implementation can use fake timer with manual ticks
-```
-
-**Option B: Increase tolerance thresholds**
-```csharp
-// Instead of: Assert.Equal(2, batches.Count)
-Assert.InRange(batches.Count, 1, 3); // Allow timing variance
-```
-
-**Effort:** 4-6 hours  
-**Priority:** 🟡 MEDIUM (test coverage, not production code)
+**No further action needed.**
 
 ---
 
-### 1.3 PrometheusFormatter Test Failure 🟢 LOW
+### 1.3 PrometheusFormatter Test Failure 🟢 LOW (COMPLETED)
 
-**Issue:** `PrometheusFormatterTests.Format_NoMetrics_ReturnsEmptyString` fails sporadically
+**Issue:** `PrometheusFormatterTests.Format_NoMetrics_ReturnsEmptyString` failed
+sporadically.
 
-**Root Cause:**
-- Test expects empty output when no metrics exist
-- Other tests leave metrics in global ring buffers
-- Same isolation issue as § 1.1
+**Status:** ✅ **RESOLVED** — resolved by the § 1.1 fix (same isolation race: other
+test classes left metrics in the global ring buffers before this test ran). Full
+suite is 326/326 passing.
 
-**Fix:** Resolved by implementing `ResetForTesting()` from § 1.1
+**No further action needed.**
 
-**Priority:** 🟢 LOW (covered by § 1.1 fix)
+---
+
+### 1.4 No Test Coverage for `/api/logs/tail` Clamping 🟢 LOW
+
+**Issue:** The resumable log-tail endpoint's count-clamping and cursor-derivation
+logic (`Loom.Dashboard/Extensions/EndpointExtensions.cs`, `MapLogEndpoints`) has no
+test coverage exercising it directly.
+
+**Context:** An earlier test,
+`InMemoryLogStoreTests.ReadAfter_ClampedToCount_NextCursorReflectsOnlyRecordsActuallyReturned`,
+was removed in `db794ec` — it re-implemented the endpoint's clamping algorithm
+inline against `ILogStore` directly, using a buffer sized so `DroppedCount` was
+always 0. That meant it asserted a copy of the algorithm's arithmetic, not the
+endpoint, and could never reach (or catch a regression in) the dropped-records case
+that a prior commit had to fix.
+
+**Proposal:** An endpoint-level test (e.g. via `WebApplicationFactory` or an
+in-process test host) that issues two HTTP polls against `/api/logs/tail` across a
+buffer that has wrapped, asserting the second poll's cursor and `droppedCount` are
+correct and no records are skipped or repeated.
+
+**Effort:** 1-2 hours  
+**Priority:** 🟢 LOW (the underlying `ILogStore`/`LogBuffer` arithmetic is covered;
+this is specifically about the endpoint's own clamping wrapper)
 
 ---
 
@@ -292,6 +272,37 @@ values.Sort(); // In-place sort
 
 ---
 
+### 4.3 PrometheusFormatter Emits Invalid Prometheus Output 🟡 MEDIUM
+
+**Issue:** `PrometheusFormatter` produces output that violates the OpenMetrics/Prometheus
+exposition format in three ways:
+
+1. **Line endings:** `NewLineBytes` is built from `Environment.NewLine`, which is
+   CRLF on Windows. The exposition format requires LF-only line endings; a scraper
+   fed CRLF output can fail to parse it depending on the client library.
+2. **Tags dropped:** `MetricRecord.Tags` are never written as Prometheus labels.
+   Every series with distinct tag values collapses into a single untagged line —
+   dimensional data (e.g. per-route, per-status-code breakdowns) is silently lost on
+   export.
+3. **Counters aren't cumulative:** for `MetricType.Counter`, the formatter emits
+   `snapshot[0].Value` — the single most recent recorded value — rather than a
+   running total. Prometheus counters are defined as monotonically increasing
+   cumulative totals; PromQL's `rate()`/`increase()` over this output is meaningless
+   because the exposed number isn't a counter in the Prometheus sense at all.
+
+**Context:** `PrometheusFormatterEquivalenceTests` currently pins today's (incorrect)
+behavior — CRLF, no labels, latest-value-as-counter — so fixing this changes that test
+file too, not just `PrometheusFormatter.cs`.
+
+**Cross-reference:** § 4.1 (LINQ in the same file's histogram/summary path) touches
+the same file and should be folded into this same pass rather than done separately.
+
+**Effort:** 3-5 hours (three behavior changes + updating the pinned equivalence tests)  
+**Priority:** 🟡 MEDIUM (exported metrics are currently misleading, not just
+inefficient)
+
+---
+
 ## 5. Documentation Gaps
 
 ### 5.1 Binary Size Target Documentation 🟡 MEDIUM
@@ -340,6 +351,31 @@ values.Sort(); // In-place sort
 
 ---
 
+### 5.3 Alerting README Documents a Call That Throws 🟢 LOW
+
+**Issue:** `Loom.Telemetry.Alerting/README.md:26` instructs
+`services.AddAlertTarget<WebhookAlertTarget>();` as a usage example. Following it
+throws at DI resolution time.
+
+**Root Cause:** `AddAlertTarget<T>()` (`ServiceCollectionExtensions.cs`) registers
+`T` as a plain DI singleton, requiring `T`'s constructor to be resolvable from the
+container. `WebhookAlertTarget(HttpClient httpClient, string webhookUrl)` takes a
+`string webhookUrl` parameter that nothing registers — there is no
+`AddAlertTarget<WebhookAlertTarget>(string webhookUrl)` overload or factory-based
+registration path. The container throws when it tries to construct `T`.
+
+**Fix options:** either add a factory-accepting overload of `AddAlertTarget` (e.g.
+`AddAlertTarget<T>(Func<IServiceProvider, T>)`), or correct the README to show
+`services.AddSingleton<IAlertTarget>(sp => new WebhookAlertTarget(sp.GetRequiredService<HttpClient>(), "https://...."));`
+until such an overload exists.
+
+**Effort:** 15 minutes (doc fix) to 1-2 hours (overload)  
+**Priority:** 🟢 LOW (copy-pasting the documented example fails immediately, but
+`ConsoleAlertTarget` — the target actually wired up in `Loom.Dashboard` and
+`Loom.Web.Api` — works fine)
+
+---
+
 ## 6. Future Enhancements
 
 ### 6.1 Test Reset Automation 🟡 MEDIUM
@@ -379,11 +415,11 @@ public class MyTests
 
 ---
 
-### 6.2 Parallel Test Execution 🟢 LOW
+### 6.2 Parallel Test Execution 🟢 LOW (REJECTED)
 
 **Issue:** Tests run sequentially, slow feedback
 
-**Proposal:** Enable xUnit parallel execution
+**Original Proposal:** Enable xUnit parallel execution
 
 ```xml
 <!-- Loom.Telemetry.Tests.csproj -->
@@ -393,10 +429,19 @@ public class MyTests
 </PropertyGroup>
 ```
 
-**Blocker:** Requires test isolation (§ 6.1) to be fixed first
+**Status:** ❌ **REJECTED / superseded** (2026-08-24, see § 9) — this is the opposite of
+what shipped. § 1.1's actual fix was
+`[assembly: CollectionBehavior(DisableTestParallelization = true)]`, which serializes
+the whole assembly rather than unblocking parallelism.
 
-**Effort:** 30 minutes (after § 6.1 complete)  
-**Priority:** 🟢 LOW (performance, not correctness)
+**Reason:** Loom's telemetry surface is deliberately static and process-global (ADR-5)
+— `LoomMetrics.Buffers`, `LoomSampling` rules, `LoomCollectors`, the alerting rule
+registry. Parallel test *classes* race on those shared buffers regardless of § 6.1's
+per-class resets; `AssemblyInfo.cs` documents this in detail. Enabling parallelism
+would reintroduce the exact failures § 1.1 fixed.
+
+**Revisiting requires:** removing the global statics (a DI-based buffer/registry
+design), not a csproj flag. No such redesign is planned.
 
 ---
 
@@ -476,33 +521,73 @@ No trigger today.
 
 ---
 
+### 6.5 Alerting Has No Resolution Notifications 🟡 MEDIUM
+
+**Issue:** Alerts can fire, but nothing ever tells a target that a firing condition
+stopped being true. Once notified, a target has no signal to distinguish "still
+broken" from "fixed" short of the alert simply going quiet.
+
+**Root Cause:**
+- `AlertNotification` (`AlertEvaluationHostedService.cs`) is
+  `record AlertNotification(AlertRule Rule, MetricAggregate Observed, DateTime FiredAt)`
+  — there is no status field (firing vs. resolved), so there is no shape for an "OK"
+  notification even if the evaluation loop wanted to send one.
+- The evaluation loop only ever calls `notificationChannel.Writer.TryWrite(...)`
+  when `rule.Condition(aggregate.Value)` is true; nothing tracks a rule transitioning
+  from firing to not-firing, so a resolution is never detected, let alone sent.
+
+**Separate but related bug in the same file:** `AlertEvaluationHostedService.ExecuteAsync`
+reads `LoomTelemetryOptionsAlertingExtensions.Rules` once at startup
+(`var rules = ...Rules;`) and returns immediately if that snapshot is empty
+(`if (rules.Count == 0) { ...; return; }`). Any rule registered after the hosted
+service starts is never evaluated — the service has already exited its loop (or
+never entered one) before that rule exists.
+
+**Impact:** Operators get paged when something breaks but never get an automatic
+"resolved" signal, and rules added post-startup (e.g. via a config reload) silently
+do nothing.
+
+**Effort:** 4-8 hours (status field + resolution detection + fixing the
+startup-snapshot bug, which likely needs the rule registry to be observable rather
+than read once)  
+**Priority:** 🟡 MEDIUM (alerting works for the "something is wrong" case that
+exists today, but both gaps reduce operational trust in the feature)
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)
-1. 🔴 Test isolation fix (§ 1.1) - 2-4 hours
+
+**None open.** § 1.1 (test isolation) and § 3.1 (ingest endpoint), the only two HIGH
+items this document ever tracked, are both completed.
+
+1. 🔴 ~~Test isolation fix (§ 1.1)~~ ✅ COMPLETED
 2. 🔴 ~~Missing ingest endpoint (§ 3.1)~~ ✅ COMPLETED
 
-**Total High Priority Work:** ~2-4 hours
+**Total High Priority Work:** 0 hours
 
 ---
 
 ### Medium Priority (Post-1.0)
-1. 🟡 Flaky timer tests (§ 1.2) - 4-6 hours
-2. 🟡 Binary size documentation (§ 5.1) - 30 minutes
-3. 🟡 Test reset automation (§ 6.1) - 4-6 hours
+1. 🟡 Binary size documentation (§ 5.1) - 30 minutes
+2. 🟡 Test reset automation (§ 6.1) - 4-6 hours
+3. 🟡 PrometheusFormatter emits invalid Prometheus output (§ 4.3) - 3-5 hours
+4. 🟡 Alerting has no resolution notifications (§ 6.5) - 4-8 hours
 
-**Total Medium Priority Work:** ~9-12 hours
+**Total Medium Priority Work:** ~12-20 hours
 
 ---
 
 ### Low Priority (Backlog)
-1. 🟢 PrometheusFormatter LINQ (§ 4.1) - 1-2 hours
+1. 🟢 PrometheusFormatter LINQ (§ 4.1) - 1-2 hours (fold into § 4.3's pass over the same file)
 2. 🟢 Search endpoint decision (§ 3.2) - 1 hour (decision only)
-3. 🟢 Parallel test execution (§ 6.2) - 30 minutes
-4. 🟢 Benchmark suite (§ 6.3) - 8-12 hours
-5. 🟢 Deferred log-capture design questions (§ 6.4) - 1-2 hours (decisions only, blocked)
+3. 🟢 Benchmark suite (§ 6.3) - 8-12 hours
+4. 🟢 Deferred log-capture design questions (§ 6.4) - 1-2 hours (decisions only, blocked)
+5. 🟢 No test coverage for `/api/logs/tail` clamping (§ 1.4) - 1-2 hours
+6. 🟢 Alerting README documents a call that throws (§ 5.3) - 15 min - 2 hours
 
-**Total Low Priority Work:** ~10-15 hours (§ 6.4 excluded - blocked on dependencies)
+**Total Low Priority Work:** ~12-19 hours (§ 6.4 excluded - blocked on dependencies)
 
 ---
 
@@ -510,17 +595,21 @@ No trigger today.
 
 | Issue ID | Title | Priority | Effort | Status | Assigned | Target |
 |----------|-------|----------|--------|--------|----------|--------|
-| DEBT-001 | Test isolation fix | 🔴 HIGH | 2-4h | Open | - | Phase 14 |
-| DEBT-002 | Flaky timer tests | 🟡 MEDIUM | 4-6h | Open | - | Phase 15 |
+| ~~DEBT-001~~ | ~~Test isolation fix~~ | ~~🔴 HIGH~~ | ~~2-4h~~ | ✅ Completed | - | § 1.1 |
+| ~~DEBT-002~~ | ~~Flaky timer tests~~ | ~~🟡 MEDIUM~~ | ~~4-6h~~ | ✅ Completed | - | § 1.2 |
 | DEBT-003 | Binary size docs | 🟡 MEDIUM | 30m | Open | - | Phase 13 |
 | DEBT-004 | Test automation | 🟡 MEDIUM | 4-6h | Open | - | Post-1.0 |
-| DEBT-005 | LINQ optimization | 🟢 LOW | 1-2h | Open | - | Backlog |
+| DEBT-005 | LINQ optimization | 🟢 LOW | 1-2h | Open | - | Fold into DEBT-012 |
 | DEBT-006 | Search endpoint | 🟢 LOW | 1h | Open | - | Backlog |
-| DEBT-007 | Parallel tests | 🟢 LOW | 30m | Blocked | - | Post-1.0 |
+| ~~DEBT-007~~ | ~~Parallel tests~~ | ~~🟢 LOW~~ | ~~30m~~ | ❌ Rejected | - | See § 6.2, § 9 |
 | DEBT-008 | Benchmarks | 🟢 LOW | 8-12h | Open | - | Backlog |
 | ~~DEBT-009~~ | ~~Ingest endpoint~~ | ~~🔴 HIGH~~ | ~~4h~~ | ✅ Completed | - | Phase 12 |
 | ~~DEBT-010~~ | ~~Anonymous type~~ | ~~🟢 LOW~~ | ~~5m~~ | ✅ Completed | - | Phase 12 |
 | DEBT-011 | Log-capture deferrals | 🟢 LOW | 1-2h | Deferred | - | See § 6.4 triggers |
+| DEBT-012 | PrometheusFormatter invalid output | 🟡 MEDIUM | 3-5h | Open | - | Backlog |
+| DEBT-013 | `/api/logs/tail` test coverage | 🟢 LOW | 1-2h | Open | - | Backlog |
+| DEBT-014 | Alerting README broken example | 🟢 LOW | 15m-2h | Open | - | Backlog |
+| DEBT-015 | Alerting resolution notifications | 🟡 MEDIUM | 4-8h | Open | - | Backlog |
 
 ---
 
@@ -573,6 +662,33 @@ No trigger today.
 
 ---
 
+### 2026-08-24: Reject § 6.2 (Parallel Test Execution)
+
+**Decision:** Reject DEBT-007 / § 6.2's proposal to enable xUnit parallel test
+execution. Superseded by what actually shipped for § 1.1: assembly-wide
+serialization (`[assembly: CollectionBehavior(DisableTestParallelization = true)]`),
+the opposite of this proposal.
+
+**Rationale:**
+- Loom's telemetry surface is deliberately static and process-global (ADR-5):
+  `LoomMetrics.Buffers`, `LoomSampling` rules, `LoomCollectors`, and the alerting
+  rule registry are all shared singletons, by design, for the shipped product.
+- Parallel test *classes* race on those shared buffers regardless of per-class
+  setup/teardown — that race was the actual root cause of § 1.1's flakiness, and
+  `Loom.Telemetry.Tests/AssemblyInfo.cs` documents it in detail.
+- Enabling parallelism as § 6.2 proposed would reintroduce exactly the failures
+  § 1.1 fixed.
+
+**Alternative Considered:** Removing the global statics in favor of an
+injectable/scoped telemetry surface, which would make parallel test classes safe.
+Not undertaken - out of scope for a backlog reconciliation pass, and a real
+architectural change to ADR-5, not a test-infra tweak.
+
+**Action:** § 6.2 marked REJECTED. Revisiting parallel test execution requires
+removing the global statics, not a csproj flag.
+
+---
+
 ## 10. References
 
 - **Phase 12 Testing Results:** `TESTING.md` § 11
@@ -582,5 +698,5 @@ No trigger today.
 ---
 
 **Document Owner:** Project Loom v2 Team  
-**Last Review:** 2026-08-18  
+**Last Review:** 2026-08-24  
 **Next Review:** Phase 13 completion or pre-1.0 release

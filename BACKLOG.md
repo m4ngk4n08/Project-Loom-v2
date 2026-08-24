@@ -746,6 +746,55 @@ reachability changed)
 
 ---
 
+### 6.9 Statistical Anomaly Detection on Metrics 🟢 LOW (PLANNED)
+
+**Issue:** Alert rules are threshold-based only — `agg.Average > 0.8`, `agg.P99 > 500`.
+Every threshold is a number somebody guessed, and a guess that is wrong in either
+direction is useless: too tight and it pages on normal load, too loose and it never
+fires. There is no way to express "tell me when this is abnormal for *this* process"
+rather than "tell me when this crosses a constant I picked."
+
+**Proposed:** Statistical baselining over the metric ring buffer, feeding the alerting
+path that already exists. Compute a rolling baseline (EWMA, or mean plus standard
+deviation over a trailing window) per metric series, and let a rule trigger on deviation
+from it — e.g. "working set is 4σ above its last-hour baseline" — instead of, or
+alongside, a fixed threshold.
+
+**Why it fits Loom specifically:**
+- It is arithmetic, not machine learning. No model, no embeddings, no new dependency,
+  no measurable impact on the <17 MB binary budget — the same reasoning that made BM25
+  the right call for log search over an embedding model (§ see Bm25LogSearch).
+- The data is already in memory. `IMetricStore.GetBuffers()` and `MetricBuffer.ReadSince`
+  provide the trailing window with no new storage.
+- It plugs into `AlertRule`/`AlertEvaluationHostedService` rather than replacing them —
+  a deviation predicate is just another way to produce the boolean a rule already needs.
+- It is a genuine differentiator. `dotnet-monitor`'s collection rules are threshold- and
+  event-triggered; nothing in the .NET diagnostics tooling space does edge-side
+  statistical baselining.
+
+**Open questions (decide before implementing, do not guess):**
+1. Which estimator — EWMA is cheap and adapts, but a fixed trailing window with mean/σ is
+   easier to explain and to test deterministically. Favor whichever is easier to write a
+   failing test for.
+2. Cold-start behavior. A baseline computed from three samples will fire constantly. A
+   minimum-sample threshold is required, and it interacts with § 6.6 (no-data grace
+   period) — both are "the rule should stay quiet until it actually knows something."
+3. Whether deviation replaces or composes with thresholds. Composition (`Average > 0.8
+   AND 3σ above baseline`) is more useful and no harder to express in the existing
+   builder.
+4. Seasonality is explicitly **out of scope**. A tool whose store dies with the process
+   cannot observe a daily cycle. Do not build toward it.
+
+**Depends on:** § 6.3 (benchmark suite) is *not* a blocker, but this is a hot-path-adjacent
+computation over the metric buffers and should be measured, not assumed cheap.
+
+**Effort:** 6-10 hours (including the design decisions above)
+**Priority:** 🟢 LOW — a differentiator, not a defect. Nothing is broken without it, and
+the two open MEDIUM alerting gaps (§ 6.6, § 6.7) should land first since this builds on
+the same evaluation loop they affect.
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)
@@ -786,8 +835,9 @@ notifications shipped in `3bd0d8b`), § 2.1 (Option A taken), § 4.3 and § 4.4
 6. 🟢 Size optimization flags (§ 2.2) - documentation only
 7. 🟢 Allocation testing baseline documentation (§ 5.2)
 8. 🟢 Test reset automation (§ 6.1) - superseded, optional tidiness only
+9. 🟢 Statistical anomaly detection on metrics (§ 6.9) - 6-10 hours (planned enhancement)
 
-**Total Low Priority Work:** ~11-18 hours (§ 6.4 excluded - blocked on dependencies)
+**Total Low Priority Work:** ~17-28 hours (§ 6.4 excluded - blocked on dependencies)
 
 **§ 6.3 (benchmark suite) is worth more than its LOW rating suggests.** Two deferred
 optimizations are explicitly waiting on measurement it would provide: the zero-allocation
@@ -919,6 +969,31 @@ startup-snapshot bug out of § 6.5 into § 6.7; correct § 1.1's `ResetForTestin
 **Pattern worth noting:** five entries in this document were found stale during this
 branch — work happened incidentally and nothing closed the entry. Closing the entry in
 the commit that does the work avoids re-deriving state later.
+
+---
+
+### 2026-08-25: File Anomaly Detection as § 6.9; Auth Deferred to Phase 14
+
+**Decision:** Record statistical anomaly detection as a planned LOW enhancement (§ 6.9)
+rather than starting it, and keep endpoint authentication out of this document — it is
+tracked as Phase 14 work, not backlog.
+
+**Rationale:**
+- Anomaly detection came out of a positioning discussion, not a defect report. It is a
+  differentiator against `dotnet-monitor`, whose collection rules are threshold- and
+  event-triggered with no edge-side baselining. Left unwritten it would have survived
+  only in conversation.
+- It is filed LOW deliberately. Nothing is broken without it, and it builds on
+  `AlertEvaluationHostedService` — the same loop § 6.6 and § 6.7 still have open MEDIUM
+  defects in. Building a new capability on a loop with two known gaps would compound
+  them.
+- Its design questions are recorded as *open* rather than resolved. Estimator choice and
+  cold-start behavior are real decisions with test-design consequences, and guessing them
+  now would bake in an answer nobody evaluated.
+- Authentication is deliberately not a backlog entry. Every endpoint is currently
+  unauthenticated, which is a release gate rather than a tracked improvement, and the
+  repository is now public — the mitigation in the meantime is that hosts bind via
+  `ListenLocalhost`, so access is over an SSH tunnel rather than an exposed port.
 
 ---
 

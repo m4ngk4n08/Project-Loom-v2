@@ -2,7 +2,7 @@
 
 
 /// <summary>
-/// Request for vector search over diagnostic telemetry.
+/// Request for BM25 lexical search over captured logs.
 /// </summary>
 public sealed record DiagnosticSearchRequest
 {
@@ -17,7 +17,8 @@ public sealed record DiagnosticSearchRequest
     public int MaxResults { get; init; } = 10;
 
     /// <summary>
-    /// Minimum similarity threshold (0.0 - 1.0) for results to be included (default: 0.7)
+    /// Minimum BM25 relevance score. Scores are unbounded and corpus-relative, not a
+    /// 0-1 similarity - leave at 0.0 unless tuning against a known corpus.
     /// </summary>
-    public double MinSimilarity { get; init; } = 0.7;
+    public double MinScore { get; init; } = 0.0;
 }

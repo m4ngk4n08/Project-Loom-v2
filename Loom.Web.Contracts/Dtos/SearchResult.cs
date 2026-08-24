@@ -11,7 +11,8 @@ public sealed record SearchResult
     public required string Content { get; init; }
 
     /// <summary>
-    /// Similarity score (0.0 - 1.0, higher = better match)
+    /// BM25 relevance score. Unbounded, higher is better, comparable only within one
+    /// result set.
     /// </summary>
     public required double Score { get; init; }
 

@@ -13,6 +13,15 @@ export interface LogEntry {
   exceptionMessage?: string;
 }
 
+export interface LogExportFilters {
+  format: 'json' | 'csv' | 'text';
+  category?: string;
+  minLevel?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -32,5 +41,17 @@ export class LogsService {
 
   connectLive(): Observable<LogEntry> {
     return this.wsService.connect('/ws/logs');
+  }
+
+  // Returns the URL only - the caller must navigate to it via an anchor click (not
+  // HttpClient) so the server's Content-Disposition: attachment header is honored.
+  buildExportUrl(filters: LogExportFilters): string {
+    const params: string[] = [`format=${encodeURIComponent(filters.format)}`];
+    if (filters.category) params.push(`category=${encodeURIComponent(filters.category)}`);
+    if (filters.minLevel) params.push(`minLevel=${encodeURIComponent(filters.minLevel)}`);
+    if (filters.from) params.push(`from=${encodeURIComponent(filters.from)}`);
+    if (filters.to) params.push(`to=${encodeURIComponent(filters.to)}`);
+    if (filters.limit) params.push(`limit=${encodeURIComponent(String(filters.limit))}`);
+    return `/api/logs/export?${params.join('&')}`;
   }
 }

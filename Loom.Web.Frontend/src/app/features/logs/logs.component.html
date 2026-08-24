@@ -45,6 +45,14 @@
         type="button">
         Clear
       </button>
+
+      <button
+        class="toolbar-btn"
+        (click)="openExportModal()"
+        [attr.aria-label]="'Export logs'"
+        type="button">
+        Export
+      </button>
     </div>
   </div>
 
@@ -79,6 +87,63 @@
           </span>
         </div>
       }
+    </div>
+  }
+
+  @if (showExportModal()) {
+    <div class="modal-backdrop" (click)="closeExportModal()">
+      <div class="export-modal surface" role="dialog" aria-modal="true" aria-label="Export logs" (click)="$event.stopPropagation()">
+        <h2 class="export-modal-title">Export Logs</h2>
+
+        <div class="export-field">
+          <label for="export-format">Format</label>
+          <select id="export-format" [(ngModel)]="exportFormat">
+            <option value="json">JSON</option>
+            <option value="csv">CSV</option>
+            <option value="text">Text</option>
+          </select>
+        </div>
+
+        <div class="export-field">
+          <label for="export-category">Category</label>
+          <select id="export-category" [(ngModel)]="exportCategory">
+            <option value="">All categories</option>
+            @for (category of categories(); track category) {
+              <option [value]="category">{{ category }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="export-field">
+          <label for="export-min-level">Min level</label>
+          <select id="export-min-level" [(ngModel)]="exportMinLevel">
+            <option value="">Any</option>
+            @for (level of logLevels; track level) {
+              <option [value]="level">{{ level }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="export-field">
+          <label for="export-from">From</label>
+          <input id="export-from" type="datetime-local" [(ngModel)]="exportFrom" />
+        </div>
+
+        <div class="export-field">
+          <label for="export-to">To</label>
+          <input id="export-to" type="datetime-local" [(ngModel)]="exportTo" />
+        </div>
+
+        <div class="export-field">
+          <label for="export-limit">Limit</label>
+          <input id="export-limit" type="number" min="1" max="10000" [(ngModel)]="exportLimit" />
+        </div>
+
+        <div class="export-modal-actions">
+          <button class="toolbar-btn" type="button" (click)="closeExportModal()">Cancel</button>
+          <button class="toolbar-btn active" type="button" (click)="runExport()">Export</button>
+        </div>
+      </div>
     </div>
   }
 </div>

@@ -2,10 +2,12 @@ import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angula
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogsService, LogEntry } from '../../core/services/logs.service';
+import { LogsService, LogEntry, LogExportFilters } from '../../core/services/logs.service';
 
 const MAX_BUFFERED_ENTRIES = 2000;
 const BACKFILL_COUNT = 200;
+
+const LOG_LEVELS = ['Trace', 'Debug', 'Information', 'Warning', 'Error', 'Critical'];
 
 @Component({
   selector: 'app-logs',
@@ -28,6 +30,15 @@ export class LogsComponent implements OnInit {
 
   isLoadingBackfill = signal(false);
   backfillError = signal<string | null>(null);
+
+  logLevels = LOG_LEVELS;
+  showExportModal = signal(false);
+  exportFormat: LogExportFilters['format'] = 'json';
+  exportCategory = '';
+  exportMinLevel = '';
+  exportFrom = '';
+  exportTo = '';
+  exportLimit = 1000;
 
   filteredEntries = computed(() => {
     const category = this.categoryFilter();
@@ -104,5 +115,35 @@ export class LogsComponent implements OnInit {
 
   formatTimestamp(timestampUtc: string): string {
     return new Date(timestampUtc).toLocaleTimeString();
+  }
+
+  openExportModal(): void {
+    this.exportCategory = this.categoryFilter();
+    this.showExportModal.set(true);
+  }
+
+  closeExportModal(): void {
+    this.showExportModal.set(false);
+  }
+
+  runExport(): void {
+    const url = this.logsService.buildExportUrl({
+      format: this.exportFormat,
+      category: this.exportCategory || undefined,
+      minLevel: this.exportMinLevel || undefined,
+      from: this.exportFrom || undefined,
+      to: this.exportTo || undefined,
+      limit: this.exportLimit || undefined
+    });
+
+    // Real anchor-click navigation (not window.location, not target="_blank") so the
+    // browser downloads via Content-Disposition without leaving or opening a tab.
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+
+    this.closeExportModal();
   }
 }

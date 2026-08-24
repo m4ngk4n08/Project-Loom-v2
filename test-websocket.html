@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Loom WebSocket Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        #status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        #status.connected { background: #4caf50; }
+        #status.disconnected { background: #f44336; }
+        #messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #444;
+            padding: 10px;
+            background: #252526;
+            font-size: 12px;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #007acc;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 3px;
+        }
+        button:hover { background: #005a9e; }
+    </style>
+</head>
+<body>
+    <h1>🔌 Loom WebSocket Test</h1>
+
+    <div id="status" class="disconnected">Disconnected</div>
+
+    <button onclick="connect()">Connect</button>
+    <button onclick="disconnect()">Disconnect</button>
+    <button onclick="clearMessages()">Clear Messages</button>
+
+    <h3>Messages Received:</h3>
+    <div id="messages"></div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                addMessage('Already connected', 'warning');
+                return;
+            }
+
+            addMessage('Connecting to ws://localhost:5209/ws/metrics...', 'info');
+
+            ws = new WebSocket('ws://localhost:5209/ws/metrics');
+
+            ws.onopen = () => {
+                document.getElementById('status').className = 'connected';
+                document.getElementById('status').textContent = 'Connected';
+                addMessage('✅ WebSocket connected!', 'success');
+            };
+
+            ws.onmessage = (event) => {
+                messageCount++;
+                const data = JSON.parse(event.data);
+                addMessage(`Message #${messageCount}: ${JSON.stringify(data, null, 2)}`, 'data');
+            };
+
+            ws.onerror = (error) => {
+                addMessage(`❌ Error: ${error}`, 'error');
+            };
+
+            ws.onclose = () => {
+                document.getElementById('status').className = 'disconnected';
+                document.getElementById('status').textContent = 'Disconnected';
+                addMessage('❌ WebSocket closed', 'info');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                addMessage('Disconnecting...', 'info');
+            }
+        }
+
+        function addMessage(text, type) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            messageDiv.textContent = text;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+            messageCount = 0;
+        }
+    </script>
+</body>
+</html>

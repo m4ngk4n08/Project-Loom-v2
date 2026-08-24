@@ -7,4 +7,6 @@ public sealed record AlertWebhookPayload
     public required long ObservedCount { get; init; }
     public required double ObservedAverage { get; init; }
     public required DateTime FiredAt { get; init; }
+    public required string Status { get; init; }      // "firing" | "resolved"
+    public DateTime? ResolvedAt { get; init; }
 }

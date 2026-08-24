@@ -191,6 +191,70 @@ public class AlertTargetTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await task);
     }
 
+    [Fact]
+    public async Task ConsoleAlertTarget_ResolvedNotification_WritesResolvedOutput()
+    {
+        // Arrange
+        var target = new ConsoleAlertTarget();
+        var notification = CreateTestResolvedNotification();
+
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+        Console.SetOut(writer);
+
+        try
+        {
+            // Act
+            await target.NotifyAsync(notification, CancellationToken.None);
+
+            // Assert
+            var output = writer.ToString();
+            Assert.Contains("[RESOLVED]", output);
+            Assert.DoesNotContain("[ALERT]", output);
+            Assert.Contains("TestAlert", output);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+
+    [Fact]
+    public async Task WebhookAlertTarget_FiringNotification_PayloadHasFiringStatusAndNoResolvedAt()
+    {
+        // Arrange
+        var handler = new TestHttpMessageHandler();
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://test.com") };
+        var target = new WebhookAlertTarget(httpClient, "http://test.com/webhook");
+        var notification = CreateTestNotification();
+
+        // Act
+        await target.NotifyAsync(notification, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(handler.LastPayloadJson);
+        Assert.Contains("\"status\":\"firing\"", handler.LastPayloadJson);
+        Assert.DoesNotContain("\"resolvedAt\"", handler.LastPayloadJson);
+    }
+
+    [Fact]
+    public async Task WebhookAlertTarget_ResolvedNotification_PayloadHasResolvedStatusAndResolvedAt()
+    {
+        // Arrange
+        var handler = new TestHttpMessageHandler();
+        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://test.com") };
+        var target = new WebhookAlertTarget(httpClient, "http://test.com/webhook");
+        var notification = CreateTestResolvedNotification();
+
+        // Act
+        await target.NotifyAsync(notification, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(handler.LastPayloadJson);
+        Assert.Contains("\"status\":\"resolved\"", handler.LastPayloadJson);
+        Assert.Contains("\"resolvedAt\"", handler.LastPayloadJson);
+    }
+
     // Helper methods
     private static AlertNotification CreateTestNotification()
     {
@@ -203,6 +267,12 @@ public class AlertTargetTests
         var firedAt = DateTime.UtcNow;
 
         return new AlertNotification(rule, aggregate, firedAt);
+    }
+
+    private static AlertNotification CreateTestResolvedNotification()
+    {
+        var firing = CreateTestNotification();
+        return firing with { State = AlertState.Resolved, ResolvedAt = DateTime.UtcNow };
     }
 }
 
@@ -229,6 +299,7 @@ public class TestHttpMessageHandler : HttpMessageHandler
     public bool WasCalled { get; private set; }
     public Uri? LastRequestUri { get; private set; }
     public HttpMethod? LastMethod { get; private set; }
+    public string? LastPayloadJson { get; private set; }
     public bool ShouldDelay { get; set; }
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -240,6 +311,10 @@ public class TestHttpMessageHandler : HttpMessageHandler
         if (ShouldDelay)
         {
             await Task.Delay(10000, cancellationToken); // Long delay for cancellation test
+        }
+        else if (request.Content is not null)
+        {
+            LastPayloadJson = await request.Content.ReadAsStringAsync(cancellationToken);
         }
 
         return new HttpResponseMessage(HttpStatusCode.OK);

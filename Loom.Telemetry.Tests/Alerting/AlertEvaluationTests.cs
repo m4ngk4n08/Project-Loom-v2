@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
@@ -272,6 +273,396 @@ public class AlertEvaluationTests
         }
 
         Assert.True(notifications <= 1, $"Expected at most 1 notification due to cooldown, got {notifications}");
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    /// <summary>Keeps a metric fed with a value on an interval until cancelled, so a window
+    /// never goes empty ("no data") while the test wants to observe fire/resolve transitions
+    /// driven purely by the VALUE crossing the condition threshold.</summary>
+    private static async Task RecordPeriodicallyAsync(string metricName, double value, TimeSpan interval, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                LoomMetrics.RecordCounter(metricName, value);
+                await Task.Delay(interval, ct);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on cancellation.
+        }
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_StaysActiveWhileConditionHolds_DoesNotReNotifyBeforeCooldown()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "StaysActive_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromSeconds(2);
+        var rule = new AlertRule("StaysActiveAlert", metricName, window)
+        {
+            Condition = agg => agg.Count > 0
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        using var recordCts = new CancellationTokenSource();
+        var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
+
+        // Act - keep the condition true across several ticks (window/10 = 200ms tick),
+        // well inside one cooldown window (2s)
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(900);
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+        recordCts.Cancel();
+        await recordTask;
+
+        // Assert - fired exactly once, never resolved
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        Assert.Single(notifications);
+        Assert.Equal(AlertState.Firing, notifications[0].State);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_ConditionClears_EmitsExactlyOneResolved()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "ResolveTest_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(600);
+        var rule = new AlertRule("ResolveAlert", metricName, window)
+        {
+            Condition = agg => agg.Max > 50
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        // Initial breach
+        LoomMetrics.RecordCounter(metricName, 100.0);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(150); // let the fire tick land
+
+        // Keep the window non-empty with low values so the alert can genuinely RESOLVE
+        // (not just go quiet) once the initial high value ages out of the window.
+        using var lowValueCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var recordTask = RecordPeriodicallyAsync(metricName, 10.0, TimeSpan.FromMilliseconds(50), lowValueCts.Token);
+
+        await Task.Delay(1400); // window (600ms) + margin for the high value to age out
+        lowValueCts.Cancel();
+        await recordTask;
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var firing = notifications.Where(n => n.State == AlertState.Firing).ToList();
+        var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
+
+        Assert.NotEmpty(firing);
+        Assert.Single(resolved);
+        Assert.Equal(firing[0].FiredAt, resolved[0].FiredAt);
+        Assert.NotNull(resolved[0].ResolvedAt);
+        Assert.True(resolved[0].ResolvedAt!.Value > resolved[0].FiredAt);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_AlreadyResolved_DoesNotEmitSecondResolved()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "NoDoubleResolve_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(600);
+        var rule = new AlertRule("NoDoubleResolveAlert", metricName, window)
+        {
+            Condition = agg => agg.Max > 50
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        LoomMetrics.RecordCounter(metricName, 100.0);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(150);
+
+        using var lowValueCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var recordTask = RecordPeriodicallyAsync(metricName, 10.0, TimeSpan.FromMilliseconds(50), lowValueCts.Token);
+
+        // Wait well past resolution and keep ticking with the condition staying clear
+        await Task.Delay(2000);
+        lowValueCts.Cancel();
+        await recordTask;
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
+        Assert.Single(resolved);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_FullCycle_FiresResolvesFiresAgain()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "FullCycle_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(600);
+        var rule = new AlertRule("FullCycleAlert", metricName, window)
+        {
+            Condition = agg => agg.Max > 50
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        LoomMetrics.RecordCounter(metricName, 100.0); // first breach
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(150);
+
+        using var lowValueCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var recordTask = RecordPeriodicallyAsync(metricName, 10.0, TimeSpan.FromMilliseconds(50), lowValueCts.Token);
+
+        await Task.Delay(1400); // let it resolve
+        lowValueCts.Cancel();
+        await recordTask;
+
+        LoomMetrics.RecordCounter(metricName, 100.0); // second breach
+        await Task.Delay(1400);
+
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var firing = notifications.Where(n => n.State == AlertState.Firing).ToList();
+        var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
+
+        Assert.True(firing.Count >= 2, $"Expected at least 2 Firing notifications, got {firing.Count}");
+        Assert.Single(resolved);
+        Assert.True(firing[^1].FiredAt > resolved[0].FiredAt);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_Resolution_IgnoresCooldown()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "IgnoresCooldown_" + Guid.NewGuid().ToString("N");
+        // The cooldown equals rule.Window, so the only way to prove resolve isn't waiting
+        // on it is to clear the condition long before a window's worth of time has passed.
+        // A closure-captured flag (rather than waiting for a value to age out of the
+        // aggregation window) lets the condition flip instantly, independent of Window.
+        var window = TimeSpan.FromSeconds(2);
+        var breached = true;
+        var rule = new AlertRule("IgnoresCooldownAlert", metricName, window)
+        {
+            Condition = _ => breached
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        using var recordCts = new CancellationTokenSource();
+        // Keeps the window non-empty (some data, any data) so the rule is evaluated each
+        // tick instead of being skipped as "no data".
+        var recordTask = RecordPeriodicallyAsync(metricName, 1.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(300); // window/10 = 200ms tick - let it fire
+
+        breached = false; // clear well within the 2s cooldown/window
+        await Task.Delay(300); // let the next tick observe the clear and resolve
+
+        recordCts.Cancel();
+        await recordTask;
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
+        Assert.Single(resolved);
+        Assert.True(resolved[0].ResolvedAt!.Value - resolved[0].FiredAt < window,
+            "Resolved should not wait for the cooldown/window to elapse.");
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_Silence_GatesFiringNotResolving()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "SilenceResolves_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(600);
+        var rule = new AlertRule("SilenceResolvesAlert", metricName, window)
+        {
+            Condition = agg => agg.Max > 50
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        LoomMetrics.RecordCounter(metricName, 100.0);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(150); // let it fire (unsilenced at this point)
+
+        // Silence AFTER it already fired
+        silenceStore.Silence("SilenceResolvesAlert", DateTime.UtcNow.AddMinutes(10));
+
+        using var lowValueCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var recordTask = RecordPeriodicallyAsync(metricName, 10.0, TimeSpan.FromMilliseconds(50), lowValueCts.Token);
+
+        await Task.Delay(1400); // let the condition clear
+        lowValueCts.Cancel();
+        await recordTask;
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert - it still resolves despite being silenced
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var firing = notifications.Where(n => n.State == AlertState.Firing).ToList();
+        var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
+
+        Assert.Single(firing);
+        Assert.Single(resolved);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_SilencedFromStart_NeverFires()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "SilencedFromStart_" + Guid.NewGuid().ToString("N");
+        var rule = new AlertRule("SilencedFromStartAlert", metricName, TimeSpan.FromSeconds(1))
+        {
+            Condition = agg => agg.Count > 0
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        silenceStore.Silence("SilencedFromStartAlert", DateTime.UtcNow.AddMinutes(10));
+
+        LoomMetrics.RecordCounter(metricName, 100.0);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(300);
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.False(channel.Reader.TryRead(out _));
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_NoData_EmitsNeitherFiringNorResolved()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "NoDataGap_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(400);
+        var rule = new AlertRule("NoDataGapAlert", metricName, window)
+        {
+            Condition = agg => agg.Max > 50
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        LoomMetrics.RecordCounter(metricName, 100.0); // initial fire
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(150); // let the fire tick land
+
+        // Record NOTHING at all past this point - the window empties out entirely
+        // ("no data"). Before the STEP 3 fix, an empty window returned a zero aggregate,
+        // which a `>` condition evaluates false on - an incorrect auto-resolve. If that
+        // regressed, a second (Resolved) notification would show up here.
+        await Task.Delay(1200); // well past window (400ms), buffer for this metric goes empty
+
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert - only the original Firing notification, nothing else
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        Assert.Single(notifications);
+        Assert.Equal(AlertState.Firing, notifications[0].State);
 
         // Cleanup
         LoomTelemetryOptionsAlertingExtensions.Rules.Clear();

@@ -14,7 +14,4 @@ public class AlertRule(string name, string metricName, TimeSpan window)
     public Func<MetricAggregate, bool> Condition { get; set; } = static _ => false;
 
     public List<Type> TargetTypes { get; } = [];
-
-    // Circular buffer of recent values within Window — the "sliding window" ADR-8 describes.
-    internal readonly Queue<(DateTime Timestamp, double Value)> RecentValues = new();
 }

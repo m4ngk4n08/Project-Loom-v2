@@ -595,6 +595,41 @@ than read once)
 **Priority:** 🟡 MEDIUM (alerting works for the "something is wrong" case that
 exists today, but both gaps reduce operational trust in the feature)
 
+**Status:** Fire/resolve state machine and status field implemented. The
+startup-snapshot bug described above is a separate, still-open issue — not touched
+by this work.
+
+---
+
+### 6.6 Alerting Has No No-Data Grace Period 🟡 MEDIUM
+
+**Issue:** `AlertEvaluationHostedService.ComputeWindowAggregate` now returns `null`
+when a metric's window holds no samples, and the evaluation loop treats `null` as
+"skip this rule — no fire, no resolve, state preserved" (see § 6.5). That's correct
+as far as it goes, but it means a metric that stops arriving entirely (crashed
+collector, network partition, misconfigured emitter) leaves any active alert on it
+stuck in whatever state it was in — firing forever with no further notifications, or
+never firing at all — for as long as the process runs. There's no timeout that turns
+prolonged silence into its own signal.
+
+**Root Cause:** No-data and "condition false" are correctly no longer conflated, but
+no-data has no expiry. The loop has no concept of "how long has this rule had no
+data" to compare against a grace period.
+
+**Impact:** An operator with an active alert on a metric whose source dies gets no
+further updates — the alert just stops updating silently, indistinguishable from
+"still broken, cooldown hasn't elapsed yet" without checking timestamps.
+
+**Fix sketch (not implemented):** Track last-seen-data time per rule. After a
+configurable grace period with no data, either auto-resolve the active alert (with a
+distinct reason so it's not confused with condition-cleared) or fire a separate
+"no data" alert. Needs a design decision on which, and whether it's per-rule or
+global.
+
+**Effort:** 2-4 hours  
+**Priority:** 🟡 MEDIUM (silent gap, not a wrong answer — but "the alert went quiet"
+is exactly the operational-trust problem § 6.5 exists to fix)
+
 ---
 
 ## 7. Priority Summary
@@ -651,6 +686,7 @@ items this document ever tracked, are both completed.
 | DEBT-014 | Alerting README broken example | 🟢 LOW | 15m-2h | Open | - | Backlog |
 | DEBT-015 | Alerting resolution notifications | 🟡 MEDIUM | 4-8h | Open | - | Backlog |
 | DEBT-016 | Prometheus counters stop growing past buffer wrap | 🟡 MEDIUM | 4-6h | Open | - | Backlog |
+| DEBT-017 | Alerting no-data grace period | 🟡 MEDIUM | 2-4h | Open | - | § 6.6 |
 
 ---
 

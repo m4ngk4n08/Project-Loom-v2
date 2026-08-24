@@ -1,4 +1,5 @@
 using System.Diagnostics.Tracing;
+using System.Text.Json;
 using Loom.Storage;
 using Loom.Telemetry;
 using Microsoft.Diagnostics.NETCore.Client;
@@ -9,21 +10,23 @@ using Microsoft.Extensions.Logging;
 namespace Loom.Dashboard;
 
 /// <summary>
-/// Background service that pulls metrics from a target process via EventPipe
-/// and writes them into the local IMetricStore.
+/// Background service that pulls metrics and logs from a target process via
+/// EventPipe and writes them into the local IMetricStore / ILogStore.
 /// </summary>
 public sealed class EventPipeBridge : BackgroundService
 {
     private readonly int _targetPid;
     private readonly IMetricStore _store;
+    private readonly ILogStore _logStore;
     private readonly ILogger<EventPipeBridge> _logger;
     private long _recordsIngested;
     private int _reconnectCount;
 
-    public EventPipeBridge(int targetPid, IMetricStore store, ILogger<EventPipeBridge> logger)
+    public EventPipeBridge(int targetPid, IMetricStore store, ILogStore logStore, ILogger<EventPipeBridge> logger)
     {
         _targetPid = targetPid;
         _store = store;
+        _logStore = logStore;
         _logger = logger;
     }
 
@@ -77,7 +80,10 @@ public sealed class EventPipeBridge : BackgroundService
                 0,
                 new Dictionary<string, string?> {
                     ["EventCounterIntervalSec"] = "1"
-                })
+                }),
+            // JsonMessage only (keyword 8) - it already carries the formatted text,
+            // so enabling FormattedMessage as well would deliver every log twice.
+            new EventPipeProvider("Microsoft-Extensions-Logging", EventLevel.Verbose, 8)
         };
 
         using var session = client.StartEventPipeSession(providers, requestRundown: false);
@@ -94,6 +100,19 @@ public sealed class EventPipeBridge : BackgroundService
             var eventName = traceEvent.EventName;
             if (eventName.Contains("Collection") || eventName.Contains("ProcessInfo"))
                 return;
+
+            if (eventName == "MessageJson")
+            {
+                try
+                {
+                    IngestLogMessage(traceEvent);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "MessageJson parse failed for PID {Pid}.", _targetPid);
+                }
+                return;
+            }
 
             // System.Runtime delivers EventCounters events (JSON payload) rather
             // than the strongly-typed *ValuePublished shape.
@@ -172,6 +191,76 @@ public sealed class EventPipeBridge : BackgroundService
             try { source.Process(); }
             catch { }
         }, ct);
+    }
+
+    private void IngestLogMessage(TraceEvent traceEvent)
+    {
+        var payloadNames = traceEvent.PayloadNames;
+        if (payloadNames == null) return;
+
+        string? category = null;
+        string? formattedMessage = null;
+        string? exceptionJson = null;
+        int level = -1;
+        int eventId = 0;
+
+        for (int i = 0; i < payloadNames.Length; i++)
+        {
+            switch (payloadNames[i])
+            {
+                case "LoggerName":
+                    category = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "Level":
+                    int.TryParse(traceEvent.PayloadValue(i)?.ToString(), out level);
+                    break;
+                case "EventId":
+                    int.TryParse(traceEvent.PayloadValue(i)?.ToString(), out eventId);
+                    break;
+                case "FormattedMessage":
+                    formattedMessage = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "ExceptionJson":
+                    exceptionJson = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+            }
+        }
+
+        if (category == null || formattedMessage == null) return;
+        // Observed range is 0..5 (Trace..Critical), matching LoomLogLevel's ordering.
+        if (level < 0 || level > 5) return;
+
+        var (exceptionType, exceptionMessage) = ParseExceptionJson(exceptionJson);
+
+        var record = new LogRecord(
+            formattedMessage,
+            category,
+            (LoomLogLevel)level,
+            traceEvent.TimeStamp.ToUniversalTime().Ticks,
+            eventId,
+            exceptionType,
+            exceptionMessage);
+
+        _logStore.Write(in record);
+    }
+
+    internal static (string? Type, string? Message) ParseExceptionJson(string? exceptionJson)
+    {
+        if (string.IsNullOrEmpty(exceptionJson) || exceptionJson == "{}")
+            return (null, null);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(exceptionJson);
+            var root = doc.RootElement;
+            var type = root.TryGetProperty("TypeName", out var typeProp) ? typeProp.GetString() : null;
+            var message = root.TryGetProperty("Message", out var messageProp) ? messageProp.GetString() : null;
+            return (type, message);
+        }
+        catch (JsonException)
+        {
+            return (null, null);
+        }
     }
 
     private void IngestEventCounters(TraceEvent traceEvent)

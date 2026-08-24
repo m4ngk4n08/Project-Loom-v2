@@ -25,6 +25,14 @@
 >    The Phase 7 "integrate with `Loom.Core` SIMD engine" work never happened.
 > 3. **`Loom.Storage` is in-memory only** — no memory-mapped binary cache, no RAG
 >    ingestor, despite those appearing in the planned structure.
+> 4. **The Grafana Cloud and Elasticsearch exporters were deleted** (commit `6d8cc2b`).
+>    Phase 12 below specifies all four exporters and Step 12.4 gives a full
+>    `GrafanaCloudExporter` listing; those two were built, found to be non-functional
+>    against their real targets (bespoke JSON where Grafana Cloud requires
+>    snappy-compressed protobuf remote-write; unescaped string-concatenated NDJSON with
+>    `ApiKey` never read for Elasticsearch), never registered in any host, and removed.
+>    `ToGrafana()` / `ToElasticsearch()` no longer exist. **Console and the Prometheus
+>    formatter are the whole exporter surface.** See `BACKLOG.md` § 9.
 >
 > For the current project graph, see `CLAUDE.md` → **Project Structure (Actual)**,
 > which is authoritative on structure and build commands.

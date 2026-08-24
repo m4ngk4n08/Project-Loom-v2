@@ -41,10 +41,18 @@ another class was mid-assertion on.
 **Actual Fix (neither of the two options this entry originally proposed):**
 `[assembly: CollectionBehavior(DisableTestParallelization = true)]` in
 `Loom.Telemetry.Tests/AssemblyInfo.cs`. Serializing the whole assembly makes the
-existing per-class resets sufficient — no `ResetForTesting()` API was added, and no
-DI-based buffer factory was introduced. The suite is small and I/O-light, so running
+existing per-class resets sufficient. The suite is small and I/O-light, so running
 serially has negligible wall-clock cost against a source of non-deterministic
 failures.
+
+**Correction (2026-08-24):** an earlier revision of this entry claimed "no
+`ResetForTesting()` API was added". That was wrong and contradicted § 9's own decision
+log. `LoomMetrics.ResetForTesting()` exists at `Loom.Telemetry/LoomMetrics.cs:155` and
+test classes call it — it was option 1 of this entry's original proposal and it did ship.
+What it could not do alone was survive xUnit running test *classes* in parallel, since
+the resets themselves then raced. The assembly-wide serialization is the piece that was
+added on top. No DI-based buffer factory was introduced (that was option 2, still
+rejected as too invasive).
 
 **No further action needed.**
 
@@ -112,7 +120,11 @@ this is specifically about the endpoint's own clamping wrapper)
 
 ## 2. Binary Size & Build Optimization
 
-### 2.1 Binary Size Target Adjustment 🟡 MEDIUM
+### 2.1 Binary Size Target Adjustment 🟡 MEDIUM (COMPLETED)
+
+**Status:** ✅ **RESOLVED** — Option A was taken. `CLAUDE.md` now states `<17 MB` in
+every place it names the target, and `TESTING.md`'s thresholds match. See also § 5.1,
+which tracked the same documentation change from the docs side.
 
 **Issue:** Original target was < 15 MB, actual size is 16.3 MB
 
@@ -121,7 +133,9 @@ this is specifically about the endpoint's own clamping wrapper)
 - Phases 5-12 added significant features:
   - Query language with SQL-like parser
   - Alerting engine with sliding windows
-  - 4 exporters (Prometheus, Grafana, Elasticsearch, Console)
+  - Exporters (at the time: Prometheus, Grafana Cloud, Elasticsearch, Console —
+    Grafana Cloud and Elasticsearch were deleted in `6d8cc2b` as non-functional dead
+    code, so the 16.3 MB figure below predates that removal and is now pessimistic)
   - Attribute-based instrumentation
   - Custom collectors plugin system
 
@@ -347,14 +361,18 @@ tests in `InMemoryMetricStoreTests`, `MetricSeriesKeyTests`, and
 
 ## 5. Documentation Gaps
 
-### 5.1 Binary Size Target Documentation 🟡 MEDIUM
+### 5.1 Binary Size Target Documentation 🟡 MEDIUM (COMPLETED)
+
+**Status:** ✅ **RESOLVED** (2026-08-24) — all three files now agree on `<17 MB`.
+`README.md`'s constraints table was the last holdout; it advertised `< 15 MB` long after
+`CLAUDE.md` and `TESTING.md` had been corrected.
 
 **Issue:** `CLAUDE.md` states < 15 MB but actual is 16.3 MB
 
 **Files to Update:**
-- `CLAUDE.md` - Update target to < 17 MB
-- `TESTING.md` - Update thresholds (already done)
-- `README.md` - Update specifications (if exists)
+- `CLAUDE.md` - Update target to < 17 MB ✅
+- `TESTING.md` - Update thresholds ✅
+- `README.md` - Update specifications ✅
 
 **Proposed Change:**
 ```markdown
@@ -420,7 +438,18 @@ until such an overload exists.
 
 ## 6. Future Enhancements
 
-### 6.1 Test Reset Automation 🟡 MEDIUM
+### 6.1 Test Reset Automation 🟢 LOW (SUPERSEDED)
+
+**Status:** ⚠️ **SUPERSEDED by § 1.1** — downgraded from 🟡 MEDIUM. The problem this
+entry exists to solve is already solved by other means: `LoomMetrics.ResetForTesting()`
+ships (`Loom.Telemetry/LoomMetrics.cs:155`), test classes call it in their
+constructor/`Dispose`, and `[assembly: CollectionBehavior(DisableTestParallelization =
+true)]` removes the cross-class race that made those resets insufficient. The suite runs
+362/362 with zero skips and no isolation-related flakiness.
+
+What remains is optional tidiness — a shared fixture would centralize the per-class reset
+boilerplate — with no correctness benefit. Keep only if that duplication becomes a
+maintenance problem.
 
 **Issue:** Manual test isolation management
 
@@ -563,7 +592,24 @@ No trigger today.
 
 ---
 
-### 6.5 Alerting Has No Resolution Notifications 🟡 MEDIUM
+### 6.5 Alerting Has No Resolution Notifications 🟡 MEDIUM (COMPLETED)
+
+**Status:** ✅ **RESOLVED** in `3bd0d8b`. `AlertState` (Firing/Resolved) plus `State` and
+`ResolvedAt` on `AlertNotification`; `AlertEvaluationHostedService` now tracks active
+alerts separately from the re-notify cooldown and emits exactly one Resolved when a
+condition clears, carrying the original firing time. Resolution deliberately ignores both
+the cooldown and silencing — an alert an operator already saw open always gets its close.
+Console, webhook and email targets render both states; the webhook payload gained a
+lowercase `status` and `ResolvedAt`.
+
+Also fixed here: an empty evaluation window used to return a **zero aggregate** rather
+than "no data", so `agg => agg.Average < 5` fired spuriously on silence — and once
+resolution existed, a `>` condition would have auto-resolved an active alert merely
+because data stopped arriving. It now returns null and the tick is skipped, preserving
+state. § 6.6 tracks the no-data grace period that follows from that.
+
+**⚠️ The startup-snapshot bug described below was NOT fixed — it is carved out as
+§ 6.7 and remains open.**
 
 **Issue:** Alerts can fire, but nothing ever tells a target that a firing condition
 stopped being true. Once notified, a target has no signal to distinguish "still
@@ -632,6 +678,45 @@ is exactly the operational-trust problem § 6.5 exists to fix)
 
 ---
 
+### 6.7 Alert Rules Registered After Startup Are Never Evaluated 🟡 MEDIUM
+
+**Issue:** Carved out of § 6.5, which fixed resolution notifications but deliberately
+left this untouched.
+
+`AlertEvaluationHostedService.ExecuteAsync` reads the rule registry **once**:
+
+```csharp
+var rules = LoomTelemetryOptionsAlertingExtensions.Rules;
+if (rules.Count == 0) { logger?.LogInformation("...no rules registered."); return; }
+```
+
+Two consequences. If the registry is empty when the hosted service starts, the method
+**returns** — the service never enters its timer loop, and no rule registered later is
+ever evaluated, for the life of the process. Even when it is non-empty, the tick interval
+is computed once from that snapshot (`rules.Select(r => r.Window).Min() / 10`), so a rule
+added afterwards with a shorter window would be evaluated too slowly even if the loop did
+see it.
+
+**Root Cause:** `LoomTelemetryOptionsAlertingExtensions.Rules` is a plain
+`public static readonly List<AlertRule>` — process-global, not thread-safe, and not
+observable. Nothing can notify the hosted service that it changed.
+
+**Impact:** Registration order becomes load-bearing and silently so. Any config-reload or
+runtime rule-management feature would appear to work — the rule lands in the list — while
+never firing.
+
+**Fix sketch (not implemented):** Re-read the registry each tick rather than snapshotting
+it, and drop the empty-list early return so the loop idles instead of exiting.
+Recomputing the tick interval per pass covers the window case. A fuller fix makes the
+registry observable and thread-safe, which is also a prerequisite for any alert CRUD API.
+
+**Effort:** 2-4 hours (re-read per tick), more if the registry is made properly
+observable
+
+**Priority:** 🟡 MEDIUM (silently does nothing; the failure mode is invisible)
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)
@@ -647,11 +732,19 @@ items this document ever tracked, are both completed.
 ---
 
 ### Medium Priority (Post-1.0)
-1. 🟡 Binary size documentation (§ 5.1) - 30 minutes
-2. 🟡 Test reset automation (§ 6.1) - 4-6 hours
-3. 🟡 Alerting has no resolution notifications (§ 6.5) - 4-8 hours
+1. 🟡 Alerting no-data grace period (§ 6.6) - 2-4 hours
+2. 🟡 Alert rules registered after startup never evaluated (§ 6.7) - 2-4 hours
 
-**Total Medium Priority Work:** ~9-15 hours
+**Total Medium Priority Work:** ~4-8 hours
+
+Both are in the same file (`AlertEvaluationHostedService`) and are natural companions:
+§ 6.6 needs per-rule last-seen-data tracking, § 6.7 needs the rule list re-read each
+tick. Doing them together is cheaper than either alone.
+
+Closed since the last revision: § 5.1 (binary size docs — all three files now agree on
+<17 MB), § 6.1 (superseded by § 1.1's fix; downgraded to LOW), § 6.5 (resolution
+notifications shipped in `3bd0d8b`), § 2.1 (Option A taken), § 4.3 and § 4.4
+(Prometheus output and counter monotonicity).
 
 ---
 
@@ -661,8 +754,16 @@ items this document ever tracked, are both completed.
 3. 🟢 Deferred log-capture design questions (§ 6.4) - 1-2 hours (decisions only, blocked)
 4. 🟢 No test coverage for `/api/logs/tail` clamping (§ 1.4) - 1-2 hours
 5. 🟢 Alerting README documents a call that throws (§ 5.3) - 15 min - 2 hours
+6. 🟢 Size optimization flags (§ 2.2) - documentation only
+7. 🟢 Allocation testing baseline documentation (§ 5.2)
+8. 🟢 Test reset automation (§ 6.1) - superseded, optional tidiness only
 
 **Total Low Priority Work:** ~11-18 hours (§ 6.4 excluded - blocked on dependencies)
+
+**§ 6.3 (benchmark suite) is worth more than its LOW rating suggests.** Two deferred
+optimizations are explicitly waiting on measurement it would provide: the zero-allocation
+struct key for the counter accumulator (§ 4.4's note) and any decision about whether
+tagged-counter write allocation matters at all. Without benchmarks those stay guesses.
 
 ---
 
@@ -672,8 +773,8 @@ items this document ever tracked, are both completed.
 |----------|-------|----------|--------|--------|----------|--------|
 | ~~DEBT-001~~ | ~~Test isolation fix~~ | ~~🔴 HIGH~~ | ~~2-4h~~ | ✅ Completed | - | § 1.1 |
 | ~~DEBT-002~~ | ~~Flaky timer tests~~ | ~~🟡 MEDIUM~~ | ~~4-6h~~ | ✅ Completed | - | § 1.2 |
-| DEBT-003 | Binary size docs | 🟡 MEDIUM | 30m | Open | - | Phase 13 |
-| DEBT-004 | Test automation | 🟡 MEDIUM | 4-6h | Open | - | Post-1.0 |
+| ~~DEBT-003~~ | ~~Binary size docs~~ | ~~🟡 MEDIUM~~ | ~~30m~~ | ✅ Completed | - | § 2.1, § 5.1 |
+| DEBT-004 | Test automation | 🟢 LOW | 4-6h | ⚠️ Superseded | - | § 6.1 |
 | ~~DEBT-005~~ | ~~LINQ optimization~~ | ~~🟢 LOW~~ | ~~1-2h~~ | ✅ Completed (stale) | - | § 4.1 |
 | DEBT-006 | Search endpoint | 🟢 LOW | 1h | Open | - | Backlog |
 | ~~DEBT-007~~ | ~~Parallel tests~~ | ~~🟢 LOW~~ | ~~30m~~ | ❌ Rejected | - | See § 6.2, § 9 |
@@ -684,9 +785,10 @@ items this document ever tracked, are both completed.
 | ~~DEBT-012~~ | ~~PrometheusFormatter invalid output~~ | ~~🟡 MEDIUM~~ | ~~3-5h~~ | ✅ Completed | - | § 4.3 |
 | DEBT-013 | `/api/logs/tail` test coverage | 🟢 LOW | 1-2h | Open | - | Backlog |
 | DEBT-014 | Alerting README broken example | 🟢 LOW | 15m-2h | Open | - | Backlog |
-| DEBT-015 | Alerting resolution notifications | 🟡 MEDIUM | 4-8h | Open | - | Backlog |
-| DEBT-016 | Prometheus counters stop growing past buffer wrap | 🟡 MEDIUM | 4-6h | Open | - | Backlog |
+| ~~DEBT-015~~ | ~~Alerting resolution notifications~~ | ~~🟡 MEDIUM~~ | ~~4-8h~~ | ✅ Completed | - | § 6.5 (`3bd0d8b`) |
+| ~~DEBT-016~~ | ~~Prometheus counters stop growing past buffer wrap~~ | ~~🟡 MEDIUM~~ | ~~4-6h~~ | ✅ Completed | - | § 4.4 (`25a1fae`) |
 | DEBT-017 | Alerting no-data grace period | 🟡 MEDIUM | 2-4h | Open | - | § 6.6 |
+| DEBT-018 | Alert rules added after startup never evaluated | 🟡 MEDIUM | 2-4h | Open | - | § 6.7 |
 
 ---
 
@@ -763,6 +865,30 @@ architectural change to ADR-5, not a test-infra tweak.
 
 **Action:** § 6.2 marked REJECTED. Revisiting parallel test execution requires
 removing the global statics, not a csproj flag.
+
+---
+
+### 2026-08-24: Backlog Reconciliation After the Cleanup Branch
+
+**Decision:** Close § 2.1, § 5.1 and § 6.5; downgrade § 6.1 to LOW/superseded; split the
+startup-snapshot bug out of § 6.5 into § 6.7; correct § 1.1's `ResetForTesting()` claim.
+
+**Rationale:**
+- § 6.5 was marked open on `main` while `3bd0d8b`, which implements it, was already
+  merged — the document was reporting shipped work as outstanding.
+- § 1.1 asserted "no `ResetForTesting()` API was added". It exists at
+  `LoomMetrics.cs:155`, and § 9's own 2026-08-18 entry records the decision to build it.
+  The document contradicted itself; the correction is recorded in § 1.1 rather than by
+  quietly rewriting the original claim.
+- § 6.5 bundled two unrelated defects. Only resolution notifications were fixed, so
+  closing the whole entry would have buried a live bug. Carving out § 6.7 keeps it
+  visible.
+- § 2.1 and § 5.1 tracked the same documentation change from two angles and were both
+  effectively done; `README.md`'s `< 15 MB` was the last stale copy.
+
+**Pattern worth noting:** five entries in this document were found stale during this
+branch — work happened incidentally and nothing closed the entry. Closing the entry in
+the commit that does the work avoids re-deriving state later.
 
 ---
 

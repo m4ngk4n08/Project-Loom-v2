@@ -3,6 +3,26 @@
 > **Document Role:** Architecture decisions, phase overviews, deployment configuration, and design rationale.
 > For step-by-step implementation with code samples, see `IMPLEMENTATION-METHODOLOGY.md` (authoritative build guide).
 
+> ### ⚠️ Corrections (2026-08-24)
+>
+> This document records decisions as they were made. Delivery diverged in three ways; the
+> ADR text below is left intact as the design record, and these override it for anything
+> present-tense. `CLAUDE.md` → **Project Structure (Actual)** is authoritative on the
+> current codebase.
+>
+> 1. **`Loom.Core` and `Loom.Host` were never built.** The structure diagram at L35 lists
+>    them; neither project exists. `Loom.Web.Api` is the Native AOT publish target, and
+>    `Loom.Dashboard` (`loom-dashboard`) and `Loom.DevTools` (`loom`) are the packaged
+>    dotnet tools. There is no separate bootstrap host and no SIMD math engine.
+> 2. **The Grafana Cloud and Elasticsearch exporters were deleted** (commit `6d8cc2b`).
+>    ADR-9's push-exporter table (L273-274) and the interoperability claim at L583 still
+>    describe them. Both were built, found non-functional against their real targets, never
+>    registered in any host, and removed. **Console plus the Prometheus formatter are the
+>    entire exporter surface.** The pull-vs-push distinction ADR-9 draws still holds — only
+>    the pull side survives. See `BACKLOG.md` § 9.
+> 3. **`Loom.Storage` is in-memory only** — ring buffers for metrics and logs. No
+>    memory-mapped binary cache, no RAG ingestor.
+
 ## Context
 
 Project Loom v2 is a **customizable telemetry platform** for .NET applications built entirely on .NET 10 Native AOT. The current scope is **.NET backend only** — nine telemetry systems delivered as a single AOT-compiled binary with zero runtime reflection.

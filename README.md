@@ -30,7 +30,7 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 
 | Constraint | Why |
 |-----------|-----|
-| Binary size **< 15 MB** | Single-binary deployment |
+| Binary size **< 17 MB** | Single-binary deployment (see `BACKLOG.md` § 2.1) |
 | Memory footprint **< 20 MB** background | Minimal overhead on host app |
 | **No reflection** | AOT can't do runtime codegen |
 | **Zero-allocation hot paths** | `Span<T>`, `ValueTask`, `ArrayPool<T>` |
@@ -208,7 +208,8 @@ dotnet publish Loom.Web.Api/Loom.Web.Api.csproj \
 strip --strip-debug \
   Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 
-# Verify the binary stays under 15 MB
+# Verify the binary stays under 17 MB (see BACKLOG.md § 2.1 for why the target moved
+# from 15 MB; 16.3 MB was the last measurement, taken before two exporters were deleted)
 ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 ```
 

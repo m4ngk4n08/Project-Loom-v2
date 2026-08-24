@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Alerting.Interfaces;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Loom.Telemetry.Tests.Alerting;
@@ -161,8 +162,9 @@ public class AlertTargetTests
     {
         // Arrange
         var handler = new TestHttpMessageHandler();
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://test.com") };
-        var target = new WebhookAlertTarget(httpClient, "http://test.com/webhook");
+        var target = new WebhookAlertTarget(
+            new FakeHttpClientFactory(handler, new Uri("http://test.com")),
+            CreateOptions("http://test.com/webhook"));
         var notification = CreateTestNotification();
 
         // Act
@@ -179,8 +181,9 @@ public class AlertTargetTests
     {
         // Arrange
         var handler = new TestHttpMessageHandler { ShouldDelay = true };
-        var httpClient = new HttpClient(handler);
-        var target = new WebhookAlertTarget(httpClient, "http://test.com/webhook");
+        var target = new WebhookAlertTarget(
+            new FakeHttpClientFactory(handler, baseAddress: null),
+            CreateOptions("http://test.com/webhook"));
         var notification = CreateTestNotification();
         var cts = new CancellationTokenSource();
 
@@ -190,6 +193,51 @@ public class AlertTargetTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await task);
     }
+
+    [Fact]
+    public async Task WebhookAlertTarget_NoUrlConfigured_DoesNotThrowAndDoesNotSend()
+    {
+        // Arrange
+        var handler = new TestHttpMessageHandler();
+        var target = new WebhookAlertTarget(
+            new FakeHttpClientFactory(handler, new Uri("http://test.com")),
+            CreateOptions(null));
+        var notification = CreateTestNotification();
+
+        // Act
+        var exception = await Record.ExceptionAsync(async () =>
+        {
+            await target.NotifyAsync(notification, CancellationToken.None);
+        });
+
+        // Assert
+        Assert.Null(exception);
+        Assert.False(handler.WasCalled);
+    }
+
+    [Fact]
+    public async Task WebhookAlertTarget_EmptyUrlConfigured_DoesNotThrowAndDoesNotSend()
+    {
+        // Arrange
+        var handler = new TestHttpMessageHandler();
+        var target = new WebhookAlertTarget(
+            new FakeHttpClientFactory(handler, new Uri("http://test.com")),
+            CreateOptions(string.Empty));
+        var notification = CreateTestNotification();
+
+        // Act
+        var exception = await Record.ExceptionAsync(async () =>
+        {
+            await target.NotifyAsync(notification, CancellationToken.None);
+        });
+
+        // Assert
+        Assert.Null(exception);
+        Assert.False(handler.WasCalled);
+    }
+
+    private static IOptions<WebhookAlertOptions> CreateOptions(string? url) =>
+        Microsoft.Extensions.Options.Options.Create(new WebhookAlertOptions { Url = url });
 
     [Fact]
     public async Task ConsoleAlertTarget_ResolvedNotification_WritesResolvedOutput()
@@ -224,8 +272,9 @@ public class AlertTargetTests
     {
         // Arrange
         var handler = new TestHttpMessageHandler();
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://test.com") };
-        var target = new WebhookAlertTarget(httpClient, "http://test.com/webhook");
+        var target = new WebhookAlertTarget(
+            new FakeHttpClientFactory(handler, new Uri("http://test.com")),
+            CreateOptions("http://test.com/webhook"));
         var notification = CreateTestNotification();
 
         // Act
@@ -242,8 +291,9 @@ public class AlertTargetTests
     {
         // Arrange
         var handler = new TestHttpMessageHandler();
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://test.com") };
-        var target = new WebhookAlertTarget(httpClient, "http://test.com/webhook");
+        var target = new WebhookAlertTarget(
+            new FakeHttpClientFactory(handler, new Uri("http://test.com")),
+            CreateOptions("http://test.com/webhook"));
         var notification = CreateTestResolvedNotification();
 
         // Act
@@ -292,6 +342,11 @@ public class TestEmailSender : IEmailSender
         LastBody = body;
         return Task.CompletedTask;
     }
+}
+
+public sealed class FakeHttpClientFactory(HttpMessageHandler handler, Uri? baseAddress) : IHttpClientFactory
+{
+    public HttpClient CreateClient(string name) => new(handler, disposeHandler: false) { BaseAddress = baseAddress };
 }
 
 public class TestHttpMessageHandler : HttpMessageHandler

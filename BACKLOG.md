@@ -717,6 +717,35 @@ observable
 
 ---
 
+### 6.8 § 6.6 and § 6.7 Are Now Live Concerns, Not Latent Ones 🟡 MEDIUM
+
+**Issue:** Both § 6.6 (no-data grace period) and § 6.7 (rules registered after startup
+never evaluated) were previously unreachable in practice — `AddAlert` was implemented
+and tested, but nothing called it outside of tests, so `LoomTelemetryOptionsAlertingExtensions.Rules`
+was empty at runtime in both hosts and `AlertEvaluationHostedService` exited its loop
+immediately. Neither gap could actually bite anyone.
+
+That changed with the webhook-alerting activation work: `Loom.Dashboard` and
+`Loom.Web.Api` now both call `AddAlert` at startup (`HighCpuUsage`/`HighMemoryUsage` in
+the Dashboard; `HighIngestErrorRate`/`HighIngestLatency` in Web.Api) and register a real
+`WebhookAlertTarget` alongside `ConsoleAlertTarget`. Rules are registered before the app
+is built, so § 6.7's empty-registry-at-startup failure mode does not currently trigger —
+but the registry is no longer empty, meaning any *future* runtime rule-registration path
+(a config reload, an alert-management API) would hit exactly the silent-no-op described
+in § 6.7. And with `AlertEvaluationHostedService` now actually ticking against live
+metrics (`cpu-usage`, `working-set` in the Dashboard), a source that goes quiet — a
+crashed `EventPipeBridge` connection, a target process that exits — will leave any active
+alert stuck exactly as § 6.6 describes, for real, in production, not just in a test.
+
+**No fix attempted here** — this entry only updates the status framing. Both § 6.6 and
+§ 6.7 remain open with their existing fix sketches.
+
+**Effort:** N/A (tracking entry only)
+**Priority:** 🟡 MEDIUM (unchanged from § 6.6/§ 6.7 — the risk was already rated, only its
+reachability changed)
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)
@@ -789,6 +818,7 @@ tagged-counter write allocation matters at all. Without benchmarks those stay gu
 | ~~DEBT-016~~ | ~~Prometheus counters stop growing past buffer wrap~~ | ~~🟡 MEDIUM~~ | ~~4-6h~~ | ✅ Completed | - | § 4.4 (`25a1fae`) |
 | DEBT-017 | Alerting no-data grace period | 🟡 MEDIUM | 2-4h | Open | - | § 6.6 |
 | DEBT-018 | Alert rules added after startup never evaluated | 🟡 MEDIUM | 2-4h | Open | - | § 6.7 |
+| DEBT-019 | § 6.6/§ 6.7 now reachable at runtime (status update only) | 🟡 MEDIUM | N/A | Open | - | § 6.8 |
 
 ---
 

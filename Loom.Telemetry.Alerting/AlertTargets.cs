@@ -1,13 +1,30 @@
 using Loom.Telemetry.Alerting.Interfaces;
 using Loom.Web.Contracts;
+using Microsoft.Extensions.Options;
 using System.Net.Http.Json;
 
 namespace Loom.Telemetry.Alerting;
 
-public sealed class WebhookAlertTarget(HttpClient httpClient, string webhookUrl) : IAlertTarget
+public sealed class WebhookAlertTarget(IHttpClientFactory httpClientFactory, IOptions<WebhookAlertOptions> options) : IAlertTarget
 {
+    // Not [ThreadStatic]-guarded like LoomLogger's hot-path pattern: notifications are
+    // low-frequency (alert fire/resolve events), so a plain instance bool is sufficient
+    // to log the "unconfigured" warning once instead of per-notification.
+    private bool _warnedUnconfigured;
+
     public async Task NotifyAsync(AlertNotification notification, CancellationToken ct)
     {
+        var webhookUrl = options.Value.Url;
+        if (string.IsNullOrEmpty(webhookUrl))
+        {
+            if (!_warnedUnconfigured)
+            {
+                _warnedUnconfigured = true;
+                Console.WriteLine("[WARN] WebhookAlertTarget: no URL configured (LOOM_ALERT_WEBHOOK_URL unset). Webhook notifications are disabled.");
+            }
+            return;
+        }
+
         var payload = new Loom.Web.Contracts.Dtos.AlertWebhookPayload
         {
             Alert = notification.Rule.Name,
@@ -18,6 +35,7 @@ public sealed class WebhookAlertTarget(HttpClient httpClient, string webhookUrl)
             Status = notification.State == AlertState.Resolved ? "resolved" : "firing",
             ResolvedAt = notification.ResolvedAt
         };
+        var httpClient = httpClientFactory.CreateClient(nameof(WebhookAlertTarget));
         await httpClient.PostAsJsonAsync(webhookUrl, payload, LoomJsonSerializerContext.Default.AlertWebhookPayload, ct);
     }
 }

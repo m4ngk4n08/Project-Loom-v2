@@ -52,6 +52,43 @@ public class AlertIntegrationTests
     }
 
     [Fact]
+    public void ServiceCollectionExtensions_AddWebhookAlertTarget_ResolvesFromDI()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddLoomAlerting();
+        services.AddHttpClient();
+        services.Configure<WebhookAlertOptions>(options => options.Url = "http://test.com/webhook");
+        services.AddAlertTarget<WebhookAlertTarget>();
+        var provider = services.BuildServiceProvider();
+
+        // Assert
+        var targets = provider.GetServices<IAlertTarget>().ToList();
+        Assert.Single(targets);
+        Assert.IsType<WebhookAlertTarget>(targets[0]);
+    }
+
+    [Fact]
+    public void ServiceCollectionExtensions_AddWebhookAlertTarget_ResolvesFromDI_EvenWithoutConfiguredUrl()
+    {
+        // Arrange - DI must always be able to construct this type; an unconfigured
+        // webhook target no-ops rather than throwing at resolution.
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddLoomAlerting();
+        services.AddHttpClient();
+        services.AddAlertTarget<WebhookAlertTarget>();
+        var provider = services.BuildServiceProvider();
+
+        // Assert
+        var target = provider.GetRequiredService<IAlertTarget>();
+        Assert.IsType<WebhookAlertTarget>(target);
+    }
+
+    [Fact]
     public void ServiceCollectionExtensions_AddMultipleTargets_RegistersAll()
     {
         // Arrange

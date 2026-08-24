@@ -1,5 +1,6 @@
 using Loom.Storage;
 using Loom.Storage.Logging;
+using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Query;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,25 @@ namespace Loom.Dashboard.Extensions
             // Alerting services
             services.AddLoomAlerting();
             services.AddAlertTarget<ConsoleAlertTarget>();
+            services.AddHttpClient();
+            services.Configure<WebhookAlertOptions>(options =>
+                options.Url = Environment.GetEnvironmentVariable("LOOM_ALERT_WEBHOOK_URL"));
+            services.AddAlertTarget<WebhookAlertTarget>();
+
+            // Rules registered here (before AddDashboardServices' caller builds the app)
+            // so AlertEvaluationHostedService sees a non-empty registry when it starts -
+            // see BACKLOG.md § 6.7.
+            new LoomTelemetryOptions()
+                .AddAlert("HighCpuUsage", alert => alert
+                    .When("cpu-usage", agg => agg.Average > 0.8)
+                    .InWindow(TimeSpan.FromMinutes(1))
+                    .Notify<ConsoleAlertTarget>()
+                    .Notify<WebhookAlertTarget>())
+                .AddAlert("HighMemoryUsage", alert => alert
+                    .When("working-set", agg => agg.Average > 500)
+                    .InWindow(TimeSpan.FromMinutes(5))
+                    .Notify<ConsoleAlertTarget>()
+                    .Notify<WebhookAlertTarget>());
 
             // EventPipe bridge — pulls metrics from target process into the store
             services.AddSingleton(sp =>

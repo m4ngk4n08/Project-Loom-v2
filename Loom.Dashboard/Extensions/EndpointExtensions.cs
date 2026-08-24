@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Loom.Storage;
 using Loom.Telemetry;
@@ -35,6 +36,7 @@ namespace Loom.Dashboard.Extensions
 
             app.MapPrometheusEndpoint();
             app.MapWebSocketEndpoint(metricsBuilder);
+            app.MapLogsWebSocketEndpoint();
             app.MapSpaFallback(embeddedProvider);
 
             return app;
@@ -346,6 +348,47 @@ namespace Loom.Dashboard.Extensions
             });
 
             return app;
+        }
+
+        private static WebApplication MapLogsWebSocketEndpoint(this WebApplication app)
+        {
+            // Logs are push-based (ILogStore.Subscribe), unlike metrics which are polled -
+            // no Task.Delay loop needed here.
+            app.Map("/ws/logs", async (HttpContext context, ILogStore store) =>
+            {
+                if (!context.WebSockets.IsWebSocketRequest)
+                {
+                    context.Response.StatusCode = 400;
+                    return;
+                }
+
+                using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                using var handler = new MetricsWebSocketHandler(webSocket);
+                await handler.StreamAsync(
+                    ReadLogStreamAsync(store, context.RequestAborted),
+                    LoomJsonSerializerContext.Default.LogEntryDto,
+                    context.RequestAborted);
+            });
+
+            return app;
+        }
+
+        private static async IAsyncEnumerable<LogEntryDto> ReadLogStreamAsync(
+            ILogStore store,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            var reader = store.Subscribe();
+            try
+            {
+                await foreach (var record in reader.ReadAllAsync(ct))
+                {
+                    yield return ToDto(record);
+                }
+            }
+            finally
+            {
+                store.Unsubscribe(reader);
+            }
         }
 
         private static WebApplication MapSpaFallback(this WebApplication app, IFileProvider? embeddedProvider)

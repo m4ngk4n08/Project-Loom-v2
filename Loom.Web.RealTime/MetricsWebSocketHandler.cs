@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.WebSockets;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Loom.Web.RealTime
 {
@@ -35,17 +36,25 @@ namespace Loom.Web.RealTime
         /// <param name="metricStream"></param>
         /// <param name="ct"></param>
         /// <returns></returns>
-        public async ValueTask StreamMetricsAsync(IAsyncEnumerable<MetricUpdate> metricStream, CancellationToken ct = default)
+        public ValueTask StreamMetricsAsync(IAsyncEnumerable<MetricUpdate> metricStream, CancellationToken ct = default) =>
+            StreamAsync(metricStream, LoomJsonSerializerContext.Default.MetricUpdate, ct);
+
+        /// <summary>
+        /// Stream any source-generated-JSON-serializable type to the connected WebSocket
+        /// client. Type-agnostic: the pooled-buffer writer and close-handshake logic are
+        /// shared across every stream kind (metrics, logs, ...).
+        /// </summary>
+        public async ValueTask StreamAsync<T>(IAsyncEnumerable<T> stream, JsonTypeInfo<T> jsonTypeInfo, CancellationToken ct = default)
         {
             try
             {
-                // Stream metrics until client disconnects or cancellation
-                await foreach(var metric in metricStream.WithCancellation(ct))
+                // Stream items until client disconnects or cancellation
+                await foreach(var item in stream.WithCancellation(ct))
                 {
                     // Reuse the same writer/buffer for every frame - no per-message allocation
                     _bufferWriter.Reset();
                     _writer.Reset(_bufferWriter);
-                    JsonSerializer.Serialize(_writer, metric, LoomJsonSerializerContext.Default.MetricUpdate);
+                    JsonSerializer.Serialize(_writer, item, jsonTypeInfo);
                     _writer.Flush();
 
                     // Send only the used portion of the buffer

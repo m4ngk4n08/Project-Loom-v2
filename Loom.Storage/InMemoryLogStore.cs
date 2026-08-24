@@ -84,6 +84,52 @@ public sealed class InMemoryLogStore : ILogStore, IDisposable
 
     public LogReadResult ReadAfter(long afterSequence) => _buffer.ReadAfter(afterSequence);
 
+    /// <summary>
+    /// Combined-filter scan, newest-first, capped at filter.Limit. This is a full
+    /// buffer scan triggered by a person (log export), NOT a hot path - do not
+    /// "optimize" it into the write path.
+    /// </summary>
+    public LogRecord[] Query(LogQueryFilter filter)
+    {
+        if (filter.Limit <= 0)
+            return Array.Empty<LogRecord>();
+
+        var capacity = _buffer.Capacity;
+        var pooled = ArrayPool<LogRecord>.Shared.Rent(capacity);
+        try
+        {
+            var span = pooled.AsSpan(0, capacity);
+            var available = _buffer.TryReadRecent(span);
+
+            var result = new List<LogRecord>(Math.Min(filter.Limit, available));
+            for (var i = 0; i < available; i++)
+            {
+                if (result.Count == filter.Limit)
+                    break;
+
+                ref readonly var record = ref span[i];
+
+                if (filter.SinceUtcTicks is { } since && record.TimestampUtcTicks < since)
+                    continue;
+                if (filter.UntilUtcTicks is { } until && record.TimestampUtcTicks > until)
+                    continue;
+                if (filter.Category is { } category && record.Category != category)
+                    continue;
+                if (filter.MinLevel is { } minLevel && record.Level < minLevel)
+                    continue;
+
+                result.Add(record);
+            }
+
+            return result.ToArray();
+        }
+        finally
+        {
+            // clearArray: true - see ReadRecent(category,count) above for why.
+            ArrayPool<LogRecord>.Shared.Return(pooled, clearArray: true);
+        }
+    }
+
     public long CurrentSequence => _buffer.CurrentSequence;
 
     /// <summary>

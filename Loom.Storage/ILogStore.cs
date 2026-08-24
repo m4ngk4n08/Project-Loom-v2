@@ -21,6 +21,13 @@ public interface ILogStore
 
     LogReadResult ReadAfter(long afterSequence);
 
+    /// <summary>
+    /// Combined-filter scan (category + level + time range), newest-first, capped at
+    /// filter.Limit. This is a full buffer scan triggered by a person (log export), NOT
+    /// a hot path - do not "optimize" it into the write path.
+    /// </summary>
+    LogRecord[] Query(LogQueryFilter filter);
+
     long CurrentSequence { get; }
 
     IReadOnlyCollection<string> GetCategories();

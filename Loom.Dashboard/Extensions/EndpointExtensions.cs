@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading.Channels;
 using Loom.Storage;
 using Loom.Telemetry;
@@ -230,7 +231,67 @@ namespace Loom.Dashboard.Extensions
             .WithName("GetLogTail")
             .Produces<LogTailResponse>(200);
 
+            api.MapGet("/logs/export", (
+                string? format, string? category, LoomLogLevel? minLevel,
+                DateTime? from, DateTime? to, int? limit, ILogStore store) =>
+            {
+                var clampedLimit = Math.Clamp(limit ?? 1000, 1, 10_000);
+                var filter = new LogQueryFilter(
+                    from?.ToUniversalTime().Ticks, to?.ToUniversalTime().Ticks,
+                    category, minLevel, clampedLimit);
+                var records = store.Query(filter);
+
+                return (format?.ToLowerInvariant()) switch
+                {
+                    "csv" => WriteCsvExport(records),
+                    "text" => WriteTextExport(records),
+                    _ => Results.Json(records.Select(ToDto).ToArray(),
+                                        LoomJsonSerializerContext.Default.LogEntryDtoArray)
+                };
+            })
+            .WithName("ExportLogs")
+            .Produces(200);
+
             return api;
+        }
+
+        internal static IResult WriteCsvExport(LogRecord[] records)
+        {
+            var sb = new StringBuilder();
+            sb.Append("Timestamp,Level,Category,EventId,Message,ExceptionType,ExceptionMessage\r\n");
+            foreach (var record in records)
+            {
+                sb.Append(CsvField(record.TimestampUtc.ToString("O"))).Append(',')
+                  .Append(CsvField(record.Level.ToString())).Append(',')
+                  .Append(CsvField(record.Category)).Append(',')
+                  .Append(CsvField(record.EventId.ToString())).Append(',')
+                  .Append(CsvField(record.Message)).Append(',')
+                  .Append(CsvField(record.ExceptionType ?? string.Empty)).Append(',')
+                  .Append(CsvField(record.ExceptionMessage ?? string.Empty))
+                  .Append("\r\n");
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+            var fileName = $"loom-logs-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
+            return Results.File(bytes, "text/csv", fileName);
+        }
+
+        internal static IResult WriteTextExport(LogRecord[] records)
+        {
+            var text = string.Join('\n', records.Select(r => r.ToString()));
+            var bytes = Encoding.UTF8.GetBytes(text);
+            var fileName = $"loom-logs-{DateTime.UtcNow:yyyyMMdd-HHmmss}.txt";
+            return Results.File(bytes, "text/plain", fileName);
+        }
+
+        // RFC 4180: a field must be quoted if it contains a comma, a double-quote, or a
+        // line break; an embedded double-quote is escaped by doubling it. LogRecord.Message
+        // is free text from real exceptions/stack traces and WILL contain all three.
+        internal static string CsvField(string value)
+        {
+            var needsQuoting = value.IndexOfAny([',', '"', '\r', '\n']) >= 0;
+            if (!needsQuoting) return value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
         }
 
         private static LogEntryDto ToDto(LogRecord record) => new()

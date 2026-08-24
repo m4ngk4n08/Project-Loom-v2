@@ -402,6 +402,108 @@ public sealed class InMemoryLogStoreTests
         Assert.Equal(LoomLogLevel.Warning, result[0].Level);
     }
 
+    private static LogRecord Record(string message, string category, LoomLogLevel level, long ticks) =>
+        new(message, category, level, ticks);
+
+    [Fact]
+    public void Query_FilterByCategory_ReturnsOnlyMatching()
+    {
+        using var store = new InMemoryLogStore();
+        store.Write(Record("a", "cat1", Base + 1));
+        store.Write(Record("b", "cat2", Base + 2));
+        store.Write(Record("c", "cat1", Base + 3));
+
+        var result = store.Query(new LogQueryFilter(null, null, "cat1", null, 100));
+
+        Assert.Equal(new[] { "c", "a" }, result.Select(r => r.Message));
+    }
+
+    [Fact]
+    public void Query_FilterByMinLevel_ReturnsOnlyAtOrAboveLevel()
+    {
+        using var store = new InMemoryLogStore();
+        store.Write(Record("trace", "cat", LoomLogLevel.Trace, Base + 1));
+        store.Write(Record("warn", "cat", LoomLogLevel.Warning, Base + 2));
+        store.Write(Record("error", "cat", LoomLogLevel.Error, Base + 3));
+
+        var result = store.Query(new LogQueryFilter(null, null, null, LoomLogLevel.Warning, 100));
+
+        Assert.Equal(new[] { "error", "warn" }, result.Select(r => r.Message));
+    }
+
+    [Fact]
+    public void Query_FilterBySince_ReturnsOnlyAtOrAfterTimestamp()
+    {
+        using var store = new InMemoryLogStore();
+        store.Write(Record("a", "cat", LoomLogLevel.Information, Base + 1));
+        store.Write(Record("b", "cat", LoomLogLevel.Information, Base + 2));
+        store.Write(Record("c", "cat", LoomLogLevel.Information, Base + 3));
+
+        var result = store.Query(new LogQueryFilter(Base + 2, null, null, null, 100));
+
+        Assert.Equal(new[] { "c", "b" }, result.Select(r => r.Message));
+    }
+
+    [Fact]
+    public void Query_FilterByUntil_ReturnsOnlyAtOrBeforeTimestamp()
+    {
+        using var store = new InMemoryLogStore();
+        store.Write(Record("a", "cat", LoomLogLevel.Information, Base + 1));
+        store.Write(Record("b", "cat", LoomLogLevel.Information, Base + 2));
+        store.Write(Record("c", "cat", LoomLogLevel.Information, Base + 3));
+
+        var result = store.Query(new LogQueryFilter(null, Base + 2, null, null, 100));
+
+        Assert.Equal(new[] { "b", "a" }, result.Select(r => r.Message));
+    }
+
+    [Fact]
+    public void Query_CombinedFilters_ReturnsIntersection()
+    {
+        using var store = new InMemoryLogStore();
+        store.Write(Record("a", "cat1", LoomLogLevel.Trace, Base + 1));
+        store.Write(Record("b", "cat1", LoomLogLevel.Error, Base + 2));
+        store.Write(Record("c", "cat2", LoomLogLevel.Error, Base + 3));
+        store.Write(Record("d", "cat1", LoomLogLevel.Error, Base + 10));
+
+        var result = store.Query(new LogQueryFilter(Base + 2, Base + 5, "cat1", LoomLogLevel.Warning, 100));
+
+        Assert.Equal(new[] { "b" }, result.Select(r => r.Message));
+    }
+
+    [Fact]
+    public void Query_LimitIsRespected_AndResultsAreNewestFirst()
+    {
+        using var store = new InMemoryLogStore();
+        for (var i = 0; i < 10; i++)
+            store.Write(Record($"msg{i}", "cat", LoomLogLevel.Information, Base + i));
+
+        var result = store.Query(new LogQueryFilter(null, null, null, null, 3));
+
+        Assert.Equal(new[] { "msg9", "msg8", "msg7" }, result.Select(r => r.Message));
+    }
+
+    [Fact]
+    public void Query_EmptyStore_ReturnsEmptyArray()
+    {
+        using var store = new InMemoryLogStore();
+
+        var result = store.Query(new LogQueryFilter(null, null, null, null, 100));
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void Query_ZeroLimit_ReturnsEmptyArray()
+    {
+        using var store = new InMemoryLogStore();
+        store.Write(Record("a", "cat", LoomLogLevel.Information, Base + 1));
+
+        var result = store.Query(new LogQueryFilter(null, null, null, null, 0));
+
+        Assert.Empty(result);
+    }
+
     // ILogStore test double that logs again from inside its own Write - simulates a
     // sink that reacts to ingested logs by producing more logs. Without the
     // ThreadStatic guard in LoomLogger.Log, this recurses without bound.
@@ -423,6 +525,7 @@ public sealed class InMemoryLogStoreTests
         public LogRecord[] ReadRecent(string category, int count) => Array.Empty<LogRecord>();
         public LogRecord[] ReadSince(long timestampUtcTicks) => Array.Empty<LogRecord>();
         public LogReadResult ReadAfter(long afterSequence) => new(Array.Empty<LogRecord>(), 0, 0);
+        public LogRecord[] Query(LogQueryFilter filter) => Array.Empty<LogRecord>();
         public long CurrentSequence => 0;
         public IReadOnlyCollection<string> GetCategories() => Array.Empty<string>();
         public ChannelReader<LogRecord> Subscribe() => Channel.CreateUnbounded<LogRecord>().Reader;

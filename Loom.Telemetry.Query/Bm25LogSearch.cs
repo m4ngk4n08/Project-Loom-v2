@@ -22,6 +22,8 @@ public static class Bm25LogSearch
         if (queryTerms.Length == 0)
             return Array.Empty<SearchResult>();
 
+        var distinctTerms = queryTerms.Distinct().ToArray();
+
         var docTermFrequencies = new Dictionary<string, int>[corpus.Length];
         var docLengths = new int[corpus.Length];
         var termDocFrequency = new Dictionary<string, int>();
@@ -50,7 +52,7 @@ public static class Bm25LogSearch
         var avgDocLength = docLengths.Average();
 
         var idf = new Dictionary<string, double>();
-        foreach (var term in queryTerms.Distinct())
+        foreach (var term in distinctTerms)
         {
             termDocFrequency.TryGetValue(term, out var nq);
             idf[term] = Math.Log(1.0 + (n - nq + 0.5) / (nq + 0.5));
@@ -64,7 +66,7 @@ public static class Bm25LogSearch
 
             var frequencies = docTermFrequencies[i];
             double score = 0;
-            foreach (var term in queryTerms.Distinct())
+            foreach (var term in distinctTerms)
             {
                 if (!frequencies.TryGetValue(term, out var termFrequency))
                     continue;

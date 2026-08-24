@@ -32,6 +32,11 @@ export const routes: Routes = [
           .then(m => m.QueryBuilderComponent)
       },
       {
+        path: 'logs',
+        loadComponent: () => import('./features/logs/logs.component')
+          .then(m => m.LogsComponent)
+      },
+      {
         path: 'alerts',
         loadComponent: () => import('./features/alerts/alerts.component')
           .then(m => m.AlertsComponent)

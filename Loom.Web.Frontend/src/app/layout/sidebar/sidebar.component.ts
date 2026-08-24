@@ -56,6 +56,12 @@ export class SidebarComponent {
           label: 'Query Builder',
           ariaLabel: 'Navigate to Query Builder',
           icon: 'M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z'
+        },
+        {
+          path: '/logs',
+          label: 'Logs',
+          ariaLabel: 'Navigate to Logs',
+          icon: 'M4 4h16v4H4zM4 10h16v4H4zM4 16h10v4H4z'
         }
       ]
     },

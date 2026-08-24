@@ -253,6 +253,26 @@ namespace Loom.Dashboard.Extensions
             .WithName("ExportLogs")
             .Produces(200);
 
+            api.MapPost("/logs/search", (DiagnosticSearchRequest request, ILogStore store) =>
+            {
+                var clampedMaxResults = Math.Clamp(request.MaxResults, 1, 100);
+                var corpus = store.Query(new LogQueryFilter(null, null, null, null, 10_000));
+
+                var started = Stopwatch.GetTimestamp();
+                var results = Bm25LogSearch.Search(corpus, request.Query, clampedMaxResults, request.MinScore);
+                var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
+                return Results.Json(new DiagnosticSearchResponse
+                {
+                    Query = request.Query,
+                    TotalResults = results.Length,
+                    SearchTimeMs = elapsedMs,
+                    Results = results
+                }, LoomJsonSerializerContext.Default.DiagnosticSearchResponse);
+            })
+            .WithName("SearchLogs")
+            .Produces<DiagnosticSearchResponse>(200);
+
             return api;
         }
 

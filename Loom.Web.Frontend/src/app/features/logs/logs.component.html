@@ -138,8 +138,8 @@
         <div class="log-row" [class]="severityClass(row.level)" [class.with-score]="row.score !== null">
           <span class="log-timestamp">{{ formatTimestamp(row.timestampUtc) }}</span>
           <span class="log-level">{{ row.level }}</span>
-          <span class="log-category">{{ row.category }}</span>
-          <span class="log-message">
+          <span class="log-category" [title]="row.category">{{ row.category }}</span>
+          <span class="log-message" [title]="row.message">
             {{ row.message }}
             @if (row.exceptionType) {
               <span class="log-exception">{{ row.exceptionType }}: {{ row.exceptionMessage }}</span>

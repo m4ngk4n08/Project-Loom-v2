@@ -7,68 +7,64 @@ import { environment } from "../../../environments/environment";
     providedIn: "root"
 })
 export class WebSocketService {
-    private socket: WebSocket | null = null;
-    private reconnectAttempts = 0;
     private readonly maxReconnectAttempts = 10;
 
     connect(endpoint: string): Observable<any> {
      return new Observable(observer => {
       const url = `${environment.wsUrl}${endpoint}`;
+      let socket: WebSocket | null = null;
+      let reconnectAttempts = 0;
+      let closedByCaller = false;
 
-      try {
-        this.socket = new WebSocket(url);
+      const open = () => {
+        try {
+          socket = new WebSocket(url);
 
-        this.socket.onopen = () => {
-          console.log(`WebSocket connected to ${url}`);
-          this.reconnectAttempts = 0;
-        };
+          socket.onopen = () => {
+            console.log(`WebSocket connected to ${url}`);
+            reconnectAttempts = 0;
+          };
 
-        this.socket.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            observer.next(data);
-          } catch (error) {
-            console.error('Failed to parse WebSocket message:', error);
-          }
-        };
+          socket.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              observer.next(data);
+            } catch (error) {
+              console.error('Failed to parse WebSocket message:', error);
+            }
+          };
 
-        this.socket.onerror = (error) => {
-          console.error('WebSocket error:', error);
+          socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            observer.error(error);
+          };
+
+          socket.onclose = (event) => {
+            console.log(`WebSocket closed: ${event.code}`);
+
+            if (!closedByCaller && !event.wasClean && reconnectAttempts < this.maxReconnectAttempts) {
+              reconnectAttempts++;
+              const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+
+              setTimeout(open, delay);
+            } else {
+              observer.complete();
+            }
+          };
+        } catch (error) {
           observer.error(error);
-        };
+        }
+      };
 
-        this.socket.onclose = (event) => {
-          console.log(`WebSocket closed: ${event.code}`);
+      open();
 
-          if (!event.wasClean && this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-
-            setTimeout(() => {
-              this.connect(endpoint).subscribe(observer);
-            }, delay);
-          } else {
-            observer.complete();
-          }
-        };
-      } catch (error) {
-        observer.error(error);
-      }
-
-      return () => this.disconnect();
+      return () => {
+        closedByCaller = true;
+        if (socket) {
+          socket.close(1000, "Client disconnecting");
+          socket = null;
+        }
+      };
     });
-    }
-
-    send(message: any): void {
-        if(this.socket && this.socket.readyState === WebSocket.OPEN){
-            this.socket.send(JSON.stringify(message));
-        }
-    }
-
-    disconnect(): void {
-        if (this.socket) {
-            this.socket.close(1000, "Client disconnecting");
-            this.socket = null;
-        }
     }
 }

@@ -62,6 +62,12 @@ export class SidebarComponent {
           label: 'Logs',
           ariaLabel: 'Navigate to Logs',
           icon: 'M4 4h16v4H4zM4 10h16v4H4zM4 16h10v4H4z'
+        },
+        {
+          path: '/log-search',
+          label: 'Log Search',
+          ariaLabel: 'Navigate to Log Search',
+          icon: 'M11 19a8 8 0 100-16 8 8 0 000 16zm10 2l-4.35-4.35'
         }
       ]
     },

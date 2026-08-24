@@ -37,6 +37,11 @@ export const routes: Routes = [
           .then(m => m.LogsComponent)
       },
       {
+        path: 'log-search',
+        loadComponent: () => import('./features/log-search/log-search.component')
+          .then(m => m.LogSearchComponent)
+      },
+      {
         path: 'alerts',
         loadComponent: () => import('./features/alerts/alerts.component')
           .then(m => m.AlertsComponent)

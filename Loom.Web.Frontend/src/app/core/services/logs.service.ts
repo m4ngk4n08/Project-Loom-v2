@@ -22,6 +22,20 @@ export interface LogExportFilters {
   limit?: number;
 }
 
+export interface SearchHit {
+  content: string;
+  score: number;
+  timestamp: string;
+  source: string;
+}
+
+export interface LogSearchResponse {
+  query: string;
+  totalResults: number;
+  searchTimeMs: number;
+  results: SearchHit[];
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -53,5 +67,9 @@ export class LogsService {
     if (filters.to) params.push(`to=${encodeURIComponent(filters.to)}`);
     if (filters.limit) params.push(`limit=${encodeURIComponent(String(filters.limit))}`);
     return `/api/logs/export?${params.join('&')}`;
+  }
+
+  search(query: string, maxResults = 20): Observable<LogSearchResponse> {
+    return this.http.post<LogSearchResponse>('/api/logs/search', { query, maxResults });
   }
 }

@@ -6,6 +6,7 @@ using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Alerting.Interfaces;
+using Loom.Telemetry.Exporters;
 using Loom.Telemetry.Exporters.Prometheus;
 using Loom.Telemetry.Query;
 using Loom.Web.Contracts;
@@ -370,10 +371,24 @@ namespace Loom.Dashboard.Extensions
             return api;
         }
 
+        internal static List<ExporterStatusDto> BuildExporterStatuses(ExportStatusTracker tracker) =>
+            tracker.GetStatuses().Values
+                .Select(s => new ExporterStatusDto
+                {
+                    Name = s.Name,
+                    IsHealthy = s.IsHealthy,
+                    LastSuccessUtc = s.LastSuccessUtc,
+                    LastFailureUtc = s.LastFailureUtc,
+                    LastError = s.LastError,
+                    TotalExports = s.TotalExports,
+                    TotalFailures = s.TotalFailures
+                })
+                .ToList();
+
         private static RouteGroupBuilder MapExporterEndpoints(this RouteGroupBuilder api)
         {
-            api.MapGet("/exporters/status", () =>
-                Results.Json(new List<ExporterStatusDto>(), LoomJsonSerializerContext.Default.ListExporterStatusDto));
+            api.MapGet("/exporters/status", (ExportStatusTracker tracker) =>
+                Results.Json(BuildExporterStatuses(tracker), LoomJsonSerializerContext.Default.ListExporterStatusDto));
 
             api.MapGet("/exporters/metrics/names", (IMetricStore store) =>
                 Results.Json(store.GetMetricNames().ToList(), LoomJsonSerializerContext.Default.ListString));

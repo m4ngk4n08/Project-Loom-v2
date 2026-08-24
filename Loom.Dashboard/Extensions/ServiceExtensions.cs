@@ -2,7 +2,10 @@ using Loom.Storage;
 using Loom.Storage.Logging;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
+using Loom.Telemetry.Exporters;
+using Loom.Telemetry.Exporters.Console;
 using Loom.Telemetry.Query;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Loom.Dashboard.Extensions
@@ -55,6 +58,24 @@ namespace Loom.Dashboard.Extensions
                 new EventPipeBridge(targetPid, sp.GetRequiredService<IMetricStore>(),
                     sp.GetRequiredService<ILogger<EventPipeBridge>>()));
             services.AddHostedService(sp => sp.GetRequiredService<EventPipeBridge>());
+
+            // Export pipeline is opt-in: both ExportCollectionHostedService and ConsoleExporter
+            // log at Information on every tick, which would flood the terminal of a live
+            // diagnostic session. Off by default; the status endpoint reports the truth either way.
+            if (string.Equals(Environment.GetEnvironmentVariable("LOOM_DASHBOARD_EXPORT"),
+                    "console", StringComparison.OrdinalIgnoreCase))
+            {
+                services.AddLoomExporting(opts =>
+                {
+                    opts.CollectionInterval = TimeSpan.FromSeconds(30);
+                    opts.ChannelCapacity = 64;
+                });
+                services.AddLoomExporter<ConsoleExporter>();
+            }
+
+            // Registered unconditionally so /api/exporters/status can always resolve it.
+            // TryAdd: AddLoomExporting already registers this when the pipeline is on.
+            services.TryAddSingleton<ExportStatusTracker>();
 
             return services;
         }

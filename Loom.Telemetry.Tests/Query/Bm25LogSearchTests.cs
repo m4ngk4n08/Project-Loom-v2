@@ -10,8 +10,15 @@ public class Bm25LogSearchTests
 {
     private static readonly long Base = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
 
-    private static LogRecord Record(string message, string category = "Test", long ticks = 0) =>
-        new(message, category, LoomLogLevel.Information, Base + ticks);
+    private static LogRecord Record(
+        string message,
+        string category = "Test",
+        long ticks = 0,
+        LoomLogLevel level = LoomLogLevel.Information,
+        int eventId = 0,
+        string? exceptionType = null,
+        string? exceptionMessage = null) =>
+        new(message, category, level, Base + ticks, eventId, exceptionType, exceptionMessage);
 
     [Fact]
     public void Search_RareTermVsCommonTerm_RareTermOutranksCommon()
@@ -132,7 +139,17 @@ public class Bm25LogSearchTests
     [Fact]
     public void Search_MapsSourceAndTimestamp()
     {
-        var docs = new[] { Record("mapped term", category: "OrderService", ticks: 12345) };
+        var docs = new[]
+        {
+            Record(
+                "mapped term",
+                category: "OrderService",
+                ticks: 12345,
+                level: LoomLogLevel.Error,
+                eventId: 42,
+                exceptionType: "InvalidOperationException",
+                exceptionMessage: "boom")
+        };
 
         var results = Bm25LogSearch.Search(docs, "mapped", 10, 0.0);
 
@@ -140,5 +157,9 @@ public class Bm25LogSearchTests
         Assert.Equal("OrderService", results[0].Source);
         Assert.Equal(Base + 12345, results[0].Timestamp.Ticks);
         Assert.Equal(DateTimeKind.Utc, results[0].Timestamp.Kind);
+        Assert.Equal("Error", results[0].Level);
+        Assert.Equal(42, results[0].EventId);
+        Assert.Equal("InvalidOperationException", results[0].ExceptionType);
+        Assert.Equal("boom", results[0].ExceptionMessage);
     }
 }

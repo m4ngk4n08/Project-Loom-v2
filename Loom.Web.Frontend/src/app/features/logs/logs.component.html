@@ -6,6 +6,32 @@
 
   <div class="toolbar surface" role="group" aria-label="Log controls">
     <div class="toolbar-left">
+      <form class="search-form" (ngSubmit)="runSearch()">
+        <label for="search-input" class="sr-only">Search logs</label>
+        <input
+          id="search-input"
+          class="search-input"
+          type="text"
+          [(ngModel)]="searchQuery"
+          name="searchQuery"
+          placeholder="Search logs..."
+          [disabled]="isSearching()"
+          [attr.aria-label]="'Search logs'"
+          autocomplete="off" />
+        @if (searchQuery()) {
+          <button
+            class="search-clear-btn"
+            type="button"
+            (click)="clearSearch()"
+            [attr.aria-label]="'Clear search'">
+            &times;
+          </button>
+        }
+        @if (isSearching()) {
+          <span class="loading-spinner search-spinner" aria-hidden="true"></span>
+        }
+      </form>
+
       <label for="category-select" class="sr-only">Filter by category</label>
       <select
         id="category-select"
@@ -18,9 +44,15 @@
         }
       </select>
 
-      <span class="entry-count" [attr.aria-label]="filteredEntries().length + ' entries shown'">
-        {{ filteredEntries().length }} entries
-      </span>
+      @if (searchResults() === null) {
+        <span class="entry-count" [attr.aria-label]="filteredEntries().length + ' entries shown'">
+          {{ filteredEntries().length }} entries
+        </span>
+      } @else {
+        <span class="entry-count" [attr.aria-label]="(filteredSearchResults()?.length ?? 0) + ' results shown'">
+          {{ filteredSearchResults()?.length ?? 0 }} results in {{ searchTimeMs() | number:'1.1-1' }} ms
+        </span>
+      }
     </div>
 
     <div class="toolbar-right">
@@ -56,39 +88,75 @@
     </div>
   </div>
 
-  @if (backfillError()) {
-    <div class="log-error" role="alert">
-      <p>{{ backfillError() }}</p>
-      <button class="retry-btn" (click)="loadBackfill()" [attr.aria-label]="'Retry loading logs'" type="button">
-        Retry
-      </button>
-    </div>
-  } @else if (isLoadingBackfill() && entries().length === 0) {
-    <div class="log-loading" role="status" aria-live="polite">
-      <span class="loading-spinner" aria-hidden="true"></span>
-      <span>Loading logs...</span>
-    </div>
-  } @else if (filteredEntries().length === 0) {
-    <div class="log-empty">
-      <p>No log entries{{ categoryFilter() ? ' for this category' : '' }}</p>
-    </div>
+  @if (searchResults() === null) {
+    @if (backfillError()) {
+      <div class="log-error" role="alert">
+        <p>{{ backfillError() }}</p>
+        <button class="retry-btn" (click)="loadBackfill()" [attr.aria-label]="'Retry loading logs'" type="button">
+          Retry
+        </button>
+      </div>
+    } @else if (isLoadingBackfill() && entries().length === 0) {
+      <div class="log-loading" role="status" aria-live="polite">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <span>Loading logs...</span>
+      </div>
+    } @else if (filteredEntries().length === 0) {
+      <div class="log-empty">
+        <p>No log entries{{ categoryFilter() ? ' for this category' : '' }}</p>
+      </div>
+    } @else {
+      <div class="log-list surface" role="log" aria-label="Log entries" aria-live="off">
+        <ng-container *ngTemplateOutlet="rowList"></ng-container>
+      </div>
+    }
   } @else {
-    <div class="log-list surface" role="log" aria-label="Log entries" aria-live="off">
-      @for (entry of filteredEntries(); track $index) {
-        <div class="log-row" [class]="severityClass(entry.level)">
-          <span class="log-timestamp">{{ formatTimestamp(entry.timestampUtc) }}</span>
-          <span class="log-level">{{ entry.level }}</span>
-          <span class="log-category">{{ entry.category }}</span>
+    @if (searchError()) {
+      <div class="log-error" role="alert">
+        <p>{{ searchError() }}</p>
+        <button class="retry-btn" (click)="runSearch()" [attr.aria-label]="'Retry search'" type="button">
+          Retry
+        </button>
+      </div>
+    } @else if ((filteredSearchResults()?.length ?? 0) === 0) {
+      <div class="log-empty">
+        <p>No matches for &laquo;{{ lastQuery() }}&raquo;</p>
+        <p class="log-empty-hint">Search is lexical and matches whole words - unmatched terms return nothing.</p>
+      </div>
+    } @else {
+      <div class="log-list surface" role="log" aria-label="Search results" aria-live="off">
+        <ng-container *ngTemplateOutlet="rowList"></ng-container>
+      </div>
+    }
+  }
+
+  <!-- Single row template shared by live and search rendering - a row shows the score
+       row/bar only when displayRows() gave it a non-null score. -->
+  <ng-template #rowList>
+    @for (row of displayRows(); track $index) {
+      <div class="log-row-wrap">
+        <div class="log-row" [class]="severityClass(row.level)" [class.with-score]="row.score !== null">
+          <span class="log-timestamp">{{ formatTimestamp(row.timestampUtc) }}</span>
+          <span class="log-level">{{ row.level }}</span>
+          <span class="log-category">{{ row.category }}</span>
           <span class="log-message">
-            {{ entry.message }}
-            @if (entry.exceptionType) {
-              <span class="log-exception">{{ entry.exceptionType }}: {{ entry.exceptionMessage }}</span>
+            {{ row.message }}
+            @if (row.exceptionType) {
+              <span class="log-exception">{{ row.exceptionType }}: {{ row.exceptionMessage }}</span>
             }
           </span>
+          @if (row.score !== null) {
+            <span class="search-score">{{ row.score | number:'1.2-2' }}</span>
+          }
         </div>
-      }
-    </div>
-  }
+        @if (row.score !== null) {
+          <div class="score-bar-track" aria-hidden="true">
+            <div class="score-bar-fill" [style.width.%]="barWidth(row.score)"></div>
+          </div>
+        }
+      </div>
+    }
+  </ng-template>
 
   @if (showExportModal()) {
     <div class="modal-backdrop" (click)="closeExportModal()">

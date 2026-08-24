@@ -2,7 +2,7 @@ import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angula
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogsService, LogEntry, LogExportFilters } from '../../core/services/logs.service';
+import { LogsService, LogEntry, LogExportFilters, SearchHit } from '../../core/services/logs.service';
 
 const MAX_BUFFERED_ENTRIES = 2000;
 const BACKFILL_COUNT = 200;
@@ -17,6 +17,32 @@ export function toUtcIso(localDateTimeValue: string): string | undefined {
   if (!localDateTimeValue) return undefined;
   const parsed = new Date(localDateTimeValue);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+// A search box with an empty/whitespace query is a no-op, not an error - there is
+// nothing to search for and no HTTP call should fire.
+export function isSearchableQuery(query: string): boolean {
+  return query.trim().length > 0;
+}
+
+// Bar width is relative to the top result in the CURRENT set, not an absolute
+// percentage - BM25 scores are unbounded. Guard the zero-corpus/zero-score case so
+// division never produces NaN or Infinity.
+export function scoreBarWidth(score: number, topScore: number): number {
+  if (!Number.isFinite(topScore) || topScore <= 0) return 0;
+  const pct = (score / topScore) * 100;
+  if (!Number.isFinite(pct)) return 0;
+  return Math.max(0, Math.min(100, pct));
+}
+
+interface DisplayRow {
+  timestampUtc: string;
+  level: string;
+  category: string;
+  message: string;
+  exceptionType?: string;
+  exceptionMessage?: string;
+  score: number | null;
 }
 
 @Component({
@@ -50,10 +76,52 @@ export class LogsComponent implements OnInit {
   exportTo = '';
   exportLimit = 1000;
 
+  searchQuery = signal('');
+  searchResults = signal<SearchHit[] | null>(null);
+  isSearching = signal(false);
+  searchError = signal<string | null>(null);
+  searchTimeMs = signal<number | null>(null);
+  lastQuery = signal('');
+
   filteredEntries = computed(() => {
     const category = this.categoryFilter();
     const entries = this.entries();
     return category === '' ? entries : entries.filter(e => e.category === category);
+  });
+
+  // Category filter applies to search results too, rather than being disabled in
+  // search mode - a SearchHit already carries its category as `source`, filtering
+  // needs no extra round trip, and the control stays meaningfully interactive
+  // instead of silently going inert the moment a search is active.
+  filteredSearchResults = computed(() => {
+    const results = this.searchResults();
+    if (results === null) return null;
+    const category = this.categoryFilter();
+    return category === '' ? results : results.filter(r => r.source === category);
+  });
+
+  displayRows = computed<DisplayRow[]>(() => {
+    const results = this.filteredSearchResults();
+    if (results !== null) {
+      return results.map(r => ({
+        timestampUtc: r.timestamp,
+        level: r.level,
+        category: r.source,
+        message: r.content,
+        exceptionType: r.exceptionType,
+        exceptionMessage: r.exceptionMessage,
+        score: r.score
+      }));
+    }
+    return this.filteredEntries().map(e => ({
+      timestampUtc: e.timestampUtc,
+      level: e.level,
+      category: e.category,
+      message: e.message,
+      exceptionType: e.exceptionType,
+      exceptionMessage: e.exceptionMessage,
+      score: null
+    }));
   });
 
   ngOnInit(): void {
@@ -125,6 +193,54 @@ export class LogsComponent implements OnInit {
 
   formatTimestamp(timestampUtc: string): string {
     return new Date(timestampUtc).toLocaleTimeString();
+  }
+
+  runSearch(): void {
+    const query = this.searchQuery();
+    if (!isSearchableQuery(query)) {
+      this.clearSearch();
+      return;
+    }
+
+    const trimmed = query.trim();
+    this.isSearching.set(true);
+    this.searchError.set(null);
+
+    this.logsService.search(trimmed)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.searchResults.set(response.results);
+          this.searchTimeMs.set(response.searchTimeMs);
+          this.lastQuery.set(trimmed);
+          this.isSearching.set(false);
+        },
+        error: (err) => {
+          console.error('Log search failed:', err);
+          this.lastQuery.set(trimmed);
+          this.isSearching.set(false);
+          this.searchError.set('Search failed. Check the connection and try again.');
+          // First-ever search failing still needs to flip out of live mode so the
+          // error state renders; a retry after prior success leaves existing
+          // results alone since the error branch is checked before the empty check.
+          if (this.searchResults() === null) {
+            this.searchResults.set([]);
+          }
+        }
+      });
+  }
+
+  clearSearch(): void {
+    this.searchQuery.set('');
+    this.searchResults.set(null);
+    this.searchError.set(null);
+    this.searchTimeMs.set(null);
+    this.lastQuery.set('');
+  }
+
+  barWidth(score: number): number {
+    const top = this.filteredSearchResults()?.[0]?.score ?? 0;
+    return scoreBarWidth(score, top);
   }
 
   openExportModal(): void {

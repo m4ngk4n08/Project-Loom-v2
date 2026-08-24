@@ -27,6 +27,10 @@ export interface SearchHit {
   score: number;
   timestamp: string;
   source: string;
+  level: string;
+  eventId: number;
+  exceptionType?: string;
+  exceptionMessage?: string;
 }
 
 export interface LogSearchResponse {

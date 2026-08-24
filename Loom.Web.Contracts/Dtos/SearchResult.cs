@@ -25,4 +25,25 @@ public sealed record SearchResult
     /// Source of the diagnostic (e.g., "CPU", "Memory", "Thread")
     /// </summary>
     public required string Source { get; init; }
+
+    /// <summary>
+    /// Log severity, as a string (e.g. "Warning"). Source-generated JSON serializes
+    /// enums as numbers by default, and a numeric severity in the API is unreadable.
+    /// </summary>
+    public required string Level { get; init; }
+
+    /// <summary>
+    /// Event id, if the caller supplied one (0 otherwise).
+    /// </summary>
+    public required int EventId { get; init; }
+
+    /// <summary>
+    /// Exception type name, only set when the log entry carries an exception.
+    /// </summary>
+    public string? ExceptionType { get; init; }
+
+    /// <summary>
+    /// Exception message, only set when the log entry carries an exception.
+    /// </summary>
+    public string? ExceptionMessage { get; init; }
 }

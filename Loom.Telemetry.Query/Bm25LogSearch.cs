@@ -88,7 +88,11 @@ public static class Bm25LogSearch
                 Content = corpus[s.Index].Message,
                 Score = s.Score,
                 Timestamp = corpus[s.Index].TimestampUtc,
-                Source = corpus[s.Index].Category
+                Source = corpus[s.Index].Category,
+                Level = corpus[s.Index].Level.ToString(),
+                EventId = corpus[s.Index].EventId,
+                ExceptionType = corpus[s.Index].ExceptionType,
+                ExceptionMessage = corpus[s.Index].ExceptionMessage
             })
             .ToArray();
     }

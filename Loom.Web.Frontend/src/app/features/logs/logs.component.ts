@@ -9,6 +9,14 @@ const BACKFILL_COUNT = 200;
 
 const LOG_LEVELS = ['Trace', 'Debug', 'Information', 'Warning', 'Error', 'Critical'];
 
+// `<input type="datetime-local">` yields a timezone-naive string like "2026-08-24T14:30".
+// `new Date(...)` parses that as wall-clock time in the BROWSER'S local timezone (the
+// interpretation the user intended), so converting it here - before it ever leaves the
+// browser - is the only place the intended instant can be recovered correctly.
+export function toUtcIso(localDateTimeValue: string): string | undefined {
+  return localDateTimeValue ? new Date(localDateTimeValue).toISOString() : undefined;
+}
+
 @Component({
   selector: 'app-logs',
   standalone: true,
@@ -131,8 +139,8 @@ export class LogsComponent implements OnInit {
       format: this.exportFormat,
       category: this.exportCategory || undefined,
       minLevel: this.exportMinLevel || undefined,
-      from: this.exportFrom || undefined,
-      to: this.exportTo || undefined,
+      from: toUtcIso(this.exportFrom),
+      to: toUtcIso(this.exportTo),
       limit: this.exportLimit || undefined
     });
 

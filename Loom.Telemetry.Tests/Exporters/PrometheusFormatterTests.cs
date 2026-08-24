@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Loom.Storage;
+using Loom.Telemetry;
 using Loom.Telemetry.Exporters.Prometheus;
 using Xunit;
 
@@ -258,5 +259,43 @@ public sealed class PrometheusFormatterTests : IDisposable
         var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
         Assert.Contains($"{sanitizedName}_count", result);
         Assert.Contains($"{sanitizedName}_sum", result);
+    }
+
+    // --- Counter accumulator (BACKLOG § 4.4): store total wins, buffer-sum is the fallback ---
+
+    private static MetricRecord CounterRecord(string name, double value, long ticks) =>
+        new(name, MetricType.Counter, value, ticks);
+
+    [Fact]
+    public void Format_CounterExceedingBufferCapacity_UsesStoreAccumulatorTotal()
+    {
+        // Capacity 16, 50 increments of 1: buffer-summing alone would report at
+        // most 16 - the formatter must prefer the store's monotonic total (50).
+        using var store = new InMemoryMetricStore(bufferCapacity: 16);
+        var metricName = $"test.counter.{Guid.NewGuid()}";
+        var baseTicks = DateTime.UtcNow.Ticks;
+        for (var i = 0; i < 50; i++)
+            store.Write(CounterRecord(metricName, 1, baseTicks + i));
+
+        var result = PrometheusFormatter.Format(store);
+
+        var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
+        Assert.Contains($"{sanitizedName} 50.00", result);
+    }
+
+    [Fact]
+    public void Format_StoreWithNoAccumulator_FallsBackToBufferSum()
+    {
+        // LoomMetricsStoreAdapter.GetCounterTotals() is always empty - this is the
+        // existing Format_CounterWithMultipleValues_OutputsCumulativeSum path,
+        // pinned again explicitly as "the fallback still works."
+        var metricName = $"test.counter.{Guid.NewGuid()}";
+        LoomMetrics.RecordCounter(metricName, 3.0);
+        LoomMetrics.RecordCounter(metricName, 4.0);
+
+        var result = PrometheusFormatter.Format(LoomMetricsStoreAdapter.Instance);
+
+        var sanitizedName = metricName.Replace('.', '_').Replace('-', '_');
+        Assert.Contains($"{sanitizedName} 7.00", result);
     }
 }

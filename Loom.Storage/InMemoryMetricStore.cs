@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using Loom.Telemetry;
 
 namespace Loom.Storage;
@@ -9,6 +10,9 @@ namespace Loom.Storage;
 /// In-memory metric store backed by per-metric ring buffers.
 /// Thread-safe, zero-allocation writes, bounded memory.
 /// Supports real-time subscriptions via Channel.
+/// Writes are zero-allocation EXCEPT for tagged counters: those build a canonical
+/// key string per write (see <see cref="RecordCounterTotal"/>). Untagged counters
+/// and every gauge/histogram write remain allocation-free.
 /// </summary>
 public sealed class InMemoryMetricStore : IMetricStore, IDisposable
 {
@@ -25,9 +29,20 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
     private readonly Lock _subscriberLock = new();
     private volatile Channel<MetricRecord>[] _subscribers = [];
 
-    public InMemoryMetricStore(int bufferCapacity = 8192)
+    // Cumulative per-series counter totals, keyed by MetricSeriesKey.Build(...).
+    // Monotonic: unaffected by ring-buffer wrap (see GetCounterTotals). Bounded by
+    // _maxSeries - see RecordCounterTotal for the cap/admission logic.
+    private readonly ConcurrentDictionary<string, CounterAccumulator> _counterTotals = new();
+    private readonly int _maxSeries;
+    private int _seriesCount;
+    private int _capWarned;
+    private readonly ILogger? _logger;
+
+    public InMemoryMetricStore(int bufferCapacity = 8192, int maxSeries = 10_000, ILogger? logger = null)
     {
         _bufferCapacity = bufferCapacity;
+        _maxSeries = maxSeries;
+        _logger = logger;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -40,7 +55,111 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
             static (_, capacity) => new MetricBuffer(capacity),
             _bufferCapacity);
         buffer.Write(in record);
+
+        if (record.Type == MetricType.Counter)
+            RecordCounterTotal(in record);
+
         NotifySubscribers(in record);
+    }
+
+    /// <summary>
+    /// Adds this write's value to its series' cumulative total. Untagged counters
+    /// (the common case) key on the metric name itself - no allocation. Tagged
+    /// counters build a canonical key string via MetricSeriesKey - the one
+    /// allocation on this otherwise allocation-free path. A zero-allocation variant
+    /// (struct key + custom comparer + an already-sorted fast path) is deferred
+    /// pending the BACKLOG § 6.3 benchmark harness.
+    /// </summary>
+    private void RecordCounterTotal(in MetricRecord record)
+    {
+        var sortedTags = MetricSeriesKey.SortTags(record.Tags);
+        var key = MetricSeriesKey.Build(record.Name, sortedTags);
+
+        if (_counterTotals.TryGetValue(key, out var existing))
+        {
+            existing.Add(record.Value);
+            return;
+        }
+
+        // Cardinality cap: a memory guard, not a hard invariant. A concurrency race
+        // here can admit a small number of series past _maxSeries - that is
+        // acceptable and intentionally not locked (this is the hot write path).
+        if (Volatile.Read(ref _seriesCount) >= _maxSeries)
+        {
+            WarnCapReachedOnce();
+            return; // untracked - PrometheusFormatter falls back to buffer-summing
+        }
+
+        var created = new CounterAccumulator(record.Name, sortedTags, record.Value);
+        if (_counterTotals.TryAdd(key, created))
+        {
+            // Do NOT use ConcurrentDictionary.Count here - it acquires every
+            // internal lock. This separate counter, incremented only on admission,
+            // is the cheap substitute.
+            Interlocked.Increment(ref _seriesCount);
+            return;
+        }
+
+        // Lost the race to another writer admitting the same series concurrently -
+        // it's in the dictionary now, so fold this write into it.
+        if (_counterTotals.TryGetValue(key, out existing))
+            existing.Add(record.Value);
+    }
+
+    private void WarnCapReachedOnce()
+    {
+        // Guarded by a bool, not a lock: a duplicate warning under a race is
+        // harmless, and this is the hot write path.
+        if (Interlocked.CompareExchange(ref _capWarned, 1, 0) != 0)
+            return;
+
+        _logger?.LogWarning(
+            "InMemoryMetricStore counter-series cap ({MaxSeries}) reached; further " +
+            "distinct counter series will not be tracked for monotonic totals and " +
+            "will fall back to ring-buffer summing. Reduce metric tag cardinality " +
+            "(e.g. avoid tagging counters with user IDs, request IDs, or raw URLs).",
+            _maxSeries);
+    }
+
+    public IReadOnlyCollection<CounterTotal> GetCounterTotals()
+    {
+        var totals = new List<CounterTotal>(_counterTotals.Count);
+        foreach (var accumulator in _counterTotals.Values)
+        {
+            totals.Add(new CounterTotal(accumulator.MetricName, accumulator.Tags, accumulator.Total));
+        }
+        return totals;
+    }
+
+    /// <summary>
+    /// Mutable per-series counter accumulator. Total is updated via a lock-free
+    /// compare-and-swap loop rather than `+=`, which is not atomic on a double and
+    /// would lose increments under concurrent writers.
+    /// </summary>
+    private sealed class CounterAccumulator
+    {
+        public string MetricName { get; }
+        public MetricTag[] Tags { get; }
+        private double _total;
+
+        public CounterAccumulator(string metricName, MetricTag[] tags, double initial)
+        {
+            MetricName = metricName;
+            Tags = tags;
+            _total = initial;
+        }
+
+        public double Total => Volatile.Read(ref _total);
+
+        public void Add(double delta)
+        {
+            double current, updated;
+            do
+            {
+                current = Volatile.Read(ref _total);
+                updated = current + delta;
+            } while (Interlocked.CompareExchange(ref _total, updated, current) != current);
+        }
     }
 
     public MetricRecord[] ReadRecent(string metricName, int count)

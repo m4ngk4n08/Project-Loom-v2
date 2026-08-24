@@ -28,4 +28,10 @@ public interface IMetricStore
     ChannelReader<MetricRecord> Subscribe();
 
     void Unsubscribe(ChannelReader<MetricRecord> reader);
+
+    /// <summary>
+    /// Cumulative per-series counter totals. Monotonic: unaffected by ring-buffer wrap.
+    /// May be empty, or may omit series past the cardinality cap - callers must fall back.
+    /// </summary>
+    IReadOnlyCollection<CounterTotal> GetCounterTotals();
 }

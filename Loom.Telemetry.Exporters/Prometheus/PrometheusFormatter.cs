@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Text;
 using System.Text;
 using Loom.Storage;
+using Loom.Telemetry;
 
 namespace Loom.Telemetry.Exporters.Prometheus;
 
@@ -26,6 +27,18 @@ public static class PrometheusFormatter
     public static void Format(IMetricStore store, IBufferWriter<byte> writer)
     {
         var buffers = store.GetBuffers();
+
+        // Built once per scrape, not per series: MetricSeriesKey.Build(name, sortedTags)
+        // -> cumulative total, keyed the same way the store's accumulator keys its
+        // entries. A miss here (untracked store, or a series past the cardinality
+        // cap) falls back to summing the ring buffer's retained records - the
+        // non-monotonic path this feature replaces, kept only as a safety net.
+        var counterTotals = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var total in store.GetCounterTotals())
+        {
+            var sortedTotalTags = MetricSeriesKey.SortTags(total.Tags);
+            counterTotals[MetricSeriesKey.Build(total.MetricName, sortedTotalTags)] = total.Total;
+        }
 
         foreach (var (metricName, buffer) in buffers)
         {
@@ -66,12 +79,23 @@ public static class PrometheusFormatter
                     foreach (var key in orderedKeys)
                     {
                         var group = groups[key];
-                        // Counters are cumulative totals: RecordCounter writes each call
-                        // as an increment, so the series total is the sum of every
-                        // retained record - not the most recent one. Gauges are
-                        // point-in-time, so they keep the newest record's value (the
-                        // first one seen while scanning newest-first).
-                        var value = metricType == MetricType.Counter ? group.Sum : group.NewestValue;
+                        // Counters are cumulative totals. Prefer the store's monotonic
+                        // accumulator (unaffected by ring-buffer wrap); fall back to
+                        // summing the retained records - the non-monotonic path - only
+                        // when the series isn't tracked there (untracked store, or past
+                        // the cardinality cap). Gauges are point-in-time, so they keep
+                        // the newest record's value (the first one seen while scanning
+                        // newest-first).
+                        double value;
+                        if (metricType == MetricType.Counter)
+                        {
+                            var seriesKey = MetricSeriesKey.Build(metricName, group.SortedTags);
+                            value = counterTotals.TryGetValue(seriesKey, out var total) ? total : group.Sum;
+                        }
+                        else
+                        {
+                            value = group.NewestValue;
+                        }
 
                         WriteSanitizedName(writer, metricName);
                         WriteLabels(writer, group.SortedTags, quantile: default);
@@ -216,8 +240,12 @@ public static class PrometheusFormatter
 
         foreach (var record in records)
         {
-            var sortedTags = SortTags(record.Tags);
-            var key = BuildCanonicalKey(sortedTags);
+            var sortedTags = MetricSeriesKey.SortTags(record.Tags);
+            // Grouping key is scoped to tags only (records here are already scoped to
+            // one metric name, via the outer per-buffer loop), unlike the
+            // name+tags key used for the counterTotals accumulator lookup above -
+            // so this intentionally does not call MetricSeriesKey.Build.
+            var key = MetricSeriesKey.Build(string.Empty, sortedTags);
 
             if (!groups.TryGetValue(key, out var group))
             {
@@ -231,41 +259,6 @@ public static class PrometheusFormatter
         }
 
         return groups;
-    }
-
-    private static MetricTag[] SortTags(MetricTag[]? tags)
-    {
-        if (tags is null || tags.Length == 0)
-            return [];
-
-        var sorted = (MetricTag[])tags.Clone();
-        Array.Sort(sorted, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
-        return sorted;
-    }
-
-    /// <summary>
-    /// Builds a canonical grouping key from sorted tags. Length-prefixes each key and
-    /// value (<c>len:key</c>, <c>len:value</c>) rather than just joining with '=' and
-    /// ','. Without the prefixes, a tag VALUE containing those separator characters
-    /// can forge another tag set's key - e.g. {a="b,c=d"} and {a="b", c="d"} both
-    /// serialize to the same "a=b,c=d" string, silently merging two distinct series
-    /// and summing their values under the wrong label set. The length prefix makes
-    /// each field's boundary unambiguous regardless of what characters it contains,
-    /// so do not "simplify" this back to plain '='/',' joining.
-    /// </summary>
-    private static string BuildCanonicalKey(MetricTag[] sortedTags)
-    {
-        if (sortedTags.Length == 0) return string.Empty;
-
-        var sb = new StringBuilder();
-        for (var i = 0; i < sortedTags.Length; i++)
-        {
-            if (i > 0) sb.Append(',');
-            var tag = sortedTags[i];
-            sb.Append(tag.Key.Length).Append(':').Append(tag.Key)
-              .Append(tag.Value.Length).Append(':').Append(tag.Value);
-        }
-        return sb.ToString();
     }
 
     /// <summary>

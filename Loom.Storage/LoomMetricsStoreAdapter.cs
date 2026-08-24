@@ -42,6 +42,12 @@ public sealed class LoomMetricsStoreAdapter : IMetricStore
 
     public void Unsubscribe(ChannelReader<MetricRecord> reader) { }
 
+    // This is a read-only bridge over the static LoomMetrics buffers - Write()
+    // above already discards type and tags, so there is no accumulator to read
+    // totals from. Empty is correct: PrometheusFormatter falls back to
+    // buffer-summing for every series here.
+    public IReadOnlyCollection<CounterTotal> GetCounterTotals() => Array.Empty<CounterTotal>();
+
     private static IReadOnlyDictionary<string, MetricBuffer> GetStaticBuffers() =>
         LoomRuntime.GetBuffersSnapshot();
 }

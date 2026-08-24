@@ -274,4 +274,86 @@ public sealed class InMemoryMetricStoreTests
         // The first 76 writes were dropped, so the oldest retained is #76.
         Assert.Equal(76, oldestRetained.Value);
     }
+
+    // --- Counter accumulator (BACKLOG § 4.4): monotonic totals across ring-buffer wrap ---
+
+    private static MetricRecord CounterRecord(string name, double value, long ticks, params MetricTag[] tags) =>
+        new(name, MetricType.Counter, value, ticks, tags.Length == 0 ? null : tags);
+
+    [Fact]
+    public void GetCounterTotals_SurvivesRingBufferWrap()
+    {
+        // THE POINT: capacity 16, write 50 increments of 1. The ring buffer only
+        // retains the last 16, so buffer-summing alone would report at most 16 -
+        // the accumulator must report the true cumulative total of 50.
+        using var store = new InMemoryMetricStore(bufferCapacity: 16);
+        for (var i = 0; i < 50; i++)
+            store.Write(CounterRecord("requests", 1, Base + i));
+
+        var totals = store.GetCounterTotals();
+
+        var total = Assert.Single(totals);
+        Assert.Equal("requests", total.MetricName);
+        Assert.Equal(50.0, total.Total);
+    }
+
+    [Fact]
+    public void GetCounterTotals_TaggedSeries_SurvivesRingBufferWrap()
+    {
+        using var store = new InMemoryMetricStore(bufferCapacity: 16);
+        var tag = new MetricTag("route", "/api/x");
+        for (var i = 0; i < 50; i++)
+            store.Write(CounterRecord("requests", 1, Base + i, tag));
+
+        var totals = store.GetCounterTotals();
+
+        var total = Assert.Single(totals);
+        Assert.Equal(50.0, total.Total);
+        Assert.Equal(tag, Assert.Single(total.Tags));
+    }
+
+    [Fact]
+    public void GetCounterTotals_IsMonotonicAcrossSuccessiveReads()
+    {
+        using var store = new InMemoryMetricStore(bufferCapacity: 16);
+        for (var i = 0; i < 10; i++)
+            store.Write(CounterRecord("requests", 1, Base + i));
+
+        var first = Assert.Single(store.GetCounterTotals()).Total;
+
+        for (var i = 10; i < 20; i++)
+            store.Write(CounterRecord("requests", 1, Base + i));
+
+        var second = Assert.Single(store.GetCounterTotals()).Total;
+
+        Assert.True(second > first, $"expected {second} > {first}");
+    }
+
+    [Fact]
+    public void GetCounterTotals_CapsAdmittedSeries_UntrackedSeriesAreAbsent()
+    {
+        using var store = new InMemoryMetricStore(bufferCapacity: 16, maxSeries: 3);
+
+        for (var i = 0; i < 5; i++)
+        {
+            var tag = new MetricTag("id", i.ToString());
+            store.Write(CounterRecord("requests", 1, Base + i, tag));
+            store.Write(CounterRecord("requests", 1, Base + 100 + i, tag)); // 2 per series
+        }
+
+        var totals = store.GetCounterTotals();
+
+        Assert.True(totals.Count <= 3, $"expected at most 3 tracked series, got {totals.Count}");
+        Assert.All(totals, t => Assert.Equal(2.0, t.Total));
+    }
+
+    [Fact]
+    public void GetCounterTotals_GaugeWrites_DoNotAccumulate()
+    {
+        using var store = new InMemoryMetricStore();
+        store.Write(Record("cpu", 10, Base));
+        store.Write(Record("cpu", 20, Base + 1));
+
+        Assert.Empty(store.GetCounterTotals());
+    }
 }

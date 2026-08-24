@@ -304,32 +304,44 @@ fix landed, so there was nothing to fold in.
 
 ---
 
-### 4.4 Prometheus Counters Stop Growing Once Their Buffer Wraps 🟡 MEDIUM
+### 4.4 Prometheus Counters Stop Growing Once Their Buffer Wraps ✅ COMPLETED
 
-**Issue:** `PrometheusFormatter` (§ 4.3) computes a counter's exported total by
+**Issue:** `PrometheusFormatter` (§ 4.3) computed a counter's exported total by
 summing every `MetricRecord` currently retained in that metric's `MetricBuffer`.
 `MetricBuffer` is a bounded ring buffer (8192 records by default) — once a
-high-frequency counter's buffer wraps, the oldest increments are overwritten and
-no longer part of the sum. From that point on, the exported total only reflects the
-records still retained, not the true lifetime cumulative count; it can even appear
-to shrink relative to a scrape taken before the wrap, which PromQL's
-`rate()`/`increase()` will read as a counter reset.
+high-frequency counter's buffer wrapped, the oldest increments were overwritten and
+no longer part of the sum, so the exported total stopped growing even though the
+true lifetime cumulative count kept increasing, which PromQL's
+`rate()`/`increase()` reads as a counter reset.
 
-**Root Cause:** The buffer is a recency window designed for the dashboard's "recent
-values" queries, not an accumulator. Deriving a Prometheus counter total from it
-conflates two different jobs.
+**Fix:** `InMemoryMetricStore` now maintains a bounded, per-series monotonic
+accumulator (`GetCounterTotals()` on `IMetricStore`), independent of ring-buffer
+contents:
+- Keyed by `MetricSeriesKey.Build(name, sortedTags)` (`Loom.Telemetry`), the single
+  canonical (name, tags) → key implementation shared by the store and the
+  formatter — no duplicated key logic to drift out of sync.
+- Capped at 10,000 tracked series (ctor parameter, default 10,000). Once the cap is
+  reached, new series are simply not admitted — existing series keep accumulating,
+  nothing is evicted (evicting would reintroduce the same non-monotonicity this
+  fix removes). A logged warning fires once when the cap is hit.
+- Untagged counters (the common case) key on the metric name itself — no
+  allocation. Only tagged counters allocate a key string; `Write()` remains
+  allocation-free otherwise.
+- `PrometheusFormatter` builds the accumulator lookup once per `Format()` call and
+  prefers it for Counter series; a series absent from the accumulator (untracked
+  store, or past the cap) falls back to summing the buffer's retained records —
+  the original, non-monotonic behavior, now demoted to a fallback rather than the
+  only path.
+- `LoomMetricsStoreAdapter` and the test double `FakeMetricStore` both implement
+  `GetCounterTotals()` as an empty collection (documented as correct — they have
+  no accumulator to read from), which exercises the fallback path.
 
-**Proposed Fix:** A monotonic accumulator maintained by the metric store itself
-(e.g. a running `double`/`long` total updated atomically on every `RecordCounter`
-call for a given name+tag-set), independent of what the ring buffer currently
-retains. The formatter would read that accumulator instead of summing buffer
-contents.
-
-**Effort:** 4-6 hours (store-level accumulator keyed by name+tag-set, plus updating
-the formatter to read it and updating the § 4.3 tests that assert sum-of-retained
-behavior)  
-**Priority:** 🟡 MEDIUM (only manifests under sustained high-frequency counter
-usage that outlives the buffer window - low severity today, but silently wrong)
+**Verification:** `InMemoryMetricStore` with `bufferCapacity: 16`, 50 counter
+increments of 1 — `PrometheusFormatter` reports `50.00`, exceeding the buffer
+capacity and confirming the old buffer-summing ceiling is gone. Monotonicity,
+tagged series, the cardinality cap, and the fallback path are all covered by new
+tests in `InMemoryMetricStoreTests`, `MetricSeriesKeyTests`, and
+`PrometheusFormatterTests`. Gauge, histogram, and summary output are unchanged.
 
 ---
 
@@ -603,9 +615,8 @@ items this document ever tracked, are both completed.
 1. 🟡 Binary size documentation (§ 5.1) - 30 minutes
 2. 🟡 Test reset automation (§ 6.1) - 4-6 hours
 3. 🟡 Alerting has no resolution notifications (§ 6.5) - 4-8 hours
-4. 🟡 Prometheus counters stop growing once their buffer wraps (§ 4.4) - 4-6 hours
 
-**Total Medium Priority Work:** ~13-21 hours
+**Total Medium Priority Work:** ~9-15 hours
 
 ---
 

@@ -35,4 +35,8 @@ internal sealed class FakeMetricStore : IMetricStore
     public (double Value, DateTime Timestamp)[] Snapshot(string metricName) => throw new NotImplementedException();
     public ChannelReader<MetricRecord> Subscribe() => throw new NotImplementedException();
     public void Unsubscribe(ChannelReader<MetricRecord> reader) { }
+
+    // Test double with no accumulator - empty is correct, exercising the
+    // formatter's buffer-summing fallback path.
+    public IReadOnlyCollection<CounterTotal> GetCounterTotals() => Array.Empty<CounterTotal>();
 }

@@ -237,7 +237,7 @@ namespace Loom.Dashboard.Extensions
             {
                 var clampedLimit = Math.Clamp(limit ?? 1000, 1, 10_000);
                 var filter = new LogQueryFilter(
-                    from?.ToUniversalTime().Ticks, to?.ToUniversalTime().Ticks,
+                    ToUtcTicks(from), ToUtcTicks(to),
                     category, minLevel, clampedLimit);
                 var records = store.Query(filter);
 
@@ -254,6 +254,15 @@ namespace Loom.Dashboard.Extensions
 
             return api;
         }
+
+        // A query value carrying no timezone designator binds as Unspecified, and
+        // ToUniversalTime() would then apply the SERVER's offset - making the export window
+        // depend on where the process is deployed. Naive input is documented as already-UTC.
+        internal static long? ToUtcTicks(DateTime? value) => value is null
+            ? null
+            : (value.Value.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+                : value.Value.ToUniversalTime()).Ticks;
 
         internal static IResult WriteCsvExport(LogRecord[] records)
         {

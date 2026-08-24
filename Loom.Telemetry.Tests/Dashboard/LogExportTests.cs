@@ -72,6 +72,37 @@ public class LogExportTests
     }
 
     [Fact]
+    public void ToUtcTicks_UtcInput_TicksUnchanged()
+    {
+        var value = new DateTime(2026, 3, 5, 9, 0, 0, DateTimeKind.Utc);
+
+        Assert.Equal(value.Ticks, EndpointExtensions.ToUtcTicks(value));
+    }
+
+    [Fact]
+    public void ToUtcTicks_UnspecifiedInput_TreatedAsUtcNotShifted()
+    {
+        var value = new DateTime(2026, 3, 5, 9, 0, 0, DateTimeKind.Unspecified);
+        var expected = new DateTime(2026, 3, 5, 9, 0, 0, DateTimeKind.Utc).Ticks;
+
+        Assert.Equal(expected, EndpointExtensions.ToUtcTicks(value));
+    }
+
+    [Fact]
+    public void ToUtcTicks_LocalInput_ConvertedToUniversalTime()
+    {
+        var value = DateTime.SpecifyKind(new DateTime(2026, 3, 5, 9, 0, 0), DateTimeKind.Local);
+
+        Assert.Equal(value.ToUniversalTime().Ticks, EndpointExtensions.ToUtcTicks(value));
+    }
+
+    [Fact]
+    public void ToUtcTicks_Null_ReturnsNull()
+    {
+        Assert.Null(EndpointExtensions.ToUtcTicks(null));
+    }
+
+    [Fact]
     public void WriteTextExport_OneLinePerRecord()
     {
         var records = new[]

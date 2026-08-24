@@ -16,15 +16,33 @@ public static class MetricSeriesKey
     /// <summary>
     /// Sorts tags by key (ordinal) so {a,b} and {b,a} produce the same key.
     /// Returns an empty array for null or empty input - never null.
+    /// ALIASING: when the input is already sorted (including the trivial
+    /// single-tag case), the input array is returned as-is rather than copied -
+    /// consistent with MetricRecord already storing the caller's Tags array by
+    /// reference elsewhere in this codebase. The returned array may therefore
+    /// alias the caller's array and must not be mutated.
     /// </summary>
     public static MetricTag[] SortTags(MetricTag[]? tags)
     {
         if (tags is null || tags.Length == 0)
             return [];
 
+        if (tags.Length == 1 || IsSortedByKey(tags))
+            return tags;
+
         var sorted = (MetricTag[])tags.Clone();
         Array.Sort(sorted, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
         return sorted;
+    }
+
+    private static bool IsSortedByKey(MetricTag[] tags)
+    {
+        for (var i = 1; i < tags.Length; i++)
+        {
+            if (string.CompareOrdinal(tags[i - 1].Key, tags[i].Key) > 0)
+                return false;
+        }
+        return true;
     }
 
     /// <summary>

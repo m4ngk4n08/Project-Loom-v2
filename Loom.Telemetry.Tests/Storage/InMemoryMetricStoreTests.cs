@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading.Channels;
+using System.Threading.Tasks;
 using Loom.Storage;
 using Loom.Telemetry;
 using Xunit;
@@ -355,5 +356,89 @@ public sealed class InMemoryMetricStoreTests
         store.Write(Record("cpu", 20, Base + 1));
 
         Assert.Empty(store.GetCounterTotals());
+    }
+
+    // --- NaN/Infinity regression guard (livelock fix) ---
+
+    [Fact]
+    public void GetCounterTotals_NaNWrite_DoesNotHangAndIsSkipped()
+    {
+        using var store = new InMemoryMetricStore();
+
+        var completed = Task.Run(() =>
+        {
+            store.Write(CounterRecord("c", double.NaN, Base));
+            store.Write(CounterRecord("c", 5, Base + 1));
+        }).Wait(TimeSpan.FromSeconds(5));
+
+        Assert.True(completed, "Write did not return - CAS loop failed to converge");
+        Assert.Equal(5.0, Assert.Single(store.GetCounterTotals()).Total);
+    }
+
+    [Fact]
+    public void GetCounterTotals_InfinityWrite_DoesNotHangAndIsSkipped()
+    {
+        using var store = new InMemoryMetricStore();
+
+        var completed = Task.Run(() =>
+        {
+            store.Write(CounterRecord("c", double.PositiveInfinity, Base));
+            store.Write(CounterRecord("c", 5, Base + 1));
+        }).Wait(TimeSpan.FromSeconds(5));
+
+        Assert.True(completed, "Write did not return - CAS loop failed to converge");
+        Assert.Equal(5.0, Assert.Single(store.GetCounterTotals()).Total);
+    }
+
+    [Fact]
+    public void GetCounterTotals_ConcurrentIncrements_ProduceExactTotal()
+    {
+        using var store = new InMemoryMetricStore();
+        const int threads = 8;
+        const int perThread = 100_000;
+
+        System.Threading.Tasks.Parallel.For(0, threads, t =>
+        {
+            for (var i = 0; i < perThread; i++)
+                store.Write(CounterRecord("c", 1, Base + i));
+        });
+
+        Assert.Equal((double)(threads * perThread), Assert.Single(store.GetCounterTotals()).Total);
+    }
+
+    // --- MetricSeriesKey.SortTags fast paths ---
+
+    [Fact]
+    public void SortTags_SingleTag_ReturnsSameCanonicalKeyAsGeneralPath()
+    {
+        var tags = new[] { new MetricTag("route", "/x") };
+        Assert.Equal(
+            MetricSeriesKey.Build("m", ForceSortViaClone(tags)),
+            MetricSeriesKey.Build("m", MetricSeriesKey.SortTags(tags)));
+    }
+
+    [Fact]
+    public void SortTags_AlreadySorted_ReturnsSameCanonicalKeyAsGeneralPath()
+    {
+        var tags = new[] { new MetricTag("a", "1"), new MetricTag("b", "2") };
+        Assert.Equal(
+            MetricSeriesKey.Build("m", ForceSortViaClone(tags)),
+            MetricSeriesKey.Build("m", MetricSeriesKey.SortTags(tags)));
+    }
+
+    [Fact]
+    public void SortTags_Unsorted_ProducesSortedOutputMatchingGeneralPath()
+    {
+        var tags = new[] { new MetricTag("b", "2"), new MetricTag("a", "1") };
+        Assert.Equal(
+            MetricSeriesKey.Build("m", ForceSortViaClone(tags)),
+            MetricSeriesKey.Build("m", MetricSeriesKey.SortTags(tags)));
+    }
+
+    private static MetricTag[] ForceSortViaClone(MetricTag[] tags)
+    {
+        var sorted = (MetricTag[])tags.Clone();
+        Array.Sort(sorted, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
+        return sorted;
     }
 }

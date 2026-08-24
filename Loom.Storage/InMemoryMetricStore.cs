@@ -11,8 +11,10 @@ namespace Loom.Storage;
 /// Thread-safe, zero-allocation writes, bounded memory.
 /// Supports real-time subscriptions via Channel.
 /// Writes are zero-allocation EXCEPT for tagged counters: those build a canonical
-/// key string per write (see <see cref="RecordCounterTotal"/>). Untagged counters
-/// and every gauge/histogram write remain allocation-free.
+/// key string per write (see <see cref="RecordCounterTotal"/>), and additionally
+/// clone the tag array when the tags arrive out of sorted order (see
+/// <see cref="MetricSeriesKey.SortTags"/>). Untagged counters and every
+/// gauge/histogram write remain allocation-free.
 /// </summary>
 public sealed class InMemoryMetricStore : IMetricStore, IDisposable
 {
@@ -65,13 +67,21 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
     /// <summary>
     /// Adds this write's value to its series' cumulative total. Untagged counters
     /// (the common case) key on the metric name itself - no allocation. Tagged
-    /// counters build a canonical key string via MetricSeriesKey - the one
-    /// allocation on this otherwise allocation-free path. A zero-allocation variant
-    /// (struct key + custom comparer + an already-sorted fast path) is deferred
-    /// pending the BACKLOG § 6.3 benchmark harness.
+    /// counters build a canonical key string via MetricSeriesKey, plus a tag-array
+    /// clone if the tags weren't already sorted (see MetricSeriesKey.SortTags) -
+    /// the only allocations on this otherwise allocation-free path. A fully
+    /// zero-allocation variant (struct key + custom comparer) is deferred pending
+    /// the BACKLOG § 6.3 benchmark harness.
     /// </summary>
     private void RecordCounterTotal(in MetricRecord record)
     {
+        // NaN/Infinity is meaningless to Prometheus and, worse, would poison the
+        // accumulator: CounterAccumulator's initial total is taken straight from
+        // record.Value, so a non-finite first write would start the series
+        // non-finite forever. Skip it here, before either the create or update path.
+        if (!double.IsFinite(record.Value))
+            return;
+
         var sortedTags = MetricSeriesKey.SortTags(record.Tags);
         var key = MetricSeriesKey.Build(record.Name, sortedTags);
 
@@ -153,12 +163,18 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
 
         public void Add(double delta)
         {
-            double current, updated;
-            do
+            // Bitwise comparison, not `!=`: under IEEE 754, NaN != NaN is always
+            // true, so if _total ever held NaN, `!= current` could never see the
+            // CAS as having succeeded and would spin forever even though the
+            // exchange itself succeeded. Callers keep NaN/Infinity out (see
+            // RecordCounterTotal), but this loop must be correct regardless.
+            while (true)
             {
-                current = Volatile.Read(ref _total);
-                updated = current + delta;
-            } while (Interlocked.CompareExchange(ref _total, updated, current) != current);
+                var current = Volatile.Read(ref _total);
+                var prev = Interlocked.CompareExchange(ref _total, current + delta, current);
+                if (BitConverter.DoubleToInt64Bits(prev) == BitConverter.DoubleToInt64Bits(current))
+                    return;
+            }
         }
     }
 

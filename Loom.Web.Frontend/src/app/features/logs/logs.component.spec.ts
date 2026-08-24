@@ -15,4 +15,9 @@ describe('toUtcIso', () => {
     const expected = new Date(2026, 7, 24, 14, 30).toISOString();
     expect(result).toBe(expected);
   });
+
+  it('returns undefined for an unparseable value instead of throwing', () => {
+    expect(() => toUtcIso('garbage')).not.toThrow();
+    expect(toUtcIso('garbage')).toBeUndefined();
+  });
 });

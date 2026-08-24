@@ -14,7 +14,9 @@ const LOG_LEVELS = ['Trace', 'Debug', 'Information', 'Warning', 'Error', 'Critic
 // interpretation the user intended), so converting it here - before it ever leaves the
 // browser - is the only place the intended instant can be recovered correctly.
 export function toUtcIso(localDateTimeValue: string): string | undefined {
-  return localDateTimeValue ? new Date(localDateTimeValue).toISOString() : undefined;
+  if (!localDateTimeValue) return undefined;
+  const parsed = new Date(localDateTimeValue);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 @Component({

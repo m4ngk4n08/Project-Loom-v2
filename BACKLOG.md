@@ -562,6 +562,8 @@ field — a schema change, not a bugfix.
 properties field needs, so the schema decision follows it rather than leading it.
 
 *Update (2026-08-25, after `1ae0b7f`):* the dashboard no longer captures logs through
+`LoomLogger` at all — `EventPipeBridge` reads the target process's
+`Microsoft-Extensions-Logging` EventSource instead. Verified against a live
 `Host.CreateApplicationBuilder` target, the `MessageJson` payload already carries two
 fields this item assumed were unavailable:
 

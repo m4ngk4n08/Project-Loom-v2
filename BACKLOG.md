@@ -561,6 +561,21 @@ field — a schema change, not a bugfix.
 *Revisit when:* the RAG corpus design is settled. The corpus determines what shape the
 properties field needs, so the schema decision follows it rather than leading it.
 
+*Update (2026-08-25, after `1ae0b7f`):* the dashboard no longer captures logs through
+`Host.CreateApplicationBuilder` target, the `MessageJson` payload already carries two
+fields this item assumed were unavailable:
+
+- `ArgumentsJson` — the structured properties, e.g.
+  `{"N":"1","{OriginalFormat}":"probe info line {N}"}`. Message template and named
+  arguments both, with no scope plumbing required.
+- `ActivityTraceId` / `ActivitySpanId` — empty under a plain console host, populated
+  under ASP.NET Core. A distributed-trace correlation key that arrives for free.
+
+`IngestLogMessage` currently reads neither. The schema question is unchanged —
+`LogRecord` still needs a structured-properties field, and that remains a schema
+change rather than a bugfix. What changed is the *source*: this no longer waits on
+`BeginScope`, so the deferral now blocks only on `LogRecord`'s shape.
+
 ---
 
 **(b) `InMemoryLogStore._categories` never evicts**

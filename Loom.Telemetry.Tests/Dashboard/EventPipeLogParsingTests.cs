@@ -60,4 +60,36 @@ public class EventPipeLogParsingTests
         Assert.Null(type);
         Assert.Null(message);
     }
+
+    [Fact]
+    public void ToInt32_BoxedInt_ReturnsUnchanged()
+    {
+        var result = EventPipeBridge.ToInt32((object)4, -1);
+
+        Assert.Equal(4, result);
+    }
+
+    [Fact]
+    public void ToInt32_Null_ReturnsFallback()
+    {
+        var result = EventPipeBridge.ToInt32(null, -1);
+
+        Assert.Equal(-1, result);
+    }
+
+    [Fact]
+    public void ToInt32_NumericString_ReturnsParsed()
+    {
+        var result = EventPipeBridge.ToInt32("3", -1);
+
+        Assert.Equal(3, result);
+    }
+
+    [Fact]
+    public void ToInt32_NonNumericString_ReturnsFallback()
+    {
+        var result = EventPipeBridge.ToInt32("Warning", -1);
+
+        Assert.Equal(-1, result);
+    }
 }

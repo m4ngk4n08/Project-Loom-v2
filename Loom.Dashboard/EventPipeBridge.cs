@@ -20,6 +20,7 @@ public sealed class EventPipeBridge : BackgroundService
     private readonly ILogStore _logStore;
     private readonly ILogger<EventPipeBridge> _logger;
     private long _recordsIngested;
+    private long _logRecordsIngested;
     private int _reconnectCount;
 
     public EventPipeBridge(int targetPid, IMetricStore store, ILogStore logStore, ILogger<EventPipeBridge> logger)
@@ -40,8 +41,9 @@ public sealed class EventPipeBridge : BackgroundService
             {
                 await StreamMetrics(stoppingToken);
                 _logger.LogInformation(
-                    "EventPipe session ended after ingesting {RecordCount} metric records.",
-                    Interlocked.Read(ref _recordsIngested));
+                    "EventPipe session ended after ingesting {RecordCount} metric records and {LogRecordCount} log records.",
+                    Interlocked.Read(ref _recordsIngested),
+                    Interlocked.Read(ref _logRecordsIngested));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -54,8 +56,10 @@ public sealed class EventPipeBridge : BackgroundService
         }
 
         _logger.LogInformation(
-            "EventPipe bridge stopped. Total: {TotalRecords} records ingested, {ReconnectCount} reconnects.",
-            Interlocked.Read(ref _recordsIngested), _reconnectCount);
+            "EventPipe bridge stopped. Total: {TotalRecords} metric records, {TotalLogRecords} log records, {ReconnectCount} reconnects.",
+            Interlocked.Read(ref _recordsIngested),
+            Interlocked.Read(ref _logRecordsIngested),
+            _reconnectCount);
     }
 
     private async Task StreamMetrics(CancellationToken ct)
@@ -212,10 +216,10 @@ public sealed class EventPipeBridge : BackgroundService
                     category = traceEvent.PayloadValue(i)?.ToString();
                     break;
                 case "Level":
-                    int.TryParse(traceEvent.PayloadValue(i)?.ToString(), out level);
+                    level = ToInt32(traceEvent.PayloadValue(i), -1);
                     break;
                 case "EventId":
-                    int.TryParse(traceEvent.PayloadValue(i)?.ToString(), out eventId);
+                    eventId = ToInt32(traceEvent.PayloadValue(i), 0);
                     break;
                 case "FormattedMessage":
                     formattedMessage = traceEvent.PayloadValue(i)?.ToString();
@@ -242,7 +246,20 @@ public sealed class EventPipeBridge : BackgroundService
             exceptionMessage);
 
         _logStore.Write(in record);
+        Interlocked.Increment(ref _logRecordsIngested);
     }
+
+    // PayloadValue boxes Level and EventId as Int32 - verified against a live
+    // Microsoft-Extensions-Logging session. Unbox directly; ToString() +
+    // int.TryParse allocates a throwaway string per field on every log event.
+    // The string branch keeps the read working if a future runtime widens the
+    // payload type rather than silently dropping the record.
+    internal static int ToInt32(object? value, int fallback) => value switch
+    {
+        int i => i,
+        null => fallback,
+        _ => int.TryParse(value.ToString(), out var parsed) ? parsed : fallback,
+    };
 
     internal static (string? Type, string? Message) ParseExceptionJson(string? exceptionJson)
     {

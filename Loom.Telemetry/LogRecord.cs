@@ -28,6 +28,23 @@ public readonly struct LogRecord
     /// <summary>Exception message (only set when the log entry carries an exception)</summary>
     public string? ExceptionMessage { get; }
 
+    /// <summary>Message template with {Placeholders} intact, before argument
+    /// substitution. Null when the source supplied no template.</summary>
+    public string? Template { get; }
+
+    /// <summary>Structured arguments as a JSON object, with {OriginalFormat}
+    /// removed. Null when there are no arguments.</summary>
+    public string? ArgumentsJson { get; }
+
+    /// <summary>High 64 bits of the W3C trace id. 0 means absent.</summary>
+    public ulong TraceIdHi { get; }
+
+    /// <summary>Low 64 bits of the W3C trace id. 0 means absent.</summary>
+    public ulong TraceIdLo { get; }
+
+    /// <summary>W3C span id. 0 means absent.</summary>
+    public ulong SpanId { get; }
+
     public LogRecord(
         string message,
         string category,
@@ -35,7 +52,12 @@ public readonly struct LogRecord
         long timestampUtcTicks,
         int eventId = 0,
         string? exceptionType = null,
-        string? exceptionMessage = null)
+        string? exceptionMessage = null,
+        string? template = null,
+        string? argumentsJson = null,
+        ulong traceIdHi = 0,
+        ulong traceIdLo = 0,
+        ulong spanId = 0)
     {
         Message = message ?? throw new ArgumentNullException(nameof(message));
         Category = category ?? throw new ArgumentNullException(nameof(category));
@@ -44,6 +66,11 @@ public readonly struct LogRecord
         EventId = eventId;
         ExceptionType = exceptionType;
         ExceptionMessage = exceptionMessage;
+        Template = template;
+        ArgumentsJson = argumentsJson;
+        TraceIdHi = traceIdHi;
+        TraceIdLo = traceIdLo;
+        SpanId = spanId;
     }
 
     public DateTime TimestampUtc => new DateTime(TimestampUtcTicks, DateTimeKind.Utc);

@@ -348,6 +348,12 @@
   }
 }
 
+.group-row-wrap {
+  &:last-child .group-row {
+    border-bottom: none;
+  }
+}
+
 .group-row {
   display: grid;
   grid-template-columns: 72px 72px 220px 1fr;
@@ -355,13 +361,10 @@
   padding: 0.4rem 1rem;
   border-bottom: 1px solid var(--border);
   align-items: baseline;
+  cursor: pointer;
 
   &:hover {
     background: rgba(255, 255, 255, 0.03);
-  }
-
-  &:last-child {
-    border-bottom: none;
   }
 }
 

@@ -204,6 +204,10 @@ export class LogsComponent implements OnInit {
   // and buffer clears, unlike traceFilter.
   grouped = signal(false);
   expandedKey = signal<string | null>(null);
+  // TemplateGroup has no natural id field of its own, but groupByTemplate already
+  // keys its internal map on the template string, so it's unique across a single
+  // grouping pass - no rowKey-style hashing needed here.
+  expandedGroupTemplate = signal<string | null>(null);
   paused = signal(false);
   isConnected = signal(false);
 
@@ -344,6 +348,7 @@ export class LogsComponent implements OnInit {
     this.entries.set([]);
     this.traceFilter.set('');
     this.expandedKey.set(null);
+    this.expandedGroupTemplate.set(null);
   }
 
   severityClass(level: string): string {
@@ -388,6 +393,14 @@ export class LogsComponent implements OnInit {
 
   rowArguments(row: DisplayRow): LogArgument[] {
     return parseArguments(row.argumentsJson);
+  }
+
+  isGroupExpanded(group: TemplateGroup): boolean {
+    return this.expandedGroupTemplate() === group.template;
+  }
+
+  toggleGroupExpanded(group: TemplateGroup): void {
+    this.expandedGroupTemplate.set(this.expandedGroupTemplate() === group.template ? null : group.template);
   }
 
   runSearch(): void {

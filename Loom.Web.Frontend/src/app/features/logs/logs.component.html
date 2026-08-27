@@ -130,11 +130,44 @@
       @if (templateGroups().groups.length > 0) {
         <div class="log-list surface" role="table" aria-label="Log entries grouped by template">
           @for (group of templateGroups().groups; track group.template) {
-            <div class="group-row" [class]="severityClass(group.level)">
-              <span class="group-count">{{ group.count }}</span>
-              <span class="log-level">{{ group.level }}</span>
-              <span class="group-category" [title]="group.category">{{ group.category }}</span>
-              <span class="group-template" [title]="group.sample">{{ group.template }}</span>
+            <div class="group-row-wrap">
+              <div class="group-row"
+                   [class]="severityClass(group.level)"
+                   (click)="toggleGroupExpanded(group)"
+                   (keydown.enter)="toggleGroupExpanded(group)"
+                   (keydown.space)="toggleGroupExpanded(group); $event.preventDefault()"
+                   tabindex="0"
+                   role="button"
+                   [attr.aria-expanded]="isGroupExpanded(group)">
+                <span class="group-count">{{ group.count }}</span>
+                <span class="log-level">{{ group.level }}</span>
+                <span class="group-category" [title]="group.category">{{ group.category }}</span>
+                <span class="group-template" [title]="group.sample">{{ group.template }}</span>
+              </div>
+              @if (isGroupExpanded(group)) {
+                <dl class="log-details">
+                  <div class="detail-row">
+                    <dt>Latest</dt>
+                    <dd>{{ group.latestTimestampUtc }}</dd>
+                  </div>
+                  <div class="detail-row">
+                    <dt>Category</dt>
+                    <dd>{{ group.category }}</dd>
+                  </div>
+                  <div class="detail-row">
+                    <dt>Count</dt>
+                    <dd>{{ group.count }}</dd>
+                  </div>
+                  <div class="detail-row">
+                    <dt>Template</dt>
+                    <dd><code>{{ group.template }}</code></dd>
+                  </div>
+                  <div class="detail-row">
+                    <dt>Sample</dt>
+                    <dd class="detail-message">{{ group.sample }}</dd>
+                  </div>
+                </dl>
+              }
             </div>
           }
         </div>

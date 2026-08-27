@@ -27,11 +27,13 @@ namespace Loom.Web.Api.Extensions
                 options.Url = Environment.GetEnvironmentVariable("LOOM_ALERT_WEBHOOK_URL"));
             services.AddAlertTarget<WebhookAlertTarget>();
 
-            // Rules registered here (before Program.cs builds the app) so
-            // AlertEvaluationHostedService sees a non-empty registry when it starts -
-            // see BACKLOG.md § 6.7. These metric names are what a self-monitoring
-            // caller would push via POST /api/metrics/ingest; Web.Api records nothing
-            // about itself automatically.
+            // Web.Api's default alerts. These metric names are what a self-monitoring caller
+            // would push via POST /api/metrics/ingest; Web.Api records nothing about itself
+            // automatically, so these stay quiet until something feeds them.
+            //
+            // Registering before the app is built is no longer load-bearing: since bcbfcdd the
+            // evaluation service re-reads the registry every tick and rules added later are
+            // picked up. These are defaults, not a workaround.
             new LoomTelemetryOptions()
                 .AddAlert("HighIngestErrorRate", alert => alert
                     .When("http.requests.errors", agg => agg.Count > 10)

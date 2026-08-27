@@ -36,9 +36,14 @@ namespace Loom.Dashboard.Extensions
                 options.Url = Environment.GetEnvironmentVariable("LOOM_ALERT_WEBHOOK_URL"));
             services.AddAlertTarget<WebhookAlertTarget>();
 
-            // Rules registered here (before AddDashboardServices' caller builds the app)
-            // so AlertEvaluationHostedService sees a non-empty registry when it starts -
-            // see BACKLOG.md § 6.7.
+            // The dashboard's default alerts. Both metrics come from the System.Runtime
+            // EventCounters that EventPipeBridge pulls from the target process, so they work
+            // against any .NET target without the target opting in.
+            //
+            // Registering before the app is built is no longer load-bearing: since bcbfcdd the
+            // evaluation service re-reads the registry every tick and rules added later are
+            // picked up. These are here because a diagnostics tool with no alerts configured is
+            // less useful out of the box, not to dodge a startup-ordering bug.
             new LoomTelemetryOptions()
                 .AddAlert("HighCpuUsage", alert => alert
                     .When("cpu-usage", agg => agg.Average > 0.8)

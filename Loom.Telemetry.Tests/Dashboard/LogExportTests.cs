@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Text;
+using Loom.Dashboard;
 using Loom.Dashboard.Extensions;
 using Loom.Telemetry;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -47,7 +48,7 @@ public class LogExportTests
             $"{EndpointExtensions.CsvField(record.TimestampUtc.ToString("O"))}," +
             "Error,cat,0," +
             "\"error: \"\"disk full\"\", retrying\nsecond line\"," +
-            ",\r\n";
+            ",,,\r\n";
 
         Assert.Equal("text/csv", result.ContentType);
         Assert.EndsWith(expectedRow, csv);
@@ -59,7 +60,7 @@ public class LogExportTests
         var result = (FileContentHttpResult)EndpointExtensions.WriteCsvExport([]);
         var csv = Encoding.UTF8.GetString(result.FileContents.Span);
 
-        Assert.Equal("Timestamp,Level,Category,EventId,Message,ExceptionType,ExceptionMessage\r\n", csv);
+        Assert.Equal("Timestamp,Level,Category,EventId,Message,ExceptionType,ExceptionMessage,TraceId,Template\r\n", csv);
     }
 
     [Fact]
@@ -100,6 +101,94 @@ public class LogExportTests
     public void ToUtcTicks_Null_ReturnsNull()
     {
         Assert.Null(EndpointExtensions.ToUtcTicks(null));
+    }
+
+    private const string TraceHex = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    [Fact]
+    public void WriteCsvExport_RecordWithTraceIdAndTemplate_EmitsBothInTrailingFields()
+    {
+        LogMessageParser.TryParseTraceId(TraceHex, out var hi, out var lo);
+        var record = new LogRecord(
+            "User 42 logged in", "cat", LoomLogLevel.Information, Base,
+            template: "User {UserId} logged in", traceIdHi: hi, traceIdLo: lo);
+
+        var result = (FileContentHttpResult)EndpointExtensions.WriteCsvExport([record]);
+        var csv = Encoding.UTF8.GetString(result.FileContents.Span);
+
+        Assert.EndsWith($"{TraceHex},User {{UserId}} logged in\r\n", csv);
+    }
+
+    [Fact]
+    public void WriteCsvExport_RecordWithNeitherTraceIdNorTemplate_EmitsTwoEmptyTrailingFields()
+    {
+        var record = new LogRecord("plain message", "cat", LoomLogLevel.Information, Base);
+
+        var result = (FileContentHttpResult)EndpointExtensions.WriteCsvExport([record]);
+        var csv = Encoding.UTF8.GetString(result.FileContents.Span);
+
+        Assert.EndsWith(",,\r\n", csv);
+    }
+
+    [Fact]
+    public void WriteCsvExport_TemplateWithComma_IsRfc4180Quoted()
+    {
+        const string template = "User {UserId}, order {OrderId} failed";
+        var record = new LogRecord(
+            "message", "cat", LoomLogLevel.Error, Base, template: template);
+
+        var result = (FileContentHttpResult)EndpointExtensions.WriteCsvExport([record]);
+        var csv = Encoding.UTF8.GetString(result.FileContents.Span);
+
+        Assert.EndsWith($",{EndpointExtensions.CsvField(template)}\r\n", csv);
+    }
+
+    [Fact]
+    public void WriteCsvExport_PartiallyPopulatedRecords_HaveSameFieldCountAsFullyPopulated()
+    {
+        LogMessageParser.TryParseTraceId(TraceHex, out var hi, out var lo);
+
+        var full = new LogRecord(
+            "full", "cat", LoomLogLevel.Information, Base,
+            template: "Full {X}", traceIdHi: hi, traceIdLo: lo);
+        var traceOnly = new LogRecord(
+            "trace only", "cat", LoomLogLevel.Information, Base,
+            traceIdHi: hi, traceIdLo: lo);
+        var templateOnly = new LogRecord(
+            "template only", "cat", LoomLogLevel.Information, Base,
+            template: "Template {Y}");
+
+        var result = (FileContentHttpResult)EndpointExtensions.WriteCsvExport([full, traceOnly, templateOnly]);
+        var csv = Encoding.UTF8.GetString(result.FileContents.Span);
+        var lines = csv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        var dataRows = lines.Skip(1).ToArray();
+
+        Assert.Equal(3, dataRows.Length);
+        var commaCounts = dataRows.Select(row => row.Count(c => c == ',')).ToArray();
+        Assert.All(commaCounts, count => Assert.Equal(commaCounts[0], count));
+    }
+
+    [Fact]
+    public void WriteCsvExport_MixedRecords_HeaderAndDataRowsAgreeOnColumnCount()
+    {
+        LogMessageParser.TryParseTraceId(TraceHex, out var hi, out var lo);
+
+        var records = new[]
+        {
+            new LogRecord("a", "cat", LoomLogLevel.Information, Base, template: "A {X}", traceIdHi: hi, traceIdLo: lo),
+            new LogRecord("b", "cat", LoomLogLevel.Warning, Base + 1),
+            new LogRecord("c", "cat", LoomLogLevel.Error, Base + 2, template: "C {Z}")
+        };
+
+        var result = (FileContentHttpResult)EndpointExtensions.WriteCsvExport(records);
+        var csv = Encoding.UTF8.GetString(result.FileContents.Span);
+        var lines = csv.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+
+        var headerColumnCount = lines[0].Count(c => c == ',') + 1;
+        foreach (var dataRow in lines.Skip(1))
+        {
+            Assert.Equal(headerColumnCount, dataRow.Count(c => c == ',') + 1);
+        }
     }
 
     [Fact]

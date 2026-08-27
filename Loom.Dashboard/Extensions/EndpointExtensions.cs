@@ -289,7 +289,11 @@ namespace Loom.Dashboard.Extensions
         internal static IResult WriteCsvExport(LogRecord[] records)
         {
             var sb = new StringBuilder();
-            sb.Append("Timestamp,Level,Category,EventId,Message,ExceptionType,ExceptionMessage\r\n");
+            // Appended, never inserted. The header is a positional contract - a consumer
+            // reading row[4] for Message must keep getting Message. SpanId is
+            // deliberately omitted: a flat log export is joined and pivoted on trace id
+            // and template, and every column costs width forever.
+            sb.Append("Timestamp,Level,Category,EventId,Message,ExceptionType,ExceptionMessage,TraceId,Template\r\n");
             foreach (var record in records)
             {
                 sb.Append(CsvField(record.TimestampUtc.ToString("O"))).Append(',')
@@ -298,7 +302,9 @@ namespace Loom.Dashboard.Extensions
                   .Append(CsvField(record.EventId.ToString())).Append(',')
                   .Append(CsvField(record.Message)).Append(',')
                   .Append(CsvField(record.ExceptionType ?? string.Empty)).Append(',')
-                  .Append(CsvField(record.ExceptionMessage ?? string.Empty))
+                  .Append(CsvField(record.ExceptionMessage ?? string.Empty)).Append(',')
+                  .Append(CsvField(LogMessageParser.FormatTraceId(record.TraceIdHi, record.TraceIdLo) ?? string.Empty)).Append(',')
+                  .Append(CsvField(record.Template ?? string.Empty))
                   .Append("\r\n");
             }
 

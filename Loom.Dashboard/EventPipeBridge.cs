@@ -1,5 +1,4 @@
 using System.Diagnostics.Tracing;
-using System.Text.Json;
 using Loom.Storage;
 using Loom.Telemetry;
 using Microsoft.Diagnostics.NETCore.Client;
@@ -226,10 +225,10 @@ public sealed class EventPipeBridge : BackgroundService
                     category = traceEvent.PayloadValue(i)?.ToString();
                     break;
                 case "Level":
-                    level = ToInt32(traceEvent.PayloadValue(i), -1);
+                    level = EventPipeLogPayload.ToInt32(traceEvent.PayloadValue(i), -1);
                     break;
                 case "EventId":
-                    eventId = ToInt32(traceEvent.PayloadValue(i), 0);
+                    eventId = EventPipeLogPayload.ToInt32(traceEvent.PayloadValue(i), 0);
                     break;
                 case "FormattedMessage":
                     formattedMessage = traceEvent.PayloadValue(i)?.ToString();
@@ -253,84 +252,13 @@ public sealed class EventPipeBridge : BackgroundService
         // Observed range is 0..5 (Trace..Critical), matching LoomLogLevel's ordering.
         if (level < 0 || level > 5) return;
 
-        var record = BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             _parser, formattedMessage, category, level,
             traceEvent.TimeStamp.ToUniversalTime().Ticks, eventId,
             exceptionJson, argumentsJson, activityTraceId, activitySpanId);
 
         _logStore.Write(in record);
         Interlocked.Increment(ref _logRecordsIngested);
-    }
-
-    // PayloadValue boxes Level and EventId as Int32 - verified against a live
-    // Microsoft-Extensions-Logging session. Unbox directly; ToString() +
-    // int.TryParse allocates a throwaway string per field on every log event.
-    // The string branch keeps the read working if a future runtime widens the
-    // payload type rather than silently dropping the record.
-    internal static int ToInt32(object? value, int fallback) => value switch
-    {
-        int i => i,
-        null => fallback,
-        _ => int.TryParse(value.ToString(), out var parsed) ? parsed : fallback,
-    };
-
-    internal static LogRecord BuildLogRecord(
-        LogMessageParser parser,
-        string formattedMessage,
-        string category,
-        int level,
-        long timestampUtcTicks,
-        int eventId,
-        string? exceptionJson,
-        string? argumentsJson,
-        string? activityTraceId,
-        string? activitySpanId)
-    {
-        var (exceptionType, exceptionMessage) = ParseExceptionJson(exceptionJson);
-        var (template, args) = parser.ExtractTemplateAndArgs(argumentsJson);
-
-        ulong traceHi = 0, traceLo = 0, spanId = 0;
-        if (activityTraceId != null)
-            W3CTraceId.TryParseTraceId(activityTraceId, out traceHi, out traceLo);
-        if (activitySpanId != null)
-            W3CTraceId.TryParseSpanId(activitySpanId, out spanId);
-
-        return new LogRecord(
-            // Message keeps the fully rendered text even though Template and
-            // ArgumentsJson are stored alongside it. Re-rendering the template per row
-            // on every page render costs more, forever, than the bytes saved once in a
-            // bounded ring buffer.
-            formattedMessage,
-            category,
-            (LoomLogLevel)level,
-            timestampUtcTicks,
-            eventId,
-            exceptionType,
-            exceptionMessage,
-            template,
-            args,
-            traceHi,
-            traceLo,
-            spanId);
-    }
-
-    internal static (string? Type, string? Message) ParseExceptionJson(string? exceptionJson)
-    {
-        if (string.IsNullOrEmpty(exceptionJson) || exceptionJson == "{}")
-            return (null, null);
-
-        try
-        {
-            using var doc = JsonDocument.Parse(exceptionJson);
-            var root = doc.RootElement;
-            var type = root.TryGetProperty("TypeName", out var typeProp) ? typeProp.GetString() : null;
-            var message = root.TryGetProperty("Message", out var messageProp) ? messageProp.GetString() : null;
-            return (type, message);
-        }
-        catch (JsonException)
-        {
-            return (null, null);
-        }
     }
 
     private void IngestEventCounters(TraceEvent traceEvent)

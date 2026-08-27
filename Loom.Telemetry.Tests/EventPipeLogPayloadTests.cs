@@ -1,10 +1,8 @@
-using Loom.Dashboard;
-using Loom.Telemetry;
 using Xunit;
 
-namespace Loom.Telemetry.Tests.Dashboard;
+namespace Loom.Telemetry.Tests;
 
-public class EventPipeLogParsingTests
+public class EventPipeLogPayloadTests
 {
     const string ArgsJson =
         "{\"UserId\":\"41\",\"Ms\":\"900\",\"{OriginalFormat}\":\"User {UserId} checkout failed after {Ms}ms\"}";
@@ -16,7 +14,7 @@ public class EventPipeLogParsingTests
         const string traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
         const string spanId = "00f067aa0ba902b7";
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "User 41 checkout failed after 900ms", "MyApp.Checkout", 2,
             0, 0, null, ArgsJson, traceId, spanId);
 
@@ -34,7 +32,7 @@ public class EventPipeLogParsingTests
     {
         var parser = new LogMessageParser();
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "no ids here", "MyApp.Checkout", 2,
             0, 0, null, null, "", "");
 
@@ -48,7 +46,7 @@ public class EventPipeLogParsingTests
     {
         var parser = new LogMessageParser();
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "plain message", "MyApp.Checkout", 2,
             0, 0, null, null, null, null);
 
@@ -62,7 +60,7 @@ public class EventPipeLogParsingTests
     {
         var parser = new LogMessageParser();
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "User 41 checkout failed after 900ms", "MyApp.Checkout", 2,
             0, 0, null, ArgsJson, null, null);
 
@@ -74,7 +72,7 @@ public class EventPipeLogParsingTests
     {
         var parser = new LogMessageParser();
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "plain message", "MyApp.Checkout", 2,
             0, 0, null, "{not json", null, null);
 
@@ -89,7 +87,7 @@ public class EventPipeLogParsingTests
         var traceId = new string('0', 32);
         var spanId = new string('0', 16);
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "plain message", "MyApp.Checkout", 2,
             0, 0, null, null, traceId, spanId);
 
@@ -103,10 +101,10 @@ public class EventPipeLogParsingTests
     {
         var parser = new LogMessageParser();
 
-        var record1 = EventPipeBridge.BuildLogRecord(
+        var record1 = EventPipeLogPayload.BuildLogRecord(
             parser, "User 41 checkout failed after 900ms", "MyApp.Checkout", 2,
             0, 0, null, ArgsJson, null, null);
-        var record2 = EventPipeBridge.BuildLogRecord(
+        var record2 = EventPipeLogPayload.BuildLogRecord(
             parser, "User 41 checkout failed after 900ms", "MyApp.Checkout", 2,
             0, 0, null, ArgsJson, null, null);
 
@@ -119,7 +117,7 @@ public class EventPipeLogParsingTests
         var parser = new LogMessageParser();
         var exceptionJson = "{\"TypeName\":\"System.InvalidOperationException\",\"Message\":\"settlement gateway refused\"}";
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "User 41 checkout failed after 900ms", "MyApp.Checkout", 2,
             0, 0, exceptionJson, ArgsJson, null, null);
 
@@ -132,7 +130,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ParseExceptionJson_Null_ReturnsNulls()
     {
-        var (type, message) = EventPipeBridge.ParseExceptionJson(null);
+        var (type, message) = EventPipeLogPayload.ParseExceptionJson(null);
 
         Assert.Null(type);
         Assert.Null(message);
@@ -141,7 +139,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ParseExceptionJson_Empty_ReturnsNulls()
     {
-        var (type, message) = EventPipeBridge.ParseExceptionJson("");
+        var (type, message) = EventPipeLogPayload.ParseExceptionJson("");
 
         Assert.Null(type);
         Assert.Null(message);
@@ -150,7 +148,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ParseExceptionJson_EmptyObject_ReturnsNulls()
     {
-        var (type, message) = EventPipeBridge.ParseExceptionJson("{}");
+        var (type, message) = EventPipeLogPayload.ParseExceptionJson("{}");
 
         Assert.Null(type);
         Assert.Null(message);
@@ -161,7 +159,7 @@ public class EventPipeLogParsingTests
     {
         var json = "{\"TypeName\":\"System.InvalidOperationException\",\"Message\":\"settlement gateway refused\",\"HResult\":\"-2146233079\",\"VerboseMessage\":\"...\"}";
 
-        var (type, message) = EventPipeBridge.ParseExceptionJson(json);
+        var (type, message) = EventPipeLogPayload.ParseExceptionJson(json);
 
         Assert.Equal("System.InvalidOperationException", type);
         Assert.Equal("settlement gateway refused", message);
@@ -170,7 +168,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ParseExceptionJson_MalformedJson_ReturnsNulls()
     {
-        var (type, message) = EventPipeBridge.ParseExceptionJson("{not json");
+        var (type, message) = EventPipeLogPayload.ParseExceptionJson("{not json");
 
         Assert.Null(type);
         Assert.Null(message);
@@ -179,7 +177,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ParseExceptionJson_ValidJsonMissingFields_DoesNotThrowAndReturnsNulls()
     {
-        var (type, message) = EventPipeBridge.ParseExceptionJson("{\"HResult\":\"-1\"}");
+        var (type, message) = EventPipeLogPayload.ParseExceptionJson("{\"HResult\":\"-1\"}");
 
         Assert.Null(type);
         Assert.Null(message);
@@ -188,7 +186,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ToInt32_BoxedInt_ReturnsUnchanged()
     {
-        var result = EventPipeBridge.ToInt32((object)4, -1);
+        var result = EventPipeLogPayload.ToInt32((object)4, -1);
 
         Assert.Equal(4, result);
     }
@@ -196,7 +194,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ToInt32_Null_ReturnsFallback()
     {
-        var result = EventPipeBridge.ToInt32(null, -1);
+        var result = EventPipeLogPayload.ToInt32(null, -1);
 
         Assert.Equal(-1, result);
     }
@@ -204,7 +202,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ToInt32_NumericString_ReturnsParsed()
     {
-        var result = EventPipeBridge.ToInt32("3", -1);
+        var result = EventPipeLogPayload.ToInt32("3", -1);
 
         Assert.Equal(3, result);
     }
@@ -212,7 +210,7 @@ public class EventPipeLogParsingTests
     [Fact]
     public void ToInt32_NonNumericString_ReturnsFallback()
     {
-        var result = EventPipeBridge.ToInt32("Warning", -1);
+        var result = EventPipeLogPayload.ToInt32("Warning", -1);
 
         Assert.Equal(-1, result);
     }

@@ -1,21 +1,23 @@
+using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 
-namespace Loom.Dashboard;
+namespace Loom.Telemetry;
 
 /// <summary>
 /// Splits {OriginalFormat} out of EventPipe log payloads and parses/formats
 /// W3C trace/span ids. Not thread-safe by design: the TraceEvent callback
 /// that owns this parser dispatches on a single thread, so no locking is used.
 /// </summary>
-internal sealed class LogMessageParser
+public sealed class LogMessageParser
 {
-    internal const int MaxPooledTemplates = 1024;
+    public const int MaxPooledTemplates = 1024;
     private readonly Dictionary<string, string> _templatePool = new(StringComparer.Ordinal);
-    internal int PooledTemplateCount => _templatePool.Count;
+    public int PooledTemplateCount => _templatePool.Count;
 
-    internal (string? Template, string? Args) ExtractTemplateAndArgs(string? argumentsJson)
+    public (string? Template, string? Args) ExtractTemplateAndArgs(string? argumentsJson)
     {
         if (string.IsNullOrEmpty(argumentsJson) || argumentsJson == "{}")
             return (null, null);

@@ -1,8 +1,7 @@
-using Loom.Dashboard;
 using System.Text.Json;
 using Xunit;
 
-namespace Loom.Telemetry.Tests.Dashboard;
+namespace Loom.Telemetry.Tests;
 
 public class LogMessageParserTests
 {

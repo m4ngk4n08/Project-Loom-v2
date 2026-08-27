@@ -126,7 +126,7 @@ public class LogDtoProjectionTests
     {
         var parser = new LogMessageParser();
 
-        var record = EventPipeBridge.BuildLogRecord(
+        var record = EventPipeLogPayload.BuildLogRecord(
             parser, "User 41 checkout failed after 900ms", "MyApp.Checkout", 2,
             Base, 0, null, null, TraceHex, SpanHex);
 

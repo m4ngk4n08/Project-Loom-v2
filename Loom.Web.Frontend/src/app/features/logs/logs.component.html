@@ -53,6 +53,16 @@
           {{ filteredSearchResults()?.length ?? 0 }} results in {{ searchTimeMs() | number:'1.1-1' }} ms
         </span>
       }
+
+      @if (traceFilter()) {
+        <button
+          class="trace-filter-active"
+          type="button"
+          (click)="clearTraceFilter()"
+          [attr.aria-label]="'Clear trace filter'">
+          trace {{ shortTrace(traceFilter()) }} &times;
+        </button>
+      }
     </div>
 
     <div class="toolbar-right">
@@ -103,7 +113,7 @@
       </div>
     } @else if (filteredEntries().length === 0) {
       <div class="log-empty">
-        <p>No log entries{{ categoryFilter() ? ' for this category' : '' }}</p>
+        <p>{{ liveEmptyMessage }}</p>
       </div>
     } @else {
       <div class="log-list surface" role="log" aria-label="Log entries" aria-live="off">
@@ -143,6 +153,16 @@
             {{ row.message }}
             @if (row.exceptionType) {
               <span class="log-exception">{{ row.exceptionType }}: {{ row.exceptionMessage }}</span>
+            }
+            @if (row.traceId) {
+              <button
+                class="log-trace-chip"
+                type="button"
+                (click)="filterByTrace(row.traceId)"
+                [title]="row.traceId"
+                [attr.aria-label]="'Filter by trace ' + row.traceId">
+                {{ shortTrace(row.traceId) }}
+              </button>
             }
           </span>
           @if (row.score !== null) {

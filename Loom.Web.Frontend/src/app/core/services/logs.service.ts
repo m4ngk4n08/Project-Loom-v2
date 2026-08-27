@@ -11,6 +11,10 @@ export interface LogEntry {
   eventId: number;
   exceptionType?: string;
   exceptionMessage?: string;
+  template?: string;
+  argumentsJson?: string;
+  traceId?: string;
+  spanId?: string;
 }
 
 export interface LogExportFilters {

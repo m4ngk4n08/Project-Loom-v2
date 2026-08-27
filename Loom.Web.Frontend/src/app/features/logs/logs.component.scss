@@ -242,6 +242,51 @@
   margin-top: 0.15rem;
 }
 
+.log-trace-chip {
+  display: inline-block;
+  margin-left: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  vertical-align: baseline;
+
+  &:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+}
+
+.trace-filter-active {
+  background: rgba(20, 184, 166, 0.15);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+
+  &:hover {
+    filter: brightness(1.15);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+}
+
 .level-trace, .level-debug {
   .log-level { color: var(--text-muted); }
 }

@@ -1,4 +1,4 @@
-import { toUtcIso, isSearchableQuery, scoreBarWidth } from './logs.component';
+import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter } from './logs.component';
 
 describe('toUtcIso', () => {
   it('converts a local datetime-local string to a UTC ISO string ending in Z', () => {
@@ -65,5 +65,45 @@ describe('scoreBarWidth', () => {
 
   it('clamps to 100 even if a score somehow exceeds the top score', () => {
     expect(scoreBarWidth(10, 5)).toBe(100);
+  });
+});
+
+describe('shortTraceId', () => {
+  it('returns undefined for undefined', () => {
+    expect(shortTraceId(undefined)).toBeUndefined();
+  });
+
+  it('returns undefined for an empty string', () => {
+    expect(shortTraceId('')).toBeUndefined();
+  });
+
+  it('returns the first 8 characters of a 32-hex trace id', () => {
+    expect(shortTraceId('4bf92f3577b34da6a3ce929d0e0e4736')).toBe('4bf92f35');
+  });
+
+  it('returns a value shorter than 8 chars unchanged', () => {
+    expect(shortTraceId('abc')).toBe('abc');
+  });
+});
+
+describe('matchesTraceFilter', () => {
+  it('matches everything when the filter is empty, even an undefined id', () => {
+    expect(matchesTraceFilter(undefined, '')).toBe(true);
+  });
+
+  it('matches everything when the filter is empty, even a populated id', () => {
+    expect(matchesTraceFilter('4bf92f3577b34da6a3ce929d0e0e4736', '')).toBe(true);
+  });
+
+  it('matches when the id equals the filter', () => {
+    expect(matchesTraceFilter('4bf92f3577b34da6a3ce929d0e0e4736', '4bf92f3577b34da6a3ce929d0e0e4736')).toBe(true);
+  });
+
+  it('does not match when the id differs from the filter', () => {
+    expect(matchesTraceFilter('4bf92f3577b34da6a3ce929d0e0e4736', 'deadbeefdeadbeefdeadbeefdeadbeef')).toBe(false);
+  });
+
+  it('does not match a non-empty filter against an undefined id', () => {
+    expect(matchesTraceFilter(undefined, '4bf92f3577b34da6a3ce929d0e0e4736')).toBe(false);
   });
 });

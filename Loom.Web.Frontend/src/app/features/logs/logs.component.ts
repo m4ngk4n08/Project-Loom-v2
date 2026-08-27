@@ -35,6 +35,23 @@ export function scoreBarWidth(score: number, topScore: number): number {
   return Math.max(0, Math.min(100, pct));
 }
 
+// A 32-hex trace id is unreadable inline and destroys the row layout. Eight
+// chars is enough to eyeball-match two lines from the same trace; the full id
+// stays available via the title attribute and click-to-filter.
+export function shortTraceId(traceId: string | undefined): string | undefined {
+  if (!traceId) return undefined;
+  return traceId.slice(0, 8);
+}
+
+// An empty filter matches everything, including rows with no trace id at all.
+// A non-empty filter must NOT match a row that has no trace id - "show me this
+// trace" and "show me everything untraced" are different requests.
+export function matchesTraceFilter(entryTraceId: string | undefined, filter: string): boolean {
+  if (filter === '') return true;
+  if (entryTraceId === undefined) return false;
+  return entryTraceId === filter;
+}
+
 interface DisplayRow {
   timestampUtc: string;
   level: string;
@@ -43,6 +60,7 @@ interface DisplayRow {
   exceptionType?: string;
   exceptionMessage?: string;
   score: number | null;
+  traceId?: string;
 }
 
 @Component({
@@ -61,6 +79,7 @@ export class LogsComponent implements OnInit {
   entries = signal<LogEntry[]>([]);
   categories = signal<string[]>([]);
   categoryFilter = signal<string>('');
+  traceFilter = signal<string>('');
   paused = signal(false);
   isConnected = signal(false);
 
@@ -85,8 +104,12 @@ export class LogsComponent implements OnInit {
 
   filteredEntries = computed(() => {
     const category = this.categoryFilter();
+    const trace = this.traceFilter();
     const entries = this.entries();
-    return category === '' ? entries : entries.filter(e => e.category === category);
+    return entries.filter(e =>
+      (category === '' || e.category === category) &&
+      matchesTraceFilter(e.traceId, trace)
+    );
   });
 
   // Category filter applies to search results too, rather than being disabled in
@@ -111,6 +134,8 @@ export class LogsComponent implements OnInit {
         exceptionType: r.exceptionType,
         exceptionMessage: r.exceptionMessage,
         score: r.score
+        // SearchHit carries no trace id, so search rows show no chip. Widening the
+        // BM25 search DTO is a separate backend change.
       }));
     }
     return this.filteredEntries().map(e => ({
@@ -120,7 +145,8 @@ export class LogsComponent implements OnInit {
       message: e.message,
       exceptionType: e.exceptionType,
       exceptionMessage: e.exceptionMessage,
-      score: null
+      score: null,
+      traceId: e.traceId
     }));
   });
 
@@ -185,6 +211,7 @@ export class LogsComponent implements OnInit {
   clear(): void {
     this.buffer = [];
     this.entries.set([]);
+    this.traceFilter.set('');
   }
 
   severityClass(level: string): string {
@@ -193,6 +220,25 @@ export class LogsComponent implements OnInit {
 
   formatTimestamp(timestampUtc: string): string {
     return new Date(timestampUtc).toLocaleTimeString();
+  }
+
+  get liveEmptyMessage(): string {
+    if (this.traceFilter()) return 'No log entries for this trace';
+    if (this.categoryFilter()) return 'No log entries for this category';
+    return 'No log entries';
+  }
+
+  shortTrace(traceId: string | undefined): string | undefined {
+    return shortTraceId(traceId);
+  }
+
+  filterByTrace(traceId: string | undefined): void {
+    if (!traceId) return;
+    this.traceFilter.set(traceId);
+  }
+
+  clearTraceFilter(): void {
+    this.traceFilter.set('');
   }
 
   runSearch(): void {
@@ -205,6 +251,10 @@ export class LogsComponent implements OnInit {
     const trimmed = query.trim();
     this.isSearching.set(true);
     this.searchError.set(null);
+    // The trace filter does not apply to search results (SearchHit has no
+    // trace id), so leaving it set would show an active filter chip that is
+    // filtering nothing.
+    this.traceFilter.set('');
 
     this.logsService.search(trimmed)
       .pipe(takeUntilDestroyed(this.destroyRef))

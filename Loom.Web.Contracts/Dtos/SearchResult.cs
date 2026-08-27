@@ -46,4 +46,30 @@ public sealed record SearchResult
     /// Exception message, only set when the log entry carries an exception.
     /// </summary>
     public string? ExceptionMessage { get; init; }
+
+    /// <summary>
+    /// Message template with {Placeholders} intact, before argument
+    /// substitution. Null when the source supplied none.
+    /// </summary>
+    public string? Template { get; init; }
+
+    /// <summary>
+    /// Structured arguments as a JSON object string, with {OriginalFormat}
+    /// removed. Null when there are no arguments.
+    /// </summary>
+    /// <remarks>Carried as a string, not raw JSON, so whatever came off the
+    /// wire is preserved verbatim rather than dropped, so this can hold text
+    /// that is not valid JSON; it must stay an escaped string property or one
+    /// bad payload corrupts the whole response.</remarks>
+    public string? ArgumentsJson { get; init; }
+
+    /// <summary>
+    /// W3C trace id as 32 lowercase hex chars. Null when absent.
+    /// </summary>
+    public string? TraceId { get; init; }
+
+    /// <summary>
+    /// W3C span id as 16 lowercase hex chars. Null when absent.
+    /// </summary>
+    public string? SpanId { get; init; }
 }

@@ -162,4 +162,89 @@ public class Bm25LogSearchTests
         Assert.Equal("InvalidOperationException", results[0].ExceptionType);
         Assert.Equal("boom", results[0].ExceptionMessage);
     }
+
+    private const string TraceHex = "4bf92f3577b34da6a3ce929d0e0e4736";
+    private const string SpanHex = "00f067aa0ba902b7";
+
+    [Fact]
+    public void Search_MapsTemplateAndArgumentsJson()
+    {
+        var docs = new[]
+        {
+            new LogRecord(
+                "processing order 42", "Test", LoomLogLevel.Information, Base,
+                template: "processing order {OrderId}", argumentsJson: "{\"OrderId\":42}")
+        };
+
+        var results = Bm25LogSearch.Search(docs, "processing", 10, 0.0);
+
+        Assert.Single(results);
+        Assert.Equal("processing order {OrderId}", results[0].Template);
+        Assert.Equal("{\"OrderId\":42}", results[0].ArgumentsJson);
+    }
+
+    [Fact]
+    public void Search_MapsTraceIdAndSpanId_WhenPopulated()
+    {
+        W3CTraceId.TryParseTraceId(TraceHex, out var traceHi, out var traceLo);
+        W3CTraceId.TryParseSpanId(SpanHex, out var spanId);
+
+        var docs = new[]
+        {
+            new LogRecord(
+                "traced message", "Test", LoomLogLevel.Information, Base,
+                traceIdHi: traceHi, traceIdLo: traceLo, spanId: spanId)
+        };
+
+        var results = Bm25LogSearch.Search(docs, "traced", 10, 0.0);
+
+        Assert.Single(results);
+        Assert.Equal(TraceHex, results[0].TraceId);
+        Assert.Equal(SpanHex, results[0].SpanId);
+    }
+
+    [Fact]
+    public void Search_AllIdFieldsZero_TraceIdAndSpanIdAreNull()
+    {
+        var docs = new[]
+        {
+            new LogRecord("untraced message", "Test", LoomLogLevel.Information, Base)
+        };
+
+        var results = Bm25LogSearch.Search(docs, "untraced", 10, 0.0);
+
+        Assert.Single(results);
+        Assert.Null(results[0].TraceId);
+        Assert.Null(results[0].SpanId);
+    }
+
+    [Fact]
+    public void Search_NoTemplate_TemplateAndArgumentsJsonAreNull()
+    {
+        var docs = new[]
+        {
+            new LogRecord("plain message", "Test", LoomLogLevel.Information, Base)
+        };
+
+        var results = Bm25LogSearch.Search(docs, "plain", 10, 0.0);
+
+        Assert.Single(results);
+        Assert.Null(results[0].Template);
+        Assert.Null(results[0].ArgumentsJson);
+    }
+
+    [Fact]
+    public void Search_WordOnlyInTemplate_DoesNotMatch()
+    {
+        var docs = new[]
+        {
+            new LogRecord(
+                "rendered message", "Test", LoomLogLevel.Information, Base,
+                template: "distinctivetemplateword {Value}")
+        };
+
+        var results = Bm25LogSearch.Search(docs, "distinctivetemplateword", 10, 0.0);
+
+        Assert.Empty(results);
+    }
 }

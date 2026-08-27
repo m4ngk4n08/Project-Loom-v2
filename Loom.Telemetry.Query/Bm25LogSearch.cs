@@ -80,6 +80,10 @@ public static class Bm25LogSearch
                 scored.Add((i, score));
         }
 
+        // Projection only. The BM25 index is still built from Message alone (see Tokenize
+        // above): carrying the template on the result does NOT make it searchable, and it
+        // must not - a six-value field like level or a placeholder-laden template would
+        // wreck IDF, and "error" in a message would collide with a template token.
         return scored
             .OrderByDescending(s => s.Score)
             .Take(maxResults)
@@ -92,7 +96,11 @@ public static class Bm25LogSearch
                 Level = corpus[s.Index].Level.ToString(),
                 EventId = corpus[s.Index].EventId,
                 ExceptionType = corpus[s.Index].ExceptionType,
-                ExceptionMessage = corpus[s.Index].ExceptionMessage
+                ExceptionMessage = corpus[s.Index].ExceptionMessage,
+                Template = corpus[s.Index].Template,
+                ArgumentsJson = corpus[s.Index].ArgumentsJson,
+                TraceId = W3CTraceId.FormatTraceId(corpus[s.Index].TraceIdHi, corpus[s.Index].TraceIdLo),
+                SpanId = W3CTraceId.FormatSpanId(corpus[s.Index].SpanId)
             })
             .ToArray();
     }

@@ -23,6 +23,13 @@ public sealed class EventPipeBridge : BackgroundService
     private long _logRecordsIngested;
     private int _reconnectCount;
 
+    // One parser for the bridge's lifetime so the template pool survives
+    // reconnects. LogMessageParser is not thread-safe, and does not need to be:
+    // IngestLogMessage runs only on the single thread inside source.Process(),
+    // and ExecuteAsync awaits each StreamMetrics call before starting the next,
+    // so no two sessions' callbacks ever overlap.
+    private readonly LogMessageParser _parser = new();
+
     public EventPipeBridge(int targetPid, IMetricStore store, ILogStore logStore, ILogger<EventPipeBridge> logger)
     {
         _targetPid = targetPid;
@@ -205,6 +212,9 @@ public sealed class EventPipeBridge : BackgroundService
         string? category = null;
         string? formattedMessage = null;
         string? exceptionJson = null;
+        string? argumentsJson = null;
+        string? activityTraceId = null;
+        string? activitySpanId = null;
         int level = -1;
         int eventId = 0;
 
@@ -227,6 +237,15 @@ public sealed class EventPipeBridge : BackgroundService
                 case "ExceptionJson":
                     exceptionJson = traceEvent.PayloadValue(i)?.ToString();
                     break;
+                case "ArgumentsJson":
+                    argumentsJson = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "ActivityTraceId":
+                    activityTraceId = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "ActivitySpanId":
+                    activitySpanId = traceEvent.PayloadValue(i)?.ToString();
+                    break;
             }
         }
 
@@ -234,16 +253,10 @@ public sealed class EventPipeBridge : BackgroundService
         // Observed range is 0..5 (Trace..Critical), matching LoomLogLevel's ordering.
         if (level < 0 || level > 5) return;
 
-        var (exceptionType, exceptionMessage) = ParseExceptionJson(exceptionJson);
-
-        var record = new LogRecord(
-            formattedMessage,
-            category,
-            (LoomLogLevel)level,
-            traceEvent.TimeStamp.ToUniversalTime().Ticks,
-            eventId,
-            exceptionType,
-            exceptionMessage);
+        var record = BuildLogRecord(
+            _parser, formattedMessage, category, level,
+            traceEvent.TimeStamp.ToUniversalTime().Ticks, eventId,
+            exceptionJson, argumentsJson, activityTraceId, activitySpanId);
 
         _logStore.Write(in record);
         Interlocked.Increment(ref _logRecordsIngested);
@@ -260,6 +273,46 @@ public sealed class EventPipeBridge : BackgroundService
         null => fallback,
         _ => int.TryParse(value.ToString(), out var parsed) ? parsed : fallback,
     };
+
+    internal static LogRecord BuildLogRecord(
+        LogMessageParser parser,
+        string formattedMessage,
+        string category,
+        int level,
+        long timestampUtcTicks,
+        int eventId,
+        string? exceptionJson,
+        string? argumentsJson,
+        string? activityTraceId,
+        string? activitySpanId)
+    {
+        var (exceptionType, exceptionMessage) = ParseExceptionJson(exceptionJson);
+        var (template, args) = parser.ExtractTemplateAndArgs(argumentsJson);
+
+        ulong traceHi = 0, traceLo = 0, spanId = 0;
+        if (activityTraceId != null)
+            LogMessageParser.TryParseTraceId(activityTraceId, out traceHi, out traceLo);
+        if (activitySpanId != null)
+            LogMessageParser.TryParseSpanId(activitySpanId, out spanId);
+
+        return new LogRecord(
+            // Message keeps the fully rendered text even though Template and
+            // ArgumentsJson are stored alongside it. Re-rendering the template per row
+            // on every page render costs more, forever, than the bytes saved once in a
+            // bounded ring buffer.
+            formattedMessage,
+            category,
+            (LoomLogLevel)level,
+            timestampUtcTicks,
+            eventId,
+            exceptionType,
+            exceptionMessage,
+            template,
+            args,
+            traceHi,
+            traceLo,
+            spanId);
+    }
 
     internal static (string? Type, string? Message) ParseExceptionJson(string? exceptionJson)
     {

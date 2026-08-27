@@ -183,6 +183,22 @@ export function rowKey(row: DisplayRow): string {
   return `${row.timestampUtc}#${row.level}#${row.message}`;
 }
 
+// Level is a filter, not a search term. BM25 indexes LogRecord.Message and
+// nothing else, so typing "warning" into the search box can never match a
+// severity - and indexing it would be wrong anyway: IDF collapses over a
+// six-value field, and the word "error" in a message body would conflate with
+// the Error level.
+//
+// An unrecognised entry level always passes. A filter should never hide a
+// record it cannot classify - silently dropping data is worse than showing a
+// row the user did not ask for.
+export function meetsMinLevel(level: string, minLevel: string): boolean {
+  if (minLevel === '') return true;
+  const entryRank = levelRank(level);
+  if (entryRank < 0) return true;
+  return entryRank >= levelRank(minLevel);
+}
+
 @Component({
   selector: 'app-logs',
   standalone: true,
@@ -200,6 +216,7 @@ export class LogsComponent implements OnInit {
   categories = signal<string[]>([]);
   categoryFilter = signal<string>('');
   traceFilter = signal<string>('');
+  levelFilter = signal<string>('');
   // A view preference, not a filter - deliberately sticky across searches
   // and buffer clears, unlike traceFilter.
   grouped = signal(false);
@@ -233,10 +250,12 @@ export class LogsComponent implements OnInit {
   filteredEntries = computed(() => {
     const category = this.categoryFilter();
     const trace = this.traceFilter();
+    const level = this.levelFilter();
     const entries = this.entries();
     return entries.filter(e =>
       (category === '' || e.category === category) &&
-      matchesTraceFilter(e.traceId, trace)
+      matchesTraceFilter(e.traceId, trace) &&
+      meetsMinLevel(e.level, level)
     );
   });
 
@@ -250,7 +269,11 @@ export class LogsComponent implements OnInit {
     const results = this.searchResults();
     if (results === null) return null;
     const category = this.categoryFilter();
-    return category === '' ? results : results.filter(r => r.source === category);
+    const level = this.levelFilter();
+    return results.filter(r =>
+      (category === '' || r.source === category) &&
+      meetsMinLevel(r.level, level)
+    );
   });
 
   displayRows = computed<DisplayRow[]>(() => {
@@ -361,6 +384,7 @@ export class LogsComponent implements OnInit {
 
   get liveEmptyMessage(): string {
     if (this.traceFilter()) return 'No log entries for this trace';
+    if (this.levelFilter()) return 'No log entries at this level or above';
     if (this.categoryFilter()) return 'No log entries for this category';
     return 'No log entries';
   }

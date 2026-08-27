@@ -44,6 +44,18 @@
         }
       </select>
 
+      <label for="level-select" class="sr-only">Filter by minimum level</label>
+      <select
+        id="level-select"
+        class="category-select"
+        [(ngModel)]="levelFilter"
+        [attr.aria-label]="'Filter by minimum level'">
+        <option value="">All levels</option>
+        @for (level of logLevels; track level) {
+          <option [value]="level">{{ level }} and above</option>
+        }
+      </select>
+
       @if (searchResults() === null) {
         <span class="entry-count" [attr.aria-label]="filteredEntries().length + ' entries shown'">
           {{ filteredEntries().length }} entries

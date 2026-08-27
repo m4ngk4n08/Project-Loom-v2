@@ -1,4 +1,4 @@
-import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow } from './logs.component';
+import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel } from './logs.component';
 import { LogEntry } from '../../core/services/logs.service';
 
 describe('toUtcIso', () => {
@@ -281,5 +281,31 @@ describe('rowKey', () => {
 
   it('is identical for two structurally identical rows (documented collision)', () => {
     expect(rowKey(row({}))).toBe(rowKey(row({})));
+  });
+});
+
+describe('meetsMinLevel', () => {
+  it('an empty minLevel passes any level', () => {
+    expect(meetsMinLevel('Trace', '')).toBe(true);
+  });
+
+  it('an equal level passes', () => {
+    expect(meetsMinLevel('Warning', 'Warning')).toBe(true);
+  });
+
+  it('a higher level passes', () => {
+    expect(meetsMinLevel('Error', 'Warning')).toBe(true);
+  });
+
+  it('a lower level fails', () => {
+    expect(meetsMinLevel('Debug', 'Warning')).toBe(false);
+  });
+
+  it('an unrecognised entry level always passes, since a filter cannot classify it', () => {
+    expect(meetsMinLevel('Verbose', 'Error')).toBe(true);
+  });
+
+  it('Trace against Trace passes (lowest-level boundary)', () => {
+    expect(meetsMinLevel('Trace', 'Trace')).toBe(true);
   });
 });

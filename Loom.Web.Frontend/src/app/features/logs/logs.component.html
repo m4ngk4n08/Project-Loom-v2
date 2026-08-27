@@ -141,6 +141,12 @@
     } @else if (grouped()) {
       @if (templateGroups().groups.length > 0) {
         <div class="log-list surface" role="table" aria-label="Log entries grouped by template">
+          <div class="group-header" role="row">
+            <span role="columnheader">Count</span>
+            <span role="columnheader">Level</span>
+            <span role="columnheader">Category</span>
+            <span role="columnheader">Template</span>
+          </div>
           @for (group of templateGroups().groups; track group.template) {
             <div class="group-row-wrap">
               <div class="group-row"
@@ -192,6 +198,15 @@
       }
     } @else {
       <div class="log-list surface" role="log" aria-label="Log entries" aria-live="off">
+        <div class="log-header" [class.with-score]="searchResults() !== null" role="row">
+          <span role="columnheader">Time</span>
+          <span role="columnheader">Level</span>
+          <span role="columnheader">Category</span>
+          <span role="columnheader">Message</span>
+          @if (searchResults() !== null) {
+            <span role="columnheader">Score</span>
+          }
+        </div>
         <ng-container *ngTemplateOutlet="rowList"></ng-container>
       </div>
     }
@@ -210,6 +225,15 @@
       </div>
     } @else {
       <div class="log-list surface" role="log" aria-label="Search results" aria-live="off">
+        <div class="log-header" [class.with-score]="searchResults() !== null" role="row">
+          <span role="columnheader">Time</span>
+          <span role="columnheader">Level</span>
+          <span role="columnheader">Category</span>
+          <span role="columnheader">Message</span>
+          @if (searchResults() !== null) {
+            <span role="columnheader">Score</span>
+          }
+        </div>
         <ng-container *ngTemplateOutlet="rowList"></ng-container>
       </div>
     }

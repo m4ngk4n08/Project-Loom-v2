@@ -168,6 +168,27 @@
   font-size: 12px;
 }
 
+.log-header {
+  display: grid;
+  grid-template-columns: 90px 72px 220px 1fr;
+  gap: 0.75rem;
+  padding: 0.4rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-surface);
+
+  &.with-score {
+    grid-template-columns: 90px 72px 220px 1fr 64px;
+  }
+}
+
 .log-row-wrap {
   &:last-child .log-row {
     border-bottom: none;
@@ -345,6 +366,27 @@
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
+  }
+}
+
+.group-header {
+  display: grid;
+  grid-template-columns: 72px 72px 220px 1fr;
+  gap: 0.75rem;
+  padding: 0.4rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-surface);
+
+  span:first-child {
+    text-align: right;
   }
 }
 

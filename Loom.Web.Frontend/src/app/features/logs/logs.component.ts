@@ -199,6 +199,26 @@ export function meetsMinLevel(level: string, minLevel: string): boolean {
   return entryRank >= levelRank(minLevel);
 }
 
+// A row is clickable but contains its own controls (the trace chip). Guarding
+// on `target === currentTarget` would be wrong: the row also contains plain
+// spans, so clicking the message text would stop working. Using
+// Element.closest() alone would also be wrong: it walks past currentTarget to
+// the document, so an interactive ancestor ABOVE the row would falsely
+// suppress. Walk up and stop at currentTarget.
+export function isInteractiveEventTarget(
+  target: EventTarget | null,
+  currentTarget: EventTarget | null
+): boolean {
+  if (!(target instanceof Element) || !(currentTarget instanceof Element)) return false;
+  const interactiveTags = new Set(['button', 'a', 'input', 'select', 'textarea']);
+  let el: Element | null = target;
+  while (el && el !== currentTarget) {
+    if (interactiveTags.has(el.tagName.toLowerCase())) return true;
+    el = el.parentElement;
+  }
+  return false;
+}
+
 @Component({
   selector: 'app-logs',
   standalone: true,
@@ -425,6 +445,23 @@ export class LogsComponent implements OnInit {
 
   toggleGroupExpanded(group: TemplateGroup): void {
     this.expandedGroupTemplate.set(this.expandedGroupTemplate() === group.template ? null : group.template);
+  }
+
+  onRowActivate(row: DisplayRow, event: Event): void {
+    if (isInteractiveEventTarget(event.target, event.currentTarget)) return;
+    // Space would otherwise scroll the page - preventDefault has to happen here
+    // rather than inline in the template, above where it would suppress the
+    // trace chip's own activation on the keydown path.
+    if (event.type === 'keydown') event.preventDefault();
+    this.toggleExpanded(row);
+  }
+
+  onGroupActivate(group: TemplateGroup, event: Event): void {
+    // Same guard as onRowActivate. Group rows have no nested control today, but
+    // the two views must not drift into different activation rules.
+    if (isInteractiveEventTarget(event.target, event.currentTarget)) return;
+    if (event.type === 'keydown') event.preventDefault();
+    this.toggleGroupExpanded(group);
   }
 
   runSearch(): void {

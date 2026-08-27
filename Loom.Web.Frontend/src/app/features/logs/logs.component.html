@@ -151,9 +151,9 @@
             <div class="group-row-wrap">
               <div class="group-row"
                    [class]="severityClass(group.level)"
-                   (click)="toggleGroupExpanded(group)"
-                   (keydown.enter)="toggleGroupExpanded(group)"
-                   (keydown.space)="toggleGroupExpanded(group); $event.preventDefault()"
+                   (click)="onGroupActivate(group, $event)"
+                   (keydown.enter)="onGroupActivate(group, $event)"
+                   (keydown.space)="onGroupActivate(group, $event)"
                    tabindex="0"
                    role="button"
                    [attr.aria-expanded]="isGroupExpanded(group)">
@@ -247,9 +247,9 @@
         <div class="log-row"
              [class]="severityClass(row.level)"
              [class.with-score]="row.score !== null"
-             (click)="toggleExpanded(row)"
-             (keydown.enter)="toggleExpanded(row)"
-             (keydown.space)="toggleExpanded(row); $event.preventDefault()"
+             (click)="onRowActivate(row, $event)"
+             (keydown.enter)="onRowActivate(row, $event)"
+             (keydown.space)="onRowActivate(row, $event)"
              tabindex="0"
              role="button"
              [attr.aria-expanded]="isExpanded(row)">
@@ -265,7 +265,7 @@
               <button
                 class="log-trace-chip"
                 type="button"
-                (click)="filterByTrace(row.traceId); $event.stopPropagation()"
+                (click)="filterByTrace(row.traceId)"
                 [title]="row.traceId"
                 [attr.aria-label]="'Filter by trace ' + row.traceId">
                 {{ shortTrace(row.traceId) }}

@@ -1,4 +1,4 @@
-import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel } from './logs.component';
+import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel, isInteractiveEventTarget } from './logs.component';
 import { LogEntry } from '../../core/services/logs.service';
 
 describe('toUtcIso', () => {
@@ -307,5 +307,58 @@ describe('meetsMinLevel', () => {
 
   it('Trace against Trace passes (lowest-level boundary)', () => {
     expect(meetsMinLevel('Trace', 'Trace')).toBe(true);
+  });
+});
+
+describe('isInteractiveEventTarget', () => {
+  it('is false when the row itself is the target, even with role="button"', () => {
+    const row = document.createElement('div');
+    row.setAttribute('role', 'button');
+    expect(isInteractiveEventTarget(row, row)).toBe(false);
+  });
+
+  it('is false for a plain span child of the row', () => {
+    const row = document.createElement('div');
+    const span = document.createElement('span');
+    row.appendChild(span);
+    expect(isInteractiveEventTarget(span, row)).toBe(false);
+  });
+
+  it('is true for a button child of the row', () => {
+    const row = document.createElement('div');
+    const button = document.createElement('button');
+    row.appendChild(button);
+    expect(isInteractiveEventTarget(button, row)).toBe(true);
+  });
+
+  it('is true for a span nested inside a button inside the row', () => {
+    const row = document.createElement('div');
+    const button = document.createElement('button');
+    const span = document.createElement('span');
+    button.appendChild(span);
+    row.appendChild(button);
+    expect(isInteractiveEventTarget(span, row)).toBe(true);
+  });
+
+  it('is true for an anchor child of the row', () => {
+    const row = document.createElement('div');
+    const anchor = document.createElement('a');
+    row.appendChild(anchor);
+    expect(isInteractiveEventTarget(anchor, row)).toBe(true);
+  });
+
+  it('is false when the target or currentTarget is null', () => {
+    const row = document.createElement('div');
+    expect(isInteractiveEventTarget(null, row)).toBe(false);
+    expect(isInteractiveEventTarget(row, null)).toBe(false);
+  });
+
+  it('is false for a button that is an ANCESTOR of currentTarget - Element.closest() would get this wrong', () => {
+    const button = document.createElement('button');
+    const row = document.createElement('div');
+    const span = document.createElement('span');
+    button.appendChild(row);
+    row.appendChild(span);
+    expect(isInteractiveEventTarget(span, row)).toBe(false);
   });
 });

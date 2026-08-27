@@ -132,15 +132,55 @@ export function groupByTemplate(
   return { groups, ungroupedCount };
 }
 
-interface DisplayRow {
+export interface DisplayRow {
   timestampUtc: string;
   level: string;
   category: string;
   message: string;
+  eventId: number;
   exceptionType?: string;
   exceptionMessage?: string;
   score: number | null;
   traceId?: string;
+  template?: string;
+  argumentsJson?: string;
+  spanId?: string;
+}
+
+export interface LogArgument {
+  name: string;
+  value: string;
+}
+
+// ArgumentsJson can hold text that is NOT valid JSON: the backend preserves a
+// malformed payload verbatim rather than dropping it, so bad input reaches the
+// browser by design. Returning [] on a parse failure keeps one bad log line
+// from taking down the whole view - an uncaught throw here renders inside the
+// row loop and blanks the page.
+export function parseArguments(argumentsJson: string | undefined): LogArgument[] {
+  if (!argumentsJson) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(argumentsJson);
+  } catch {
+    return [];
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return [];
+  return Object.entries(parsed as Record<string, unknown>).map(([name, value]) => ({
+    name,
+    value: typeof value === 'string' ? value : JSON.stringify(value)
+  }));
+}
+
+// Expansion state cannot key on $index: the live buffer shifts when
+// appendEntry trims past MAX_BUFFERED_ENTRIES, so an index would silently
+// point at a different row. It also cannot BECOME the @for track expression -
+// Angular throws NG0955 on duplicate track keys, and two identical lines at
+// the same timestamp is ordinary. So track stays on $index and this key drives
+// expansion only; a collision means two identical rows expand together, which
+// is cosmetic rather than a crash.
+export function rowKey(row: DisplayRow): string {
+  return `${row.timestampUtc}#${row.level}#${row.message}`;
 }
 
 @Component({
@@ -163,6 +203,7 @@ export class LogsComponent implements OnInit {
   // A view preference, not a filter - deliberately sticky across searches
   // and buffer clears, unlike traceFilter.
   grouped = signal(false);
+  expandedKey = signal<string | null>(null);
   paused = signal(false);
   isConnected = signal(false);
 
@@ -216,6 +257,7 @@ export class LogsComponent implements OnInit {
         level: r.level,
         category: r.source,
         message: r.content,
+        eventId: r.eventId,
         exceptionType: r.exceptionType,
         exceptionMessage: r.exceptionMessage,
         score: r.score
@@ -228,10 +270,14 @@ export class LogsComponent implements OnInit {
       level: e.level,
       category: e.category,
       message: e.message,
+      eventId: e.eventId,
       exceptionType: e.exceptionType,
       exceptionMessage: e.exceptionMessage,
       score: null,
-      traceId: e.traceId
+      traceId: e.traceId,
+      template: e.template,
+      argumentsJson: e.argumentsJson,
+      spanId: e.spanId
     }));
   });
 
@@ -297,6 +343,7 @@ export class LogsComponent implements OnInit {
     this.buffer = [];
     this.entries.set([]);
     this.traceFilter.set('');
+    this.expandedKey.set(null);
   }
 
   severityClass(level: string): string {
@@ -328,6 +375,19 @@ export class LogsComponent implements OnInit {
 
   toggleGrouped(): void {
     this.grouped.update(v => !v);
+  }
+
+  isExpanded(row: DisplayRow): boolean {
+    return this.expandedKey() === rowKey(row);
+  }
+
+  toggleExpanded(row: DisplayRow): void {
+    const key = rowKey(row);
+    this.expandedKey.set(this.expandedKey() === key ? null : key);
+  }
+
+  rowArguments(row: DisplayRow): LogArgument[] {
+    return parseArguments(row.argumentsJson);
   }
 
   runSearch(): void {

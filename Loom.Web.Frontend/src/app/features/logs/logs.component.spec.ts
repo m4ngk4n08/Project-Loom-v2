@@ -1,4 +1,4 @@
-import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank } from './logs.component';
+import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow } from './logs.component';
 import { LogEntry } from '../../core/services/logs.service';
 
 describe('toUtcIso', () => {
@@ -211,5 +211,75 @@ describe('groupByTemplate', () => {
       entry({ template: 'A', category: 'Db' }),
     ]);
     expect(mixed.groups[0].category).toBe('multiple');
+  });
+});
+
+describe('parseArguments', () => {
+  it('returns [] for undefined', () => {
+    expect(parseArguments(undefined)).toEqual([]);
+  });
+
+  it('returns [] for an empty string', () => {
+    expect(parseArguments('')).toEqual([]);
+  });
+
+  it('returns [] and does not throw for malformed JSON', () => {
+    expect(() => parseArguments('{not json')).not.toThrow();
+    expect(parseArguments('{not json')).toEqual([]);
+  });
+
+  it("returns [] for '{}'", () => {
+    expect(parseArguments('{}')).toEqual([]);
+  });
+
+  it('returns one LogArgument per property with the correct names and values', () => {
+    const result = parseArguments('{"UserId":"41","Ms":"900"}');
+    expect(result).toEqual([
+      { name: 'UserId', value: '41' },
+      { name: 'Ms', value: '900' },
+    ]);
+  });
+
+  it('preserves property order', () => {
+    const result = parseArguments('{"z":"1","a":"2","m":"3"}');
+    expect(result.map(a => a.name)).toEqual(['z', 'a', 'm']);
+  });
+
+  it('returns [] for a JSON array, null, or a bare string', () => {
+    expect(parseArguments('[1,2]')).toEqual([]);
+    expect(parseArguments('null')).toEqual([]);
+    expect(parseArguments('"text"')).toEqual([]);
+  });
+
+  it('stringifies non-string values', () => {
+    const result = parseArguments('{"n":42,"o":{"a":1}}');
+    expect(result).toEqual([
+      { name: 'n', value: '42' },
+      { name: 'o', value: '{"a":1}' },
+    ]);
+  });
+});
+
+describe('rowKey', () => {
+  const row = (over: Partial<DisplayRow>): DisplayRow => ({
+    timestampUtc: '2026-01-01T00:00:00Z', level: 'Information',
+    category: 'c', message: 'm', eventId: 0, score: null, ...over,
+  });
+
+  it('differs when only timestampUtc differs', () => {
+    expect(rowKey(row({ timestampUtc: '2026-01-01T00:00:00Z' })))
+      .not.toBe(rowKey(row({ timestampUtc: '2026-01-01T00:00:01Z' })));
+  });
+
+  it('differs when only message differs', () => {
+    expect(rowKey(row({ message: 'm1' }))).not.toBe(rowKey(row({ message: 'm2' })));
+  });
+
+  it('differs when only level differs', () => {
+    expect(rowKey(row({ level: 'Warning' }))).not.toBe(rowKey(row({ level: 'Error' })));
+  });
+
+  it('is identical for two structurally identical rows (documented collision)', () => {
+    expect(rowKey(row({}))).toBe(rowKey(row({})));
   });
 });

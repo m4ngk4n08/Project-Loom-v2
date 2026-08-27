@@ -175,7 +175,15 @@
   <ng-template #rowList>
     @for (row of displayRows(); track $index) {
       <div class="log-row-wrap">
-        <div class="log-row" [class]="severityClass(row.level)" [class.with-score]="row.score !== null">
+        <div class="log-row"
+             [class]="severityClass(row.level)"
+             [class.with-score]="row.score !== null"
+             (click)="toggleExpanded(row)"
+             (keydown.enter)="toggleExpanded(row)"
+             (keydown.space)="toggleExpanded(row); $event.preventDefault()"
+             tabindex="0"
+             role="button"
+             [attr.aria-expanded]="isExpanded(row)">
           <span class="log-timestamp">{{ formatTimestamp(row.timestampUtc) }}</span>
           <span class="log-level">{{ row.level }}</span>
           <span class="log-category" [title]="row.category">{{ row.category }}</span>
@@ -188,7 +196,7 @@
               <button
                 class="log-trace-chip"
                 type="button"
-                (click)="filterByTrace(row.traceId)"
+                (click)="filterByTrace(row.traceId); $event.stopPropagation()"
                 [title]="row.traceId"
                 [attr.aria-label]="'Filter by trace ' + row.traceId">
                 {{ shortTrace(row.traceId) }}
@@ -203,6 +211,65 @@
           <div class="score-bar-track" aria-hidden="true">
             <div class="score-bar-fill" [style.width.%]="barWidth(row.score)"></div>
           </div>
+        }
+        @if (isExpanded(row)) {
+          <dl class="log-details">
+            <div class="detail-row">
+              <dt>Time</dt>
+              <dd>{{ row.timestampUtc }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>Category</dt>
+              <dd>{{ row.category }}</dd>
+            </div>
+            @if (row.eventId !== 0) {
+              <div class="detail-row">
+                <dt>Event</dt>
+                <dd>{{ row.eventId }}</dd>
+              </div>
+            }
+            @if (row.template) {
+              <div class="detail-row">
+                <dt>Template</dt>
+                <dd><code>{{ row.template }}</code></dd>
+              </div>
+            }
+            @if (rowArguments(row).length > 0) {
+              <div class="detail-row">
+                <dt>Arguments</dt>
+                <dd>
+                  <ul class="argument-list" role="list">
+                    @for (arg of rowArguments(row); track arg.name) {
+                      <li><span class="argument-name">{{ arg.name }}</span>
+                          <span class="argument-value">{{ arg.value }}</span></li>
+                    }
+                  </ul>
+                </dd>
+              </div>
+            }
+            @if (row.traceId) {
+              <div class="detail-row">
+                <dt>Trace</dt>
+                <dd><code>{{ row.traceId }}</code></dd>
+              </div>
+            }
+            @if (row.spanId) {
+              <div class="detail-row">
+                <dt>Span</dt>
+                <dd><code>{{ row.spanId }}</code></dd>
+              </div>
+            }
+            @if (row.exceptionType) {
+              <div class="detail-row">
+                <dt>Exception</dt>
+                <dd>{{ row.exceptionType }}: {{ row.exceptionMessage }}</dd>
+              </div>
+            }
+            <div class="detail-row">
+              <dt>Message</dt>
+              <dd class="detail-message">{{ row.message }}</dd>
+            </div>
+          </dl>
         }
       </div>
     }

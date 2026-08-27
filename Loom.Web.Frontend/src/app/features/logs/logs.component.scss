@@ -182,6 +182,8 @@
   border-bottom: 1px solid var(--border);
   align-items: baseline;
 
+  cursor: pointer;
+
   &:hover {
     background: rgba(255, 255, 255, 0.03);
   }
@@ -189,6 +191,65 @@
   &.with-score {
     grid-template-columns: 90px 72px 220px 1fr 64px;
   }
+}
+
+.log-details {
+  border-left: 2px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.6rem 1rem 0.6rem 1.5rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.detail-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+
+  dt {
+    flex: 0 0 90px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  dd {
+    flex: 1;
+    margin: 0;
+    color: var(--text-primary);
+    word-break: break-all;
+
+    code {
+      font-family: 'Monaco', 'Courier New', monospace;
+      word-break: break-all;
+    }
+  }
+}
+
+.detail-message {
+  white-space: pre-wrap;
+}
+
+.argument-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.argument-name {
+  color: var(--text-secondary);
+  margin-right: 0.5rem;
+}
+
+.argument-value {
+  font-family: 'Monaco', 'Courier New', monospace;
+  word-break: break-all;
 }
 
 .search-score {

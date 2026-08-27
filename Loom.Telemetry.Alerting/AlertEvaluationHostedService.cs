@@ -29,23 +29,40 @@ public sealed class AlertEvaluationHostedService(
     // rule name -> DateTime of the last Firing notification (the re-notify cooldown)
     private readonly Dictionary<string, DateTime> _lastNotified = [];
 
+    // With no rules the loop body is a no-op, so a short idle tick costs a timer
+    // wakeup and nothing else. It bounds how long a rule registered after startup
+    // waits for its first evaluation - which is the whole point of § 6.7.
+    internal static readonly TimeSpan IdleTickInterval = TimeSpan.FromMilliseconds(250);
+
+    internal static TimeSpan ComputeTickInterval(IReadOnlyList<AlertRule> rules) =>
+        rules.Count == 0
+            ? IdleTickInterval
+            : rules.Select(r => r.Window).Min() / 10;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var rules = LoomTelemetryOptionsAlertingExtensions.Rules;
-        if (rules.Count == 0)
-        {
-            logger?.LogInformation("Alert evaluation started: no rules registered.");
-            return;
-        }
-
-        logger?.LogInformation("Alert evaluation started: {RuleCount} rule(s) registered: {RuleNames}",
-            rules.Count, string.Join(", ", rules.Select(r => r.Name)));
-
-        var tickInterval = rules.Select(r => r.Window).DefaultIfEmpty(TimeSpan.FromMinutes(5)).Min() / 10;
+        // The registry is re-read every tick rather than snapshotted once: returning
+        // early on an empty registry meant no rule registered later was ever
+        // evaluated, for the life of the process (BACKLOG.md § 6.7).
+        var tickInterval = ComputeTickInterval(LoomTelemetryOptionsAlertingExtensions.Rules);
         using var timer = new PeriodicTimer(tickInterval);
+
+        logger?.LogInformation("Alert evaluation started with a {Tick} tick.", tickInterval);
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            // Copy before iterating: Rules is a plain List and enumerating it while
+            // something adds a rule throws.
+            var rules = LoomTelemetryOptionsAlertingExtensions.Rules.ToList();
+
+            var desiredTick = ComputeTickInterval(rules);
+            if (desiredTick != tickInterval)
+            {
+                tickInterval = desiredTick;
+                timer.Period = desiredTick;
+                logger?.LogInformation("Alert evaluation tick adjusted to {Tick}.", desiredTick);
+            }
+
             var now = DateTime.UtcNow;
             foreach (var rule in rules)
             {

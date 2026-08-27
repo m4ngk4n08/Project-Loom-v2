@@ -15,7 +15,7 @@ namespace Loom.Telemetry.Tests.Alerting;
 public class AlertEvaluationTests
 {
     [Fact]
-    public async Task AlertEvaluationHostedService_NoRules_DoesNotEvaluate()
+    public async Task AlertEvaluationHostedService_NoRules_FiresNothing()
     {
         // Arrange
         var channel = Channel.CreateUnbounded<AlertNotification>();
@@ -663,6 +663,75 @@ public class AlertEvaluationTests
 
         Assert.Single(notifications);
         Assert.Equal(AlertState.Firing, notifications[0].State);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public void ComputeTickInterval_EmptyList_ReturnsIdleTickInterval()
+    {
+        var result = AlertEvaluationHostedService.ComputeTickInterval([]);
+
+        Assert.Equal(AlertEvaluationHostedService.IdleTickInterval, result);
+    }
+
+    [Fact]
+    public void ComputeTickInterval_OneRule_ReturnsWindowDividedByTen()
+    {
+        var rule = new AlertRule("SingleRule", "SomeMetric", TimeSpan.FromSeconds(10));
+
+        var result = AlertEvaluationHostedService.ComputeTickInterval([rule]);
+
+        Assert.Equal(TimeSpan.FromSeconds(1), result);
+    }
+
+    [Fact]
+    public void ComputeTickInterval_ThreeRules_ReturnsSmallestWindowDividedByTen()
+    {
+        var ruleA = new AlertRule("RuleA", "MetricA", TimeSpan.FromSeconds(10));
+        var ruleB = new AlertRule("RuleB", "MetricB", TimeSpan.FromSeconds(2)); // smallest, not first
+        var ruleC = new AlertRule("RuleC", "MetricC", TimeSpan.FromSeconds(20));
+
+        var result = AlertEvaluationHostedService.ComputeTickInterval([ruleA, ruleB, ruleC]);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(200), result);
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_RuleRegisteredAfterStart_IsEvaluated()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        // Act - start with an EMPTY registry, so the old code would have returned
+        // immediately and never entered its loop.
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+
+        var metricName = "RegisteredAfterStart_" + Guid.NewGuid().ToString("N");
+        LoomMetrics.RecordCounter(metricName, 100.0);
+
+        var rule = new AlertRule("RegisteredAfterStartAlert", metricName, TimeSpan.FromSeconds(1))
+        {
+            Condition = agg => agg.Count > 0
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        await Task.Delay(700); // idle tick picks up the rule, retimed tick evaluates it
+
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var hasNotification = channel.Reader.TryRead(out var notification);
+        Assert.True(hasNotification);
+        Assert.NotNull(notification);
+        Assert.Equal("RegisteredAfterStartAlert", notification.Rule.Name);
 
         // Cleanup
         LoomTelemetryOptionsAlertingExtensions.Rules.Clear();

@@ -35,6 +35,10 @@ export interface SearchHit {
   eventId: number;
   exceptionType?: string;
   exceptionMessage?: string;
+  template?: string;
+  argumentsJson?: string;
+  traceId?: string;
+  spanId?: string;
 }
 
 export interface LogSearchResponse {

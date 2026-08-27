@@ -285,14 +285,19 @@ export class LogsComponent implements OnInit {
   // search mode - a SearchHit already carries its category as `source`, filtering
   // needs no extra round trip, and the control stays meaningfully interactive
   // instead of silently going inert the moment a search is active.
+  //
+  // All three filters apply in search mode now that SearchHit carries a trace id.
+  // A filter the toolbar shows as active must actually filter something.
   filteredSearchResults = computed(() => {
     const results = this.searchResults();
     if (results === null) return null;
     const category = this.categoryFilter();
     const level = this.levelFilter();
+    const trace = this.traceFilter();
     return results.filter(r =>
       (category === '' || r.source === category) &&
-      meetsMinLevel(r.level, level)
+      meetsMinLevel(r.level, level) &&
+      matchesTraceFilter(r.traceId, trace)
     );
   });
 
@@ -307,9 +312,11 @@ export class LogsComponent implements OnInit {
         eventId: r.eventId,
         exceptionType: r.exceptionType,
         exceptionMessage: r.exceptionMessage,
-        score: r.score
-        // SearchHit carries no trace id, so search rows show no chip. Widening the
-        // BM25 search DTO is a separate backend change.
+        score: r.score,
+        template: r.template,
+        argumentsJson: r.argumentsJson,
+        traceId: r.traceId,
+        spanId: r.spanId
       }));
     }
     return this.filteredEntries().map(e => ({
@@ -474,10 +481,6 @@ export class LogsComponent implements OnInit {
     const trimmed = query.trim();
     this.isSearching.set(true);
     this.searchError.set(null);
-    // The trace filter does not apply to search results (SearchHit has no
-    // trace id), so leaving it set would show an active filter chip that is
-    // filtering nothing.
-    this.traceFilter.set('');
 
     this.logsService.search(trimmed)
       .pipe(takeUntilDestroyed(this.destroyRef))

@@ -52,6 +52,86 @@ export function matchesTraceFilter(entryTraceId: string | undefined, filter: str
   return entryTraceId === filter;
 }
 
+export interface TemplateGroup {
+  template: string;
+  count: number;
+  level: string;
+  category: string;
+  latestTimestampUtc: string;
+  sample: string;
+}
+
+// LOG_LEVELS is ordered Trace -> Critical, so its index IS the severity rank.
+// An unrecognised level ranks below every known one rather than throwing: a
+// future server-side level must not be able to hijack a group's severity.
+export function levelRank(level: string): number {
+  return LOG_LEVELS.indexOf(level);
+}
+
+// Two lines with different argument values but the same {OriginalFormat} are
+// the same EVENT. Grouping on the template is what commit 1 bought by storing
+// it separately from the rendered Message.
+//
+// Entries with no template are EXCLUDED from the groups and counted instead.
+// Collapsing them into one bucket would claim they are the same event when
+// nothing establishes that; giving each its own group shreds the table when
+// messages carry varying ids. The count is the honest third option - it makes
+// grouping's coverage gap visible rather than hiding it.
+export function groupByTemplate(
+  entries: LogEntry[]
+): { groups: TemplateGroup[]; ungroupedCount: number } {
+  const byTemplate = new Map<string, LogEntry[]>();
+  let ungroupedCount = 0;
+
+  for (const entry of entries) {
+    if (!entry.template) {
+      ungroupedCount++;
+      continue;
+    }
+    const list = byTemplate.get(entry.template);
+    if (list) {
+      list.push(entry);
+    } else {
+      byTemplate.set(entry.template, [entry]);
+    }
+  }
+
+  const groups: TemplateGroup[] = [];
+  for (const [template, groupEntries] of byTemplate) {
+    let latest = groupEntries[0];
+    let bestLevel = groupEntries[0];
+    let allSameCategory = true;
+
+    for (const entry of groupEntries) {
+      if (Date.parse(entry.timestampUtc) > Date.parse(latest.timestampUtc)) {
+        latest = entry;
+      }
+      if (levelRank(entry.level) > levelRank(bestLevel.level)) {
+        bestLevel = entry;
+      }
+      if (entry.category !== groupEntries[0].category) {
+        allSameCategory = false;
+      }
+    }
+
+    groups.push({
+      template,
+      count: groupEntries.length,
+      level: bestLevel.level,
+      category: allSameCategory ? groupEntries[0].category : 'multiple',
+      latestTimestampUtc: latest.timestampUtc,
+      sample: latest.message
+    });
+  }
+
+  groups.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return Date.parse(b.latestTimestampUtc) - Date.parse(a.latestTimestampUtc);
+  });
+
+  return { groups, ungroupedCount };
+}
+
 interface DisplayRow {
   timestampUtc: string;
   level: string;
@@ -80,6 +160,9 @@ export class LogsComponent implements OnInit {
   categories = signal<string[]>([]);
   categoryFilter = signal<string>('');
   traceFilter = signal<string>('');
+  // A view preference, not a filter - deliberately sticky across searches
+  // and buffer clears, unlike traceFilter.
+  grouped = signal(false);
   paused = signal(false);
   isConnected = signal(false);
 
@@ -111,6 +194,8 @@ export class LogsComponent implements OnInit {
       matchesTraceFilter(e.traceId, trace)
     );
   });
+
+  templateGroups = computed(() => groupByTemplate(this.filteredEntries()));
 
   // Category filter applies to search results too, rather than being disabled in
   // search mode - a SearchHit already carries its category as `source`, filtering
@@ -239,6 +324,10 @@ export class LogsComponent implements OnInit {
 
   clearTraceFilter(): void {
     this.traceFilter.set('');
+  }
+
+  toggleGrouped(): void {
+    this.grouped.update(v => !v);
   }
 
   runSearch(): void {

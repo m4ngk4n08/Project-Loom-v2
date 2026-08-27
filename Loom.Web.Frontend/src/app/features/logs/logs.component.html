@@ -73,6 +73,17 @@
 
       <button
         class="toolbar-btn"
+        [class.active]="grouped()"
+        [disabled]="searchResults() !== null"
+        (click)="toggleGrouped()"
+        [title]="searchResults() !== null ? 'Grouping is unavailable for search results' : ''"
+        [attr.aria-label]="grouped() ? 'Show individual log entries' : 'Group log entries by template'"
+        type="button">
+        Group
+      </button>
+
+      <button
+        class="toolbar-btn"
         [class.active]="paused()"
         (click)="togglePause()"
         [attr.aria-label]="paused() ? 'Resume live logs' : 'Pause live logs'"
@@ -115,6 +126,25 @@
       <div class="log-empty">
         <p>{{ liveEmptyMessage }}</p>
       </div>
+    } @else if (grouped()) {
+      @if (templateGroups().groups.length > 0) {
+        <div class="log-list surface" role="table" aria-label="Log entries grouped by template">
+          @for (group of templateGroups().groups; track group.template) {
+            <div class="group-row" [class]="severityClass(group.level)">
+              <span class="group-count">{{ group.count }}</span>
+              <span class="log-level">{{ group.level }}</span>
+              <span class="group-category" [title]="group.category">{{ group.category }}</span>
+              <span class="group-template" [title]="group.sample">{{ group.template }}</span>
+            </div>
+          }
+        </div>
+      }
+      @if (templateGroups().ungroupedCount > 0) {
+        <p class="ungrouped-note"
+           title="These entries carry no message template, so they cannot be grouped by event.">
+          {{ templateGroups().ungroupedCount }} ungrouped
+        </p>
+      }
     } @else {
       <div class="log-list surface" role="log" aria-label="Log entries" aria-live="off">
         <ng-container *ngTemplateOutlet="rowList"></ng-container>

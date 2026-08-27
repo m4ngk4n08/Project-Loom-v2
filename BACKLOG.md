@@ -359,6 +359,48 @@ tests in `InMemoryMetricStoreTests`, `MetricSeriesKeyTests`, and
 
 ---
 
+### 4.5 Log Row Declares role="button" While Containing a Button 🟢 LOW
+
+**Issue:** `.log-row` in `logs.component.html` carries `role="button"` and contains the
+trace-filter chip, which is a real `<button>`. ARIA forbids interactive descendants inside
+a `button` role, so assistive technology may not expose the chip at all.
+
+**Found:** review of `c38d2a5`.
+
+**Fix:** drop `role="button"` from the row, keeping `tabindex="0"` and
+`[attr.aria-expanded]` — an element with `aria-expanded` and a tab stop is a valid
+disclosure pattern without the invalid nesting. `.group-row` shares the markup and should
+change with it, though it has no nested control today.
+
+**Not urgent because:** the behavioural bug this structure caused — activation firing twice
+on the keyboard path — was fixed separately in `da99d99`. What remains is a semantics
+defect with no functional symptom.
+
+**Effort:** 15-30 minutes
+**Priority:** 🟢 LOW
+
+---
+
+### 4.6 parseArguments Runs Twice Per Change-Detection Cycle 🟢 LOW
+
+**Issue:** the expanded-row detail panel calls `rowArguments(row)` twice — once in the
+`@if` length guard, once in the `@for`. Each call is a full `JSON.parse` plus
+`Object.entries().map()`. Change detection runs on every incoming log line, so that is two
+parses per line for as long as any row stays expanded.
+
+**Found:** review of `c38d2a5`.
+
+**Fix:** a `computed` keyed on `expandedKey`, so parsing happens once per expansion instead
+of once per cycle.
+
+**Not urgent because:** only one row expands at a time and argument payloads are a handful
+of keys. It becomes a real cost if multiple rows ever expand at once, or if payloads grow.
+
+**Effort:** 30 minutes
+**Priority:** 🟢 LOW
+
+---
+
 ## 5. Documentation Gaps
 
 ### 5.1 Binary Size Target Documentation 🟡 MEDIUM (COMPLETED)
@@ -854,7 +896,10 @@ notifications shipped in `3bd0d8b`), § 2.1 (Option A taken), § 4.3 and § 4.4
 8. 🟢 Test reset automation (§ 6.1) - superseded, optional tidiness only
 9. 🟢 Statistical anomaly detection on metrics (§ 6.9) - 6-10 hours (planned enhancement)
 
-**Total Low Priority Work:** ~17-28 hours (§ 6.4 excluded - blocked on dependencies)
+10. 🟢 Log row `role="button"` ARIA nesting (§ 4.5) - 15-30 min
+11. 🟢 `parseArguments` runs twice per change-detection cycle (§ 4.6) - 30 min
+
+**Total Low Priority Work:** ~18-29 hours (§ 6.4 excluded - blocked on dependencies)
 
 **§ 6.3 (benchmark suite) is worth more than its LOW rating suggests.** Two deferred
 optimizations are explicitly waiting on measurement it would provide: the zero-allocation
@@ -885,6 +930,8 @@ tagged-counter write allocation matters at all. Without benchmarks those stay gu
 | ~~DEBT-016~~ | ~~Prometheus counters stop growing past buffer wrap~~ | ~~🟡 MEDIUM~~ | ~~4-6h~~ | ✅ Completed | - | § 4.4 (`25a1fae`) |
 | DEBT-017 | Alerting no-data grace period | 🟡 MEDIUM | 2-4h | Open | - | § 6.6 |
 | DEBT-018 | Alert rules added after startup never evaluated | 🟡 MEDIUM | 2-4h | Open | - | § 6.7 |
+| DEBT-020 | Log row role="button" ARIA nesting | 🟢 LOW | 15-30m | Open | - | § 4.5 |
+| DEBT-021 | parseArguments double-parse per CD cycle | 🟢 LOW | 30m | Open | - | § 4.6 |
 | DEBT-019 | § 6.6/§ 6.7 now reachable at runtime (status update only) | 🟡 MEDIUM | N/A | Open | - | § 6.8 |
 
 ---
@@ -1011,6 +1058,20 @@ tracked as Phase 14 work, not backlog.
   unauthenticated, which is a release gate rather than a tracked improvement, and the
   repository is now public — the mitigation in the meantime is that hosts bind via
   `ListenLocalhost`, so access is over an SSH tunnel rather than an exposed port.
+
+---
+
+### 2026-08-27: File Two Frontend Log-View Lows Rather Than Fix Them
+
+Both surfaced while reviewing `c38d2a5` (expandable log rows). Neither is reachable as a
+user-visible defect: § 4.5 is an ARIA semantics violation whose only behavioural symptom —
+row activation firing twice on the keyboard path — was already fixed in `da99d99`, and
+§ 4.6 is two small `JSON.parse` calls per change-detection cycle while a single row is
+expanded.
+
+Filed rather than fixed because the log view had taken nine consecutive commits and further
+polish there was worth less than moving on. Both are cheap enough to fold into whatever
+next touches that component, and neither blocks anything.
 
 ---
 

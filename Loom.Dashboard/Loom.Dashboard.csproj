@@ -19,6 +19,7 @@
     <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
     <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
     <ProjectReference Include="..\Loom.Telemetry.Alerting\Loom.Telemetry.Alerting.csproj" />
+    <ProjectReference Include="..\Loom.Telemetry.Assist\Loom.Telemetry.Assist.csproj" />
     <ProjectReference Include="..\Loom.Telemetry.Exporters\Loom.Telemetry.Exporters.csproj" />
     <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
     <ProjectReference Include="..\Loom.Web.RealTime\Loom.Web.RealTime.csproj" />

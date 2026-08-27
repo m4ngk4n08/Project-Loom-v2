@@ -7,6 +7,7 @@ using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Alerting.Interfaces;
+using Loom.Telemetry.Assist;
 using Loom.Telemetry.Exporters;
 using Loom.Telemetry.Exporters.Prometheus;
 using Loom.Telemetry.Query;
@@ -273,6 +274,37 @@ namespace Loom.Dashboard.Extensions
             })
             .WithName("SearchLogs")
             .Produces<DiagnosticSearchResponse>(200);
+
+            // Mapped only when configured. An unconfigured deployment returns 404 from the
+            // router rather than 501 from a handler - there is no endpoint, not a disabled one.
+            if (AssistOptions.FromEnvironment() is not null)
+            {
+                api.MapPost("/logs/explain", async (
+                    ExplainRequest request,
+                    IExplainClient client,
+                    HttpContext context) =>
+                {
+                    var payload = ExplainPayloadBuilder.Build(
+                        request.Template, request.ArgumentsJson,
+                        request.Category, request.Level, request.ExceptionType);
+
+                    if (payload is null)
+                        return Results.BadRequest("A message template is required to explain an entry.");
+
+                    var result = await client.ExplainAsync(payload, context.RequestAborted);
+
+                    return Results.Json(new ExplainResponse
+                    {
+                        Explanation = result.Explanation,
+                        ModelUsed = result.ModelUsed,
+                        SentText = result.SentText,
+                        InputTokens = result.InputTokens,
+                        OutputTokens = result.OutputTokens
+                    }, LoomJsonSerializerContext.Default.ExplainResponse);
+                })
+                .WithName("ExplainLogEntry")
+                .Produces<ExplainResponse>(200);
+            }
 
             return api;
         }

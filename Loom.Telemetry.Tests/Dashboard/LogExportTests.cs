@@ -108,7 +108,7 @@ public class LogExportTests
     [Fact]
     public void WriteCsvExport_RecordWithTraceIdAndTemplate_EmitsBothInTrailingFields()
     {
-        LogMessageParser.TryParseTraceId(TraceHex, out var hi, out var lo);
+        W3CTraceId.TryParseTraceId(TraceHex, out var hi, out var lo);
         var record = new LogRecord(
             "User 42 logged in", "cat", LoomLogLevel.Information, Base,
             template: "User {UserId} logged in", traceIdHi: hi, traceIdLo: lo);
@@ -146,7 +146,7 @@ public class LogExportTests
     [Fact]
     public void WriteCsvExport_PartiallyPopulatedRecords_HaveSameFieldCountAsFullyPopulated()
     {
-        LogMessageParser.TryParseTraceId(TraceHex, out var hi, out var lo);
+        W3CTraceId.TryParseTraceId(TraceHex, out var hi, out var lo);
 
         var full = new LogRecord(
             "full", "cat", LoomLogLevel.Information, Base,
@@ -171,7 +171,7 @@ public class LogExportTests
     [Fact]
     public void WriteCsvExport_MixedRecords_HeaderAndDataRowsAgreeOnColumnCount()
     {
-        LogMessageParser.TryParseTraceId(TraceHex, out var hi, out var lo);
+        W3CTraceId.TryParseTraceId(TraceHex, out var hi, out var lo);
 
         var records = new[]
         {

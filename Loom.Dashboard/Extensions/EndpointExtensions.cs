@@ -303,7 +303,7 @@ namespace Loom.Dashboard.Extensions
                   .Append(CsvField(record.Message)).Append(',')
                   .Append(CsvField(record.ExceptionType ?? string.Empty)).Append(',')
                   .Append(CsvField(record.ExceptionMessage ?? string.Empty)).Append(',')
-                  .Append(CsvField(LogMessageParser.FormatTraceId(record.TraceIdHi, record.TraceIdLo) ?? string.Empty)).Append(',')
+                  .Append(CsvField(W3CTraceId.FormatTraceId(record.TraceIdHi, record.TraceIdLo) ?? string.Empty)).Append(',')
                   .Append(CsvField(record.Template ?? string.Empty))
                   .Append("\r\n");
             }
@@ -345,8 +345,8 @@ namespace Loom.Dashboard.Extensions
             // FormatTraceId/FormatSpanId return null rather than a string of zeros for
             // an absent id. Paired with DefaultIgnoreCondition.WhenWritingNull on the
             // serializer context, an untraced line emits no traceId key at all.
-            TraceId = LogMessageParser.FormatTraceId(record.TraceIdHi, record.TraceIdLo),
-            SpanId = LogMessageParser.FormatSpanId(record.SpanId)
+            TraceId = W3CTraceId.FormatTraceId(record.TraceIdHi, record.TraceIdLo),
+            SpanId = W3CTraceId.FormatSpanId(record.SpanId)
         };
 
         private static RouteGroupBuilder MapAlertEndpoints(this RouteGroupBuilder api)

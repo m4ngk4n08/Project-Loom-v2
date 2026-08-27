@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -133,64 +132,5 @@ internal sealed class LogMessageParser
             _templatePool[s] = s;
 
         return s;
-    }
-
-    internal static bool TryParseTraceId(ReadOnlySpan<char> hex, out ulong hi, out ulong lo)
-    {
-        hi = 0;
-        lo = 0;
-        if (hex.Length != 32)
-            return false;
-
-        if (!ulong.TryParse(hex[..16], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var h))
-            return false;
-        if (!ulong.TryParse(hex[16..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var l))
-            return false;
-
-        // W3C: an all-zero id is invalid, and 0 is our "absent" sentinel.
-        if (h == 0 && l == 0)
-            return false;
-
-        hi = h;
-        lo = l;
-        return true;
-    }
-
-    internal static bool TryParseSpanId(ReadOnlySpan<char> hex, out ulong id)
-    {
-        id = 0;
-        if (hex.Length != 16)
-            return false;
-
-        if (!ulong.TryParse(hex, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var parsed))
-            return false;
-
-        // W3C: an all-zero id is invalid, and 0 is our "absent" sentinel.
-        if (parsed == 0)
-            return false;
-
-        id = parsed;
-        return true;
-    }
-
-    internal static string? FormatTraceId(ulong hi, ulong lo)
-    {
-        if (hi == 0 && lo == 0)
-            return null;
-
-        Span<char> span = stackalloc char[32];
-        hi.TryFormat(span[..16], out _, "x16", CultureInfo.InvariantCulture);
-        lo.TryFormat(span[16..], out _, "x16", CultureInfo.InvariantCulture);
-        return new string(span);
-    }
-
-    internal static string? FormatSpanId(ulong id)
-    {
-        if (id == 0)
-            return null;
-
-        Span<char> span = stackalloc char[16];
-        id.TryFormat(span, out _, "x16", CultureInfo.InvariantCulture);
-        return new string(span);
     }
 }

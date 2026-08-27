@@ -291,9 +291,9 @@ public sealed class EventPipeBridge : BackgroundService
 
         ulong traceHi = 0, traceLo = 0, spanId = 0;
         if (activityTraceId != null)
-            LogMessageParser.TryParseTraceId(activityTraceId, out traceHi, out traceLo);
+            W3CTraceId.TryParseTraceId(activityTraceId, out traceHi, out traceLo);
         if (activitySpanId != null)
-            LogMessageParser.TryParseSpanId(activitySpanId, out spanId);
+            W3CTraceId.TryParseSpanId(activitySpanId, out spanId);
 
         return new LogRecord(
             // Message keeps the fully rendered text even though Template and

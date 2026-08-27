@@ -1,4 +1,5 @@
 using Loom.Dashboard;
+using Loom.Telemetry;
 using Xunit;
 
 namespace Loom.Telemetry.Tests.Dashboard;
@@ -24,8 +25,8 @@ public class EventPipeLogParsingTests
         Assert.NotEqual(0UL, record.TraceIdHi);
         Assert.NotEqual(0UL, record.TraceIdLo);
         Assert.NotEqual(0UL, record.SpanId);
-        Assert.Equal(traceId, LogMessageParser.FormatTraceId(record.TraceIdHi, record.TraceIdLo));
-        Assert.Equal(spanId, LogMessageParser.FormatSpanId(record.SpanId));
+        Assert.Equal(traceId, W3CTraceId.FormatTraceId(record.TraceIdHi, record.TraceIdLo));
+        Assert.Equal(spanId, W3CTraceId.FormatSpanId(record.SpanId));
     }
 
     [Fact]

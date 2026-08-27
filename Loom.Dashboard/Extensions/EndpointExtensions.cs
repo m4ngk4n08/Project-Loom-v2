@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
+using Loom.Dashboard;
 using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
@@ -324,7 +325,7 @@ namespace Loom.Dashboard.Extensions
             return "\"" + value.Replace("\"", "\"\"") + "\"";
         }
 
-        private static LogEntryDto ToDto(LogRecord record) => new()
+        internal static LogEntryDto ToDto(LogRecord record) => new()
         {
             Message = record.Message,
             Category = record.Category,
@@ -332,7 +333,14 @@ namespace Loom.Dashboard.Extensions
             TimestampUtc = record.TimestampUtc,
             EventId = record.EventId,
             ExceptionType = record.ExceptionType,
-            ExceptionMessage = record.ExceptionMessage
+            ExceptionMessage = record.ExceptionMessage,
+            Template = record.Template,
+            ArgumentsJson = record.ArgumentsJson,
+            // FormatTraceId/FormatSpanId return null rather than a string of zeros for
+            // an absent id. Paired with DefaultIgnoreCondition.WhenWritingNull on the
+            // serializer context, an untraced line emits no traceId key at all.
+            TraceId = LogMessageParser.FormatTraceId(record.TraceIdHi, record.TraceIdLo),
+            SpanId = LogMessageParser.FormatSpanId(record.SpanId)
         };
 
         private static RouteGroupBuilder MapAlertEndpoints(this RouteGroupBuilder api)

@@ -16,6 +16,9 @@ public sealed record AlertNotification(AlertRule Rule, MetricAggregate Observed,
 
     /// <summary>Set only when State == Resolved.</summary>
     public DateTime? ResolvedAt { get; init; }
+
+    /// <summary>Set only when State == Resolved.</summary>
+    public AlertResolutionReason? ResolutionReason { get; init; }
 }
 
 public sealed class AlertEvaluationHostedService(
@@ -28,6 +31,10 @@ public sealed class AlertEvaluationHostedService(
     private readonly Dictionary<string, DateTime> _activeAlerts = [];
     // rule name -> DateTime of the last Firing notification (the re-notify cooldown)
     private readonly Dictionary<string, DateTime> _lastNotified = [];
+    // rule name -> when we last computed a real aggregate, and what it was. The
+    // aggregate is kept so an expiry notification can report the last thing actually
+    // observed rather than a fabricated zero reading.
+    private readonly Dictionary<string, (DateTime SeenAt, MetricAggregate Aggregate)> _lastData = [];
 
     // With no rules the loop body is a no-op, so a short idle tick costs a timer
     // wakeup and nothing else. It bounds how long a rule registered after startup
@@ -38,6 +45,14 @@ public sealed class AlertEvaluationHostedService(
         rules.Count == 0
             ? IdleTickInterval
             : rules.Select(r => r.Window).Min() / 10;
+
+    // Three windows of silence. Scales with the rule instead of being one constant
+    // that is too eager for a 5-minute rule and too slow for a 1-minute one.
+    internal static TimeSpan ResolveNoDataGrace(AlertRule rule) =>
+        rule.NoDataGrace ?? rule.Window * 3;
+
+    internal static bool HasExpired(DateTime now, DateTime lastDataSeen, TimeSpan grace) =>
+        now - lastDataSeen >= grace;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -66,17 +81,36 @@ public sealed class AlertEvaluationHostedService(
             var now = DateTime.UtcNow;
             foreach (var rule in rules)
             {
-                // No data (buffer missing, or exists but the window holds no samples) means
-                // "we don't know" — not "the condition is false". Skip the rule entirely:
-                // no fire, no resolve, state preserved. See BACKLOG.md DEBT-017: a metric
-                // that stops arriving entirely leaves its alert stuck in whatever state it
-                // was in until data resumes; a no-data grace period is future work.
                 var aggregate = ComputeWindowAggregate(rule, now);
                 if (aggregate is null)
                 {
+                    // An active alert whose metric has been silent past its grace period is
+                    // resolved as NoData. A rule that has never seen data cannot expire: there
+                    // is no alert open to close.
+                    if (_activeAlerts.TryGetValue(rule.Name, out var noDataActiveSince) &&
+                        _lastData.TryGetValue(rule.Name, out var last) &&
+                        HasExpired(now, last.SeenAt, ResolveNoDataGrace(rule)))
+                    {
+                        _activeAlerts.Remove(rule.Name);
+                        _lastNotified.Remove(rule.Name);
+                        notificationChannel.Writer.TryWrite(
+                            new AlertNotification(rule, last.Aggregate, noDataActiveSince)
+                            {
+                                State = AlertState.Resolved,
+                                ResolvedAt = now,
+                                ResolutionReason = AlertResolutionReason.NoData
+                            });
+                        logger?.LogWarning(
+                            "Alert RESOLVED (no data): rule={Rule} metric={Metric} firedAt={FiredAt:O} lastData={LastData:O} grace={Grace}",
+                            rule.Name, rule.MetricName, noDataActiveSince, last.SeenAt, ResolveNoDataGrace(rule));
+                        continue;
+                    }
+
                     logger?.LogDebug("Alert rule {Rule} evaluated: no data in window.", rule.Name);
                     continue;
                 }
+
+                _lastData[rule.Name] = (now, aggregate.Value);
 
                 var conditionMet = rule.Condition(aggregate.Value);
                 var isActive = _activeAlerts.TryGetValue(rule.Name, out var activeSince);
@@ -122,7 +156,8 @@ public sealed class AlertEvaluationHostedService(
                     notificationChannel.Writer.TryWrite(new AlertNotification(rule, aggregate.Value, activeSince)
                     {
                         State = AlertState.Resolved,
-                        ResolvedAt = now
+                        ResolvedAt = now,
+                        ResolutionReason = AlertResolutionReason.ConditionCleared
                     });
                     logger?.LogInformation(
                         "Alert RESOLVED: rule={Rule} metric={Metric} count={Count} avg={Avg:F2} max={Max:F2} p99={P99:F2} firedAt={FiredAt:O}",

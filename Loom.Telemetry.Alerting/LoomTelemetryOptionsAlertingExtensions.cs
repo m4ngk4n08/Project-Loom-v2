@@ -21,6 +21,7 @@ public class AlertBuilder(string name)
     private string _metricName = "";
     private TimeSpan _window = TimeSpan.FromMinutes(5);
     private Func<MetricAggregate, bool> _condition = static _ => false;
+    private TimeSpan? _noDataGrace;
     private readonly List<Type> _targetTypes = [];
 
     /// <summary>metrics => metrics.ErrorCount > 100 from the original design becomes
@@ -35,6 +36,8 @@ public class AlertBuilder(string name)
 
     public AlertBuilder InWindow(TimeSpan window) { _window = window; return this; }
 
+    public AlertBuilder ExpireAfterNoData(TimeSpan grace) { _noDataGrace = grace; return this; }
+
     public AlertBuilder Notify<T>() where T : class, IAlertTarget
     {
         _targetTypes.Add(typeof(T));
@@ -43,7 +46,7 @@ public class AlertBuilder(string name)
 
     public AlertRule Build()
     {
-        var rule = new AlertRule(name, _metricName, _window) { Condition = _condition };
+        var rule = new AlertRule(name, _metricName, _window) { Condition = _condition, NoDataGrace = _noDataGrace };
         rule.TargetTypes.AddRange(_targetTypes);
         return rule;
     }

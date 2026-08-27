@@ -13,5 +13,9 @@ public class AlertRule(string name, string metricName, TimeSpan window)
     /// <summary>A plain closure, not an expression tree — see the AOT-compatibility note above.</summary>
     public Func<MetricAggregate, bool> Condition { get; set; } = static _ => false;
 
+    /// <summary>How long a metric may produce no samples before an active alert on
+    /// it is resolved as NoData. Null means Window * 3.</summary>
+    public TimeSpan? NoDataGrace { get; set; }
+
     public List<Type> TargetTypes { get; } = [];
 }

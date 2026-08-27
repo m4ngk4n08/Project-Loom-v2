@@ -736,4 +736,194 @@ public class AlertEvaluationTests
         // Cleanup
         LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
+
+    [Fact]
+    public void ResolveNoDataGrace_NoDataGraceUnset_ReturnsWindowTimesThree()
+    {
+        var rule = new AlertRule("GraceUnset", "SomeMetric", TimeSpan.FromSeconds(10));
+
+        var result = AlertEvaluationHostedService.ResolveNoDataGrace(rule);
+
+        Assert.Equal(TimeSpan.FromSeconds(30), result);
+    }
+
+    [Fact]
+    public void ResolveNoDataGrace_NoDataGraceSet_ReturnsThatValueIgnoringWindow()
+    {
+        var rule = new AlertRule("GraceSet", "SomeMetric", TimeSpan.FromSeconds(10))
+        {
+            NoDataGrace = TimeSpan.FromSeconds(5)
+        };
+
+        var result = AlertEvaluationHostedService.ResolveNoDataGrace(rule);
+
+        Assert.Equal(TimeSpan.FromSeconds(5), result);
+    }
+
+    [Fact]
+    public void HasExpired_ElapsedLessThanGrace_ReturnsFalse()
+    {
+        var now = new DateTime(2026, 1, 1, 0, 0, 10, DateTimeKind.Utc);
+        var lastDataSeen = new DateTime(2026, 1, 1, 0, 0, 5, DateTimeKind.Utc);
+        var grace = TimeSpan.FromSeconds(10);
+
+        Assert.False(AlertEvaluationHostedService.HasExpired(now, lastDataSeen, grace));
+    }
+
+    [Fact]
+    public void HasExpired_ElapsedEqualsGrace_ReturnsTrue()
+    {
+        var now = new DateTime(2026, 1, 1, 0, 0, 15, DateTimeKind.Utc);
+        var lastDataSeen = new DateTime(2026, 1, 1, 0, 0, 5, DateTimeKind.Utc);
+        var grace = TimeSpan.FromSeconds(10);
+
+        Assert.True(AlertEvaluationHostedService.HasExpired(now, lastDataSeen, grace));
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_MetricGoesSilentPastGrace_ResolvesAsNoData()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "GoesSilent_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromSeconds(1);
+        var rule = new AlertRule("GoesSilentAlert", metricName, window)
+        {
+            Condition = agg => agg.Count > 0,
+            NoDataGrace = TimeSpan.FromMilliseconds(400)
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        using var recordCts = new CancellationTokenSource();
+        var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(300); // let it fire (window/10 = 100ms tick)
+
+        // Stop recording - metric goes silent
+        recordCts.Cancel();
+        await recordTask;
+
+        await Task.Delay(2000); // window drains, then NoDataGrace (400ms) elapses
+
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var firing = notifications.Where(n => n.State == AlertState.Firing).ToList();
+        var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
+
+        Assert.NotEmpty(firing);
+        Assert.Single(resolved);
+        Assert.Equal(AlertResolutionReason.NoData, resolved[0].ResolutionReason);
+        Assert.Equal(firing[0].FiredAt, resolved[0].FiredAt);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_MetricSilentWithinGrace_DoesNotResolve()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "SilentWithinGrace_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromSeconds(1);
+        var rule = new AlertRule("SilentWithinGraceAlert", metricName, window)
+        {
+            Condition = agg => agg.Count > 0,
+            NoDataGrace = TimeSpan.FromSeconds(30)
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        using var recordCts = new CancellationTokenSource();
+        var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(300); // let it fire
+
+        // Stop recording - metric goes silent, but well within the 30s grace
+        recordCts.Cancel();
+        await recordTask;
+
+        await Task.Delay(2000);
+
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert - no Resolved notification (30s grace far exceeds the wait). The
+        // rule's Window also doubles as its re-notify cooldown (pre-existing,
+        // unrelated behavior), so a redundant Firing re-notification landing in
+        // this window is not itself a failure - only a Resolved would be.
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        Assert.NotEmpty(notifications);
+        Assert.All(notifications, n => Assert.Equal(AlertState.Firing, n.State));
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_ConditionClears_ResolvesAsConditionCleared()
+    {
+        // Arrange
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "ClearsAsCondition_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(600);
+        var rule = new AlertRule("ClearsAsConditionAlert", metricName, window)
+        {
+            Condition = agg => agg.Max > 50
+        };
+        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+
+        LoomMetrics.RecordCounter(metricName, 100.0);
+
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(150); // let the fire tick land
+
+        // Keep the window non-empty with low values so the alert resolves via
+        // condition-cleared, not no-data.
+        using var lowValueCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        var recordTask = RecordPeriodicallyAsync(metricName, 10.0, TimeSpan.FromMilliseconds(50), lowValueCts.Token);
+
+        await Task.Delay(1400);
+        lowValueCts.Cancel();
+        await recordTask;
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
+        Assert.Single(resolved);
+        Assert.Equal(AlertResolutionReason.ConditionCleared, resolved[0].ResolutionReason);
+
+        // Cleanup
+        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+    }
 }

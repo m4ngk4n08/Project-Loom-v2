@@ -60,7 +60,8 @@ public sealed class ConsoleAlertTarget : IAlertTarget
         if (notification.State == AlertState.Resolved)
         {
             var duration = notification.ResolvedAt!.Value - notification.FiredAt;
-            Console.WriteLine($"[RESOLVED] {notification.Rule.Name} resolved at {notification.ResolvedAt:O} (fired at {notification.FiredAt:O}, active for {duration})");
+            var suffix = notification.ResolutionReason == AlertResolutionReason.NoData ? " (no data)" : "";
+            Console.WriteLine($"[RESOLVED] {notification.Rule.Name} resolved at {notification.ResolvedAt:O} (fired at {notification.FiredAt:O}, active for {duration}){suffix}");
         }
         else
         {

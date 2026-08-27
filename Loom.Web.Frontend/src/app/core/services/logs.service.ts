@@ -48,6 +48,22 @@ export interface LogSearchResponse {
   results: SearchHit[];
 }
 
+export interface ExplainRequest {
+  template: string;
+  argumentsJson?: string;
+  category?: string;
+  level?: string;
+  exceptionType?: string;
+}
+
+export interface ExplainResponse {
+  explanation: string;
+  modelUsed: string;
+  sentText: string;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -83,5 +99,9 @@ export class LogsService {
 
   search(query: string, maxResults = 20): Observable<LogSearchResponse> {
     return this.http.post<LogSearchResponse>('/api/logs/search', { query, maxResults });
+  }
+
+  explain(request: ExplainRequest): Observable<ExplainResponse> {
+    return this.http.post<ExplainResponse>('/api/logs/explain', request);
   }
 }

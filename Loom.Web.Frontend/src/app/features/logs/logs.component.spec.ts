@@ -1,4 +1,4 @@
-import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel, isInteractiveEventTarget } from './logs.component';
+import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel, isInteractiveEventTarget, canExplain, explainErrorMessage } from './logs.component';
 import { LogEntry } from '../../core/services/logs.service';
 
 describe('toUtcIso', () => {
@@ -360,5 +360,49 @@ describe('isInteractiveEventTarget', () => {
     button.appendChild(row);
     row.appendChild(span);
     expect(isInteractiveEventTarget(span, row)).toBe(false);
+  });
+});
+
+describe('canExplain', () => {
+  const row = (over: Partial<DisplayRow>): DisplayRow => ({
+    timestampUtc: '2026-01-01T00:00:00Z', level: 'Information',
+    category: 'c', message: 'm', eventId: 0, score: null, ...over,
+  });
+
+  it('returns true for a row with a populated template', () => {
+    expect(canExplain(row({ template: 'processing {UserId}' }))).toBe(true);
+  });
+
+  it('returns false for a row with template undefined', () => {
+    expect(canExplain(row({ template: undefined }))).toBe(false);
+  });
+
+  it("returns false for a row with template ''", () => {
+    expect(canExplain(row({ template: '' }))).toBe(false);
+  });
+});
+
+describe('explainErrorMessage', () => {
+  it('mentions LOOM_LLM_API_KEY for a 404', () => {
+    expect(explainErrorMessage(404)).toContain('LOOM_LLM_API_KEY');
+  });
+
+  it('an unconfigured feature is not worded as a failure for a 404', () => {
+    const message = explainErrorMessage(404).toLowerCase();
+    expect(message).not.toContain('failed');
+    expect(message).not.toContain('error');
+  });
+
+  it('mentions "template" for a 400', () => {
+    expect(explainErrorMessage(400)).toContain('template');
+  });
+
+  it('returns the generic message for a 500', () => {
+    expect(explainErrorMessage(500)).toBe('Could not reach the model. Check the connection and try again.');
+  });
+
+  it('returns the same generic message as 500 for a 0 status and does not throw', () => {
+    expect(() => explainErrorMessage(0)).not.toThrow();
+    expect(explainErrorMessage(0)).toBe(explainErrorMessage(500));
   });
 });

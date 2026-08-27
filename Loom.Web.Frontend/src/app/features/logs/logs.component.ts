@@ -2,7 +2,7 @@ import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angula
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { LogsService, LogEntry, LogExportFilters, SearchHit } from '../../core/services/logs.service';
+import { LogsService, LogEntry, LogExportFilters, SearchHit, ExplainResponse } from '../../core/services/logs.service';
 
 const MAX_BUFFERED_ENTRIES = 2000;
 const BACKFILL_COUNT = 200;
@@ -152,6 +152,27 @@ export interface LogArgument {
   value: string;
 }
 
+// The endpoint rebuilds the payload server-side and rejects an entry with no template,
+// so a row without one has nothing to ask about. Hiding the control beats offering it
+// and returning a 400.
+export function canExplain(row: DisplayRow): boolean {
+  return typeof row.template === 'string' && row.template.length > 0;
+}
+
+// A deployment with no LOOM_LLM_API_KEY never maps the route, so an unconfigured Loom
+// answers 404. That is a configuration state, not a failure, and must not be worded as
+// one - "it broke" sends someone debugging; "it is not turned on" sends them to the
+// env var.
+export function explainErrorMessage(status: number): string {
+  if (status === 404) {
+    return 'The explain feature is not configured. Set LOOM_LLM_API_KEY to turn it on.';
+  }
+  if (status === 400) {
+    return 'This entry has no message template to explain.';
+  }
+  return 'Could not reach the model. Check the connection and try again.';
+}
+
 // ArgumentsJson can hold text that is NOT valid JSON: the backend preserves a
 // malformed payload verbatim rather than dropping it, so bad input reaches the
 // browser by design. Returning [] on a parse failure keeps one bad log line
@@ -266,6 +287,13 @@ export class LogsComponent implements OnInit {
   searchError = signal<string | null>(null);
   searchTimeMs = signal<number | null>(null);
   lastQuery = signal('');
+
+  // Only one row expands at a time, so one slot of explain state is enough. Keyed on
+  // rowKey so collapsing and re-expanding a different row does not show a stale answer.
+  explainKey = signal<string | null>(null);
+  explainLoading = signal(false);
+  explainResult = signal<ExplainResponse | null>(null);
+  explainError = signal<string | null>(null);
 
   filteredEntries = computed(() => {
     const category = this.categoryFilter();
@@ -399,6 +427,10 @@ export class LogsComponent implements OnInit {
     this.traceFilter.set('');
     this.expandedKey.set(null);
     this.expandedGroupTemplate.set(null);
+    this.explainKey.set(null);
+    this.explainLoading.set(false);
+    this.explainResult.set(null);
+    this.explainError.set(null);
   }
 
   severityClass(level: string): string {
@@ -440,10 +472,60 @@ export class LogsComponent implements OnInit {
   toggleExpanded(row: DisplayRow): void {
     const key = rowKey(row);
     this.expandedKey.set(this.expandedKey() === key ? null : key);
+    // Collapsing or switching rows clears explain state - a stale explanation must
+    // never appear under a different row.
+    this.explainKey.set(null);
+    this.explainLoading.set(false);
+    this.explainResult.set(null);
+    this.explainError.set(null);
   }
 
   rowArguments(row: DisplayRow): LogArgument[] {
     return parseArguments(row.argumentsJson);
+  }
+
+  canExplainRow(row: DisplayRow): boolean {
+    return canExplain(row);
+  }
+
+  explainResultFor(row: DisplayRow): ExplainResponse | null {
+    return this.explainKey() === rowKey(row) ? this.explainResult() : null;
+  }
+
+  explainErrorFor(row: DisplayRow): string | null {
+    return this.explainKey() === rowKey(row) ? this.explainError() : null;
+  }
+
+  isExplaining(row: DisplayRow): boolean {
+    return this.explainLoading() && this.explainKey() === rowKey(row);
+  }
+
+  explainRow(row: DisplayRow): void {
+    const key = rowKey(row);
+    this.explainKey.set(key);
+    this.explainResult.set(null);
+    this.explainError.set(null);
+    this.explainLoading.set(true);
+
+    this.logsService.explain({
+      template: row.template!,
+      argumentsJson: row.argumentsJson,
+      category: row.category,
+      level: row.level,
+      exceptionType: row.exceptionType
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.explainResult.set(response);
+          this.explainLoading.set(false);
+        },
+        error: (err) => {
+          console.error('Explain request failed:', err);
+          this.explainError.set(explainErrorMessage(err.status ?? 0));
+          this.explainLoading.set(false);
+        }
+      });
   }
 
   isGroupExpanded(group: TemplateGroup): boolean {

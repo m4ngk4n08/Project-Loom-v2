@@ -338,6 +338,36 @@
               <dt>Message</dt>
               <dd class="detail-message">{{ row.message }}</dd>
             </div>
+            @if (canExplainRow(row)) {
+              <div class="detail-row">
+                <dt>Explain</dt>
+                <dd class="explain-cell">
+                  <button
+                    class="explain-btn"
+                    type="button"
+                    [disabled]="isExplaining(row)"
+                    (click)="explainRow(row)"
+                    [attr.aria-label]="'Explain this log event'">
+                    {{ isExplaining(row) ? 'Asking…' : 'Explain this event' }}
+                  </button>
+
+                  @if (explainErrorFor(row); as explainErr) {
+                    <p class="explain-error" role="status">{{ explainErr }}</p>
+                  }
+
+                  @if (explainResultFor(row); as explained) {
+                    <p class="explain-text">{{ explained.explanation }}</p>
+                    <details class="explain-sent">
+                      <summary>What was sent to the model</summary>
+                      <pre class="explain-sent-text">{{ explained.sentText }}</pre>
+                    </details>
+                    <p class="explain-meta">
+                      {{ explained.modelUsed }} · {{ explained.inputTokens }} in / {{ explained.outputTokens }} out
+                    </p>
+                  }
+                </dd>
+              </div>
+            }
           </dl>
         }
       </div>

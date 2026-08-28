@@ -250,7 +250,34 @@ which tracked the same documentation change from the docs side.
 
 ---
 
-### 3.3 `Loom.Web.Api` Cannot Serve HTTPS 🔴 HIGH — Phase 15 blocker
+### 3.3 `Loom.Web.Api` Cannot Serve HTTPS 🟢 RESOLVED BY DECISION — not by fixing it
+
+**Status:** ✅ **CLOSED 2026-08-28.** Neither option below was taken. A third was:
+**Loom does not terminate TLS at all.** It binds loopback in code, `UseHsts()` and
+`UseHttpsRedirection()` are deleted, and the SSH tunnel carries the only hop that leaves
+the machine. In-process TLS was measured at **+0.946 MB** (15.124 → 16.070 MB) to protect
+a hop that never crosses a network, and it would have added certificate provisioning,
+permissions under `ProtectSystem=strict`, and renewal as a standing operational chore.
+
+**What made the decision, rather than the measurement alone:** the threat model in
+`IMPLEMENTATION-METHODOLOGY.md` § 14.0.4 already asserted that both hosts bind loopback.
+That was true of `Loom.Dashboard` (`ListenLocalhost`) and **false** of `Loom.Web.Api`,
+which had no explicit bind and accepted whatever `ASPNETCORE_URLS` supplied. Binding
+loopback in code costs nothing, cannot be overridden by configuration, and makes the
+documented property real — a stronger guarantee than TLS over a hop that stays inside one
+machine.
+
+**Option 2 below is retained as the documented path for non-tunnel access**: front the
+loopback port with a reverse proxy and let it own the certificate. Option 1 is rejected.
+
+**Still true and worth keeping:** browsers treat `http://localhost` as a secure context,
+so nothing in the Angular app depends on TLS being present.
+
+The original analysis follows.
+
+---
+
+### 3.3 (original analysis) `Loom.Web.Api` Cannot Serve HTTPS
 
 **Location:** `Loom.Web.Api/Program.cs` — `WebApplication.CreateSlimBuilder` with no
 `UseKestrelHttpsConfiguration()` and no HTTPS listener anywhere.
@@ -542,7 +569,22 @@ that is already installed correctly.
 
 ---
 
-### 4.9 `/api/health` Now Requires a Token, Breaking Liveness Probes 🟢 LOW
+### 4.9 `/api/health` Now Requires a Token, Breaking Liveness Probes 🟢 LOW (COMPLETED)
+
+**Status:** ✅ **RESOLVED 2026-08-28** — option 1 taken, the endpoint is marked
+`LoomAllowAnonymous`. Once § 3.3 settled on a loopback-only service, an anonymous health
+page stopped being an exposure question: only processes on the same machine can reach it,
+and it reports status, uptime, and working-set size. Options 2 and 3 both ended in a
+long-lived credential living in a systemd unit, which is worse than what it protects.
+
+**Applied on both hosts.** The original entry named only the Dashboard, and the marker
+initially landed there alone — `Loom.Web.Api/Extensions/EndpointExtensions.cs` was missed
+and its `/api/health` still returned 401, verified by probe. That is the host the decision
+was actually written for: `Loom.Web.Api` is the Native AOT publish target and therefore
+the one that runs under systemd, where a liveness probe cannot hold a 60-minute JWT.
+Both are now marked; both verified 200 without a token.
+
+The original analysis follows.
 
 **Location:** `Loom.Dashboard/Extensions/EndpointExtensions.cs:52`
 
@@ -1030,9 +1072,10 @@ the same evaluation loop they affect.
 
 ### High Priority (Pre-1.0 Release)
 
-**One open: § 3.3, and it blocks Phase 15.**
+**None open.** § 3.3 was closed by decision rather than by code — Loom does not terminate
+TLS. See its entry and the 2026-08-28 decision-log note.
 
-1. 🔴 `Loom.Web.Api` cannot serve HTTPS (§ 3.3) - 1 hour, plus a certificate decision
+1. 🔴 ~~`Loom.Web.Api` cannot serve HTTPS (§ 3.3)~~ ✅ RESOLVED BY DECISION
 2. 🔴 ~~Test isolation fix (§ 1.1)~~ ✅ COMPLETED
 3. 🔴 ~~Missing ingest endpoint (§ 3.1)~~ ✅ COMPLETED
 
@@ -1073,7 +1116,7 @@ notifications shipped in `3bd0d8b`), § 2.1 (Option A taken), § 4.3 and § 4.4
 11. 🟢 `parseArguments` runs twice per change-detection cycle (§ 4.6) - 30 min
 12. 🟢 ~~Security headers absent on production redirects (§ 4.7)~~ ✅ COMPLETED in Phase 14C
 13. 🟢 `loom dashboard` reports every launch failure as "package not found" (§ 4.8) - 30 min
-14. 🟢 `/api/health` now requires a token, breaking liveness probes (§ 4.9) - 15 min once decided
+14. 🟢 ~~`/api/health` now requires a token (§ 4.9)~~ ✅ COMPLETED — marked anonymous
 
 **Total Low Priority Work:** ~18-29 hours (§ 6.4 excluded - blocked on dependencies)
 

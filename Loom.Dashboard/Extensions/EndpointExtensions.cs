@@ -55,7 +55,8 @@ namespace Loom.Dashboard.Extensions
                 Timestamp = DateTime.UtcNow,
                 UptimeSeconds = (long)(DateTime.UtcNow - Process.GetCurrentProcess().StartTime.ToUniversalTime()).TotalSeconds,
                 MemoryUsageMb = Process.GetCurrentProcess().WorkingSet64 / 1_048_576.0
-            }, LoomJsonSerializerContext.Default.HealthCheckResponse));
+            }, LoomJsonSerializerContext.Default.HealthCheckResponse))
+            .WithMetadata(new LoomAllowAnonymous());
 
             return api;
         }

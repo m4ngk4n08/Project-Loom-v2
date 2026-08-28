@@ -159,6 +159,19 @@ export function canExplain(row: DisplayRow): boolean {
   return typeof row.template === 'string' && row.template.length > 0;
 }
 
+// The redaction boundary removes argument VALUES, not the template's literal text, and
+// the template goes to the model word for word. A template with no placeholders is
+// therefore sent whole - "no values leak" is not "no PII leaks". Escaped braces ({{ and
+// }}) are literal characters, so strip them before looking for a real placeholder. An
+// empty {} is not a named hole and counts as no placeholder, which errs toward showing
+// the warning - the safe direction.
+export function hasNoPlaceholders(template: string | undefined): boolean {
+  if (typeof template !== 'string' || template.length === 0) {
+    return false;
+  }
+  return !/\{[^{}]+\}/.test(template.replace(/\{\{|\}\}/g, ''));
+}
+
 // A deployment with no LOOM_LLM_API_KEY never maps the route, so an unconfigured Loom
 // answers 404. That is a configuration state, not a failure, and must not be worded as
 // one - "it broke" sends someone debugging; "it is not turned on" sends them to the
@@ -486,6 +499,10 @@ export class LogsComponent implements OnInit {
 
   canExplainRow(row: DisplayRow): boolean {
     return canExplain(row);
+  }
+
+  showsVerbatimWarning(row: DisplayRow): boolean {
+    return canExplain(row) && hasNoPlaceholders(row.template);
   }
 
   explainResultFor(row: DisplayRow): ExplainResponse | null {

@@ -351,6 +351,13 @@
                     {{ isExplaining(row) ? 'Asking…' : 'Explain this event' }}
                   </button>
 
+                  @if (showsVerbatimWarning(row)) {
+                    <p class="explain-verbatim">
+                      No placeholders in this message, so it is sent to the model exactly
+                      as written — including anything hard-coded into the text.
+                    </p>
+                  }
+
                   @if (explainErrorFor(row); as explainErr) {
                     <p class="explain-error" role="status">{{ explainErr }}</p>
                   }

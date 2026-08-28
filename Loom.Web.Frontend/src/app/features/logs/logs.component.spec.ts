@@ -1,4 +1,4 @@
-import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel, isInteractiveEventTarget, canExplain, explainErrorMessage } from './logs.component';
+import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel, isInteractiveEventTarget, canExplain, explainErrorMessage, hasNoPlaceholders } from './logs.component';
 import { LogEntry } from '../../core/services/logs.service';
 
 describe('toUtcIso', () => {
@@ -379,6 +379,48 @@ describe('canExplain', () => {
 
   it("returns false for a row with template ''", () => {
     expect(canExplain(row({ template: '' }))).toBe(false);
+  });
+});
+
+describe('hasNoPlaceholders', () => {
+  it('returns false for a template with two placeholders', () => {
+    expect(hasNoPlaceholders('Payment processed: {Amount} via {Method}')).toBe(false);
+  });
+
+  it('returns false for a template with a formatted placeholder', () => {
+    expect(hasNoPlaceholders('Order {OrderId:D8} shipped')).toBe(false);
+  });
+
+  it('returns false for a template with a destructured placeholder', () => {
+    expect(hasNoPlaceholders('User {@User} signed in')).toBe(false);
+  });
+
+  it('returns true for a template with no placeholders', () => {
+    expect(hasNoPlaceholders('Failed to authenticate angelo@example.com')).toBe(true);
+  });
+
+  it('returns true for a plain message', () => {
+    expect(hasNoPlaceholders('Cache warm')).toBe(true);
+  });
+
+  it('returns true when only escaped braces are present', () => {
+    expect(hasNoPlaceholders('Progress at 50%% done {{literal}}')).toBe(true);
+  });
+
+  it('returns false when a real placeholder accompanies escaped braces', () => {
+    expect(hasNoPlaceholders('Mixed {{escaped}} and {Real}')).toBe(false);
+  });
+
+  it('returns true for empty {} braces - not a named hole', () => {
+    expect(hasNoPlaceholders('Empty {} braces')).toBe(true);
+  });
+
+  it("returns false for ''", () => {
+    expect(hasNoPlaceholders('')).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(hasNoPlaceholders(undefined)).toBe(false);
   });
 });
 

@@ -14,13 +14,23 @@ public sealed class EventPipeCollector : IDisposable
 {
     private readonly int _pid;
     private readonly IMetricStore _store;
+    private readonly ILogStore? _logStore;
+
+    // LogMessageParser is not thread-safe and does not need to be: EventPipe delivers
+    // callbacks serialized on the processing thread, and one collector owns one parser.
+    private readonly LogMessageParser _parser = new();
     private CancellationTokenSource? _cts;
     private Task? _collectionTask;
 
-    public EventPipeCollector(int pid, IMetricStore store)
+    // logStore is an APPENDED optional parameter, so every existing call site compiles
+    // unchanged. When it is null the logging provider is not enabled at all - collecting
+    // Microsoft-Extensions-Logging at Verbose serializes every log event in the target
+    // process, and `metrics`/`query`/`watch` must not silently pay that cost.
+    public EventPipeCollector(int pid, IMetricStore store, ILogStore? logStore = null)
     {
         _pid = pid;
         _store = store;
+        _logStore = logStore;
     }
 
     public void Start(CancellationToken ct)
@@ -72,6 +82,14 @@ public sealed class EventPipeCollector : IDisposable
                 })
         };
 
+        // JsonMessage only (keyword 8) - it already carries the formatted text, so
+        // enabling FormattedMessage as well would deliver every log twice.
+        if (_logStore is not null)
+        {
+            providers = [.. providers,
+                new EventPipeProvider("Microsoft-Extensions-Logging", EventLevel.Verbose, 8)];
+        }
+
         EventPipeSession? session = null;
         try
         {
@@ -101,6 +119,19 @@ public sealed class EventPipeCollector : IDisposable
                     catch (Exception ex)
                     {
                         Console.Error.WriteLine($"EventCounters parse failed: {ex.Message}");
+                    }
+                    return;
+                }
+
+                if (eventName == "MessageJson")
+                {
+                    try
+                    {
+                        IngestLogMessage(traceEvent);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"MessageJson parse failed: {ex.Message}");
                     }
                     return;
                 }
@@ -156,6 +187,65 @@ public sealed class EventPipeCollector : IDisposable
         {
             session?.Dispose();
         }
+    }
+
+    private void IngestLogMessage(TraceEvent traceEvent)
+    {
+        if (_logStore is null) return;
+
+        var payloadNames = traceEvent.PayloadNames;
+        if (payloadNames == null) return;
+
+        string? category = null;
+        string? formattedMessage = null;
+        string? exceptionJson = null;
+        string? argumentsJson = null;
+        string? activityTraceId = null;
+        string? activitySpanId = null;
+        int level = -1;
+        int eventId = 0;
+
+        for (int i = 0; i < payloadNames.Length; i++)
+        {
+            switch (payloadNames[i])
+            {
+                case "LoggerName":
+                    category = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "Level":
+                    level = EventPipeLogPayload.ToInt32(traceEvent.PayloadValue(i), -1);
+                    break;
+                case "EventId":
+                    eventId = EventPipeLogPayload.ToInt32(traceEvent.PayloadValue(i), 0);
+                    break;
+                case "FormattedMessage":
+                    formattedMessage = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "ExceptionJson":
+                    exceptionJson = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "ArgumentsJson":
+                    argumentsJson = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "ActivityTraceId":
+                    activityTraceId = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+                case "ActivitySpanId":
+                    activitySpanId = traceEvent.PayloadValue(i)?.ToString();
+                    break;
+            }
+        }
+
+        if (category == null || formattedMessage == null) return;
+        // Observed range is 0..5 (Trace..Critical), matching LoomLogLevel's ordering.
+        if (level < 0 || level > 5) return;
+
+        var record = EventPipeLogPayload.BuildLogRecord(
+            _parser, formattedMessage, category, level,
+            traceEvent.TimeStamp.ToUniversalTime().Ticks, eventId,
+            exceptionJson, argumentsJson, activityTraceId, activitySpanId);
+
+        _logStore.Write(in record);
     }
 
     private void IngestEventCounters(TraceEvent traceEvent)

@@ -38,6 +38,12 @@ switch (args)
     case ["query", var pidArg, ..] when int.TryParse(pidArg, out var queryPid) && args.Length >= 3:
         await QueryCommand.RunAsync(queryPid, string.Join(" ", args[2..]), cts.Token);
         break;
+    case ["logs", var pidArg, ..] when int.TryParse(pidArg, out var logsPid):
+        await LogsCommand.RunAsync(logsPid, args[2..], cts.Token);
+        break;
+    case ["search", var pidArg, var queryArg, ..] when int.TryParse(pidArg, out var searchPid):
+        await SearchCommand.RunAsync(searchPid, queryArg, args[3..], cts.Token);
+        break;
     case ["metrics", var pidArg] when int.TryParse(pidArg, out var metricsPid):
         await MetricsCommand.RunAsync(metricsPid, null, cts.Token);
         break;
@@ -56,5 +62,7 @@ switch (args)
         Console.WriteLine("  loom metrics <pid> [cpu|memory|thread]  Show formatted metrics");
         Console.WriteLine("  loom metrics <pid> --live               Live-refreshing terminal dashboard (requires an interactive terminal)");
         Console.WriteLine("  loom query <pid> \"SELECT...\"            Execute LoomQL query");
+        Console.WriteLine("  loom logs <pid> [--count N] [--category X] [--seconds N]   Show recent captured logs");
+        Console.WriteLine("  loom search <pid> \"<query>\" [--max N] [--seconds N]        BM25 search over captured logs");
         break;
 }

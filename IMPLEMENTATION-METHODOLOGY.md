@@ -5162,156 +5162,544 @@ Ready for Phase 14 (Security Hardening)? [Y/N]
 
 # PHASE 14: Security Hardening
 
-**Duration:** 3-4 days
-**Goal:** Manual JWT (HS256), HTTPS enforcement, strict CORS, security headers, plus the new-in-this-platform surfaces: query-parser input safety and alert-webhook destination validation.
-**AOT-compatibility note (ADR-3):** Manual `System.Security.Cryptography.HMACSHA256`-based JWT — not `System.IdentityModel.Tokens.Jwt` or `Microsoft.AspNetCore.Authentication.JwtBearer`, both of which use reflection for claim deserialization, `TypeDescriptor` for validation, and assembly scanning for scheme discovery. `Span<byte>`/`stackalloc` throughout for zero-allocation token parsing.
+**Duration:** 4-6 days (revised up from 3-4; see 14.0.3)
+**Goal:** Authenticate every data-bearing endpoint on **both** HTTP hosts, on top of the
+transport hardening and query-input safety already shipped.
 
-## Step 14.1: Manual JWT (ADR-3)
+> **Status banner — revised 2026-08-28.** This section was rewritten after the original
+> was found to be under-specified and, in one place, provably wrong. Three things
+> changed:
+>
+> 1. **The original Step 14.1 code does not work.** Its `TryBase64UrlDecode` delegates to
+>    `Convert.TryFromBase64Chars`, which rejects base64url. Measured on .NET 10.0.11:
+>    `Convert.TryFromBase64Chars("----Pn8")` returns **`False`, 0 bytes written**, while
+>    `System.Buffers.Text.Base64Url.TryDecodeFromChars` returns `True`, 5 bytes, correct
+>    round-trip. Any JWT whose signature contains `-` or `_` — roughly all of them —
+>    would have failed validation. `ExtractSubjectClaim` also returned `default`
+>    unconditionally, and no expiry, no `nbf`, and **no `alg` header check** existed.
+> 2. **Phase 14 was scoped to `Loom.Web.Api` only.** `Loom.Dashboard` is a second,
+>    larger HTTP host (~25 endpoints, including `/api/logs/*`, `/api/logs/explain`,
+>    `/ws/logs`, `/prometheus`) and is the host operators actually run. Securing one and
+>    not the other is a full bypass. Both are now in scope.
+> 3. **The scope decisions are now recorded** (14.0.1) instead of being carried as an
+>    inference in a handoff file.
 
-**File:** `Loom.Web.Api/Security/JwtValidator.cs`
+**AOT-compatibility note (ADR-3):** Manual `HMACSHA256`-based JWT — not
+`System.IdentityModel.Tokens.Jwt` or `Microsoft.AspNetCore.Authentication.JwtBearer`,
+both of which use reflection for claim deserialization, `TypeDescriptor` for validation,
+and assembly scanning for scheme discovery. `Span<byte>`/`stackalloc` throughout.
+
+---
+
+## Step 14.0: Scope, Threat Model, and Status
+
+### 14.0.1 Resolved scope decisions
+
+Decided by the user on 2026-08-28. These are settled; do not re-open them.
+
+| # | Decision | Chosen | Consequence |
+|---|---|---|---|
+| 1 | Token issuance | **Interactive login** — `POST /api/token` exchanges username + password for a JWT | Requires a credential store, a password KDF, and a login UI. No user database — see 14.1.1. |
+| 2 | Protection scope | **Everything protected, no exceptions** | Prometheus scraping breaks until its scrape job carries a token. See 14.0.2 for the two mechanically-forced carve-outs. |
+| 3 | WebSocket carrier | **`Sec-WebSocket-Protocol`** | Token never appears in a URL, access log, or `Referer`. |
+
+### 14.0.2 Two carve-outs forced by mechanics, not by preference
+
+Decision 2 says "no exceptions." Two endpoints cannot honour it, for reasons that are
+structural rather than discretionary. Both are called out here so they are visible as
+accepted exposure rather than discovered later as oversights.
+
+- **`POST /api/token`** — it is the credential exchange. Requiring a token to obtain a
+  token is not satisfiable.
+- **The SPA shell and its static assets** (`Loom.Dashboard`'s `MapSpaFallback` /
+  `MapFallback`) — the browser must load the login page *before* a token exists. These
+  routes serve only the Angular bundle from `ManifestEmbeddedFileProvider`; they expose
+  no telemetry. Every `/api/*` and `/ws/*` route behind them is protected.
+
+`/prometheus` and `/metrics` **are** protected, per decision 2. This has a real
+operational cost — see 14.7.3, which carries the one item still needing your sign-off.
+
+### 14.0.3 What is already done
+
+Shipped in `7f147e1` and `289422b`, verified in source at `289422b`:
+
+- HSTS + HTTPS redirection under `!IsDevelopment()` (`Loom.Web.Api/Program.cs`)
+- Opt-in strict CORS via `LOOM_CORS_ORIGINS`; no policy registered when unset, so the
+  browser's same-origin default applies. No wildcard branch exists.
+- Security headers: `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+  `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`
+- Kestrel limits: `AddServerHeader=false`, 1 MB body, 8 KB request line, 1000 connections
+- Query input safety: `QueryParser.MaxQueryLength = 4096` bounded off a null-safe span,
+  and the `int.TryParse` guard on `LIMIT` at `QueryParser.cs:86`
+
+**Still to build:** everything in 14.1 through 14.7.
+
+### 14.0.4 Threat model
+
+What this phase defends against, stated plainly so the design can be judged against it:
+
+- **In scope.** An unauthenticated party who can reach the listening port reads captured
+  telemetry and application logs, or writes fabricated metrics via
+  `POST /api/metrics/ingest`. Today every endpoint on both hosts is anonymous, so this
+  requires no attack — only reachability.
+- **In scope.** Credential brute-force against the new login endpoint (14.1.5).
+- **In scope.** JWT algorithm confusion and `alg: none` forgery (14.1.4).
+- **Out of scope, by design.** An attacker with local code execution as the `loomd` user.
+  They can read `jwt.key` directly; no token scheme survives that.
+- **Out of scope, unchanged from today.** Both hosts bind loopback
+  (`options.ListenLocalhost(port)` in `Loom.Dashboard/Program.cs:104`), so remote access
+  already requires an SSH tunnel. Authentication is defence in depth on top of that, not
+  a replacement for it — do not relax the loopback bind because auth now exists.
+
+---
+
+## Step 14.1: Authentication
+
+### 14.1.1 Where credentials live
+
+No database, no `IdentityDbContext`, no ORM — all three would drag reflection into an AOT
+binary. Users live in a flat file, parsed once at startup into a frozen array.
+
+**File:** `LOOM_AUTH_USERS_FILE`, default `/var/secrets/loom/users` (mode `400`,
+`root:loomd`, alongside `jwt.key`).
+
+```
+# comment lines and blanks are skipped
+operator:pbkdf2-sha256$600000$<base64url-salt>$<base64url-hash>
+```
+
+Rules:
+
+- Parsed once at startup. A malformed line is a **startup failure**, not a skipped line —
+  a typo must not silently remove an account.
+- Empty or missing file with auth enabled is a **startup failure**. Fail closed.
+- Username comparison is `StringComparison.Ordinal`.
+- **An unknown username still runs a full PBKDF2 verification against a fixed dummy
+  record before returning failure.** Without this, "no such user" returns in
+  microseconds while "wrong password" takes ~74 ms, and the endpoint becomes a user
+  enumeration oracle.
+
+### 14.1.2 Password KDF
+
+`Rfc2898DeriveBytes.Pbkdf2` — a static method in `System.Security.Cryptography`, no
+reflection, AOT-clean. Argon2 is deliberately **not** used: it is not in the BCL, and the
+available packages would add a dependency with unverified AOT behaviour to satisfy a
+threat this deployment does not face.
+
+| Parameter | Value |
+|---|---|
+| Algorithm | PBKDF2-HMAC-SHA256 |
+| Iterations | 600,000 (OWASP guidance for SHA-256) |
+| Salt | 16 bytes from `RandomNumberGenerator.Fill` |
+| Output | 32 bytes |
+
+**Measured on this machine, .NET 10.0.11: 74 ms per derivation.** That figure is load-
+bearing in two directions — it is an acceptable one-off login cost, and it caps offline
+brute-force throughput at roughly 13 guesses/second/core, which is why the throttle in
+14.1.5 is defence in depth rather than the primary control.
+
+Comparison uses `CryptographicOperations.FixedTimeEquals`. Never `SequenceEqual`.
+
+### 14.1.3 Token format
+
+```
+Header   {"alg":"HS256","typ":"JWT"}
+Payload  {"sub":"operator","iss":"loom","iat":<unix>,"exp":<unix>}
+```
+
+- **TTL 60 minutes.** Absolute session lifetime 12 hours, enforced from `iat` — after
+  that, refresh stops working and the operator logs in again.
+- **Clock skew leeway: 60 seconds** on `exp` and `nbf`.
+- Stateless. No server-side token store, no revocation list. Rotating `jwt.key`
+  invalidates every outstanding token at once, which is the intended revocation lever
+  for a single-operator diagnostic tool.
+
+`JwtHeader` and `JwtClaims` are DTOs in **`Loom.Web.Contracts`** and **must** be
+registered in `LoomJsonSerializerContext` like every other DTO. `TokenRequest` and
+`TokenResponse` go there too.
+
+### 14.1.4 `JwtValidator` — corrected
+
+**New project: `Loom.Security`.** Both hosts need this code and neither may depend on
+the other. `Loom.Web.Contracts` is not the home for it — that project holds DTOs and
+must keep its "no project references" property. `Loom.Security` references
+`Loom.Web.Contracts` only, and is added to `Loom.slnx` as the 14th project.
+
+**File:** `Loom.Security/JwtValidator.cs`
 
 ```csharp
+using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using Loom.Web.Contracts;
+using Loom.Web.Contracts.Dtos;
 
-namespace Loom.Web.Api.Security;
+namespace Loom.Security;
 
-/// <summary>HS256 JWT validation using Span<byte>/stackalloc — no reflection-based
-/// claim deserialization, no TypeDescriptor, no assembly-scanned auth schemes.</summary>
-public sealed class JwtValidator(byte[] secret)
+public enum JwtFailure { None, Malformed, BadAlgorithm, BadSignature, Expired, NotYetValid, SessionExpired }
+
+/// <summary>HS256 validation. No reflection, no TypeDescriptor, no assembly-scanned
+/// auth schemes. Signature work is stack-allocated; the single unavoidable heap
+/// allocation is the UTF-8 byte copy of the signing input.</summary>
+public sealed class JwtValidator(byte[] secret, TimeProvider clock)
 {
-    public bool TryValidate(ReadOnlySpan<char> token, out ReadOnlySpan<char> subject)
+    private const int SignatureBytes = 32;              // HMAC-SHA256 is always 32
+    private const int SkewSeconds = 60;
+    private const int AbsoluteSessionSeconds = 12 * 60 * 60;
+
+    public JwtFailure Validate(ReadOnlySpan<char> token, out string? subject)
     {
-        subject = default;
+        subject = null;
+
         var firstDot = token.IndexOf('.');
+        if (firstDot < 0) return JwtFailure.Malformed;
         var lastDot = token.LastIndexOf('.');
-        if (firstDot < 0 || lastDot <= firstDot) return false;
+        if (lastDot <= firstDot) return JwtFailure.Malformed;
 
-        var headerAndPayload = token[..lastDot];
-        var signatureBase64Url = token[(lastDot + 1)..];
+        var signingInput = token[..lastDot];
+        var headerSpan = token[..firstDot];
+        var payloadSpan = token[(firstDot + 1)..lastDot];
+        var signatureSpan = token[(lastDot + 1)..];
 
-        Span<byte> computedSignature = stackalloc byte[32]; // HMAC-SHA256 output is always 32 bytes
-        var payloadBytes = Encoding.UTF8.GetBytes(headerAndPayload.ToString()); // one allocation: HMACSHA256.TryHashData needs byte[] or Span<byte> source
-        if (!HMACSHA256.TryHashData(secret, payloadBytes, computedSignature, out _)) return false;
-
-        Span<byte> providedSignature = stackalloc byte[32];
-        if (!TryBase64UrlDecode(signatureBase64Url, providedSignature, out _)) return false;
-
-        if (!CryptographicOperations.FixedTimeEquals(computedSignature, providedSignature)) return false;
-
-        // Payload claim extraction (subject, expiry) via System.Text.Json source-generated
-        // parsing against a small closed JwtClaims DTO — same JsonContext discipline as
-        // every other DTO in this platform, not reproduced in full here.
-        subject = ExtractSubjectClaim(token[(firstDot + 1)..lastDot]);
-        return true;
-    }
-
-    private static bool TryBase64UrlDecode(ReadOnlySpan<char> input, Span<byte> destination, out int written)
-    {
-        // Base64Url differs from Base64 by character set (- and _ instead of + and /)
-        // and no padding — a small, allocation-free translation, not shown in full here.
-        written = 0;
-        return Convert.TryFromBase64Chars(input, destination, out written);
-    }
-
-    private static ReadOnlySpan<char> ExtractSubjectClaim(ReadOnlySpan<char> base64UrlPayload) => default; // mechanical follow-up
-}
-```
-
-**Explanation (ELI5):**
-> `CryptographicOperations.FixedTimeEquals` compares two byte spans in constant time regardless of where they first differ — an ordinary `==`/`SequenceEqual` comparison can leak timing information an attacker could use to guess a signature byte-by-byte (a timing side-channel attack). This is the standard defense and costs nothing extra to use correctly. The `Encoding.UTF8.GetBytes` call is the one unavoidable allocation in this method (`HMACSHA256.TryHashData` needs its source as bytes) — flagged rather than claimed as fully zero-allocation, since JWT validation happens once per request, not in the same per-message hot path as Phase 4's WebSocket streaming, so this trade-off is acceptable here specifically.
-
-## Step 14.2: HTTPS, CORS, Security Headers
-
-**File:** `Loom.Web.Api/Program.cs` — add near the top, before endpoint mapping:
-
-```csharp
-if (app.Environment.IsProduction())
-{
-    app.UseHsts();
-    app.Use(async (context, next) =>
-    {
-        if (!context.Request.IsHttps)
+        // 1. Header FIRST. An attacker controls this; `alg: none` and algorithm
+        //    confusion are only stopped by refusing anything that is not exactly HS256,
+        //    before a signature is computed.
+        Span<byte> headerBytes = stackalloc byte[256];
+        if (!Base64Url.TryDecodeFromChars(headerSpan, headerBytes, out var headerWritten))
+            return JwtFailure.Malformed;
+        JwtHeader? header;
+        try
         {
-            context.Response.Redirect($"https://{context.Request.Host}{context.Request.Path}", permanent: true);
-            return;
+            header = JsonSerializer.Deserialize(headerBytes[..headerWritten],
+                LoomJsonSerializerContext.Default.JwtHeader);
         }
-        await next();
-    });
+        catch (JsonException) { return JwtFailure.Malformed; }
+        if (header is null || !string.Equals(header.Alg, "HS256", StringComparison.Ordinal))
+            return JwtFailure.BadAlgorithm;
+
+        // 2. Signature. Base64Url, NOT Convert.TryFromBase64Chars - that call returns
+        //    false on any base64url input containing '-' or '_' (measured).
+        Span<byte> provided = stackalloc byte[SignatureBytes];
+        if (!Base64Url.TryDecodeFromChars(signatureSpan, provided, out var sigWritten)
+            || sigWritten != SignatureBytes)
+            return JwtFailure.BadSignature;
+
+        var signingBytes = Encoding.UTF8.GetBytes(signingInput.ToString()); // the one allocation
+        Span<byte> computed = stackalloc byte[SignatureBytes];
+        HMACSHA256.HashData(secret, signingBytes, computed);
+        if (!CryptographicOperations.FixedTimeEquals(computed, provided))
+            return JwtFailure.BadSignature;
+
+        // 3. Claims - only after the signature is trusted.
+        Span<byte> payloadBytes = stackalloc byte[512];
+        if (!Base64Url.TryDecodeFromChars(payloadSpan, payloadBytes, out var payloadWritten))
+            return JwtFailure.Malformed;
+        JwtClaims? claims;
+        try
+        {
+            claims = JsonSerializer.Deserialize(payloadBytes[..payloadWritten],
+                LoomJsonSerializerContext.Default.JwtClaims);
+        }
+        catch (JsonException) { return JwtFailure.Malformed; }
+        if (claims is null || string.IsNullOrEmpty(claims.Sub)) return JwtFailure.Malformed;
+
+        var now = clock.GetUtcNow().ToUnixTimeSeconds();
+        if (now > claims.Exp + SkewSeconds) return JwtFailure.Expired;
+        if (claims.Nbf > 0 && now + SkewSeconds < claims.Nbf) return JwtFailure.NotYetValid;
+        if (now > claims.Iat + AbsoluteSessionSeconds) return JwtFailure.SessionExpired;
+
+        subject = claims.Sub;
+        return JwtFailure.None;
+    }
 }
-
-app.UseCors(policy => policy
-    .WithOrigins(app.Configuration.GetSection("Loom:Cors:AllowedOrigins").Get<string[]>() ?? [])
-    .WithMethods("GET", "POST", "PUT")
-    .WithHeaders("Content-Type", "Authorization"));
-
-app.Use(async (context, next) =>
-{
-    context.Response.Headers.Append("X-Frame-Options", "DENY");
-    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
-    context.Response.Headers.Append("Content-Security-Policy", "default-src 'self'");
-    await next();
-});
 ```
 
-**Explanation (ELI5):**
-> `WithOrigins(...Get<string[]>() ?? [])` defaults to an **empty** allow-list, not a wildcard, if the config section is missing — a strict whitelist fails closed (nothing is allowed) rather than failing open (everything is allowed), which matters because a missing config value under `CORS misconfiguration` is exactly the Risk Register's own "MEDIUM" entry for this area.
+Four notes on why this differs from the original:
 
-## Step 14.3: Query Parser Input Safety (New Surface — Risk Register: "Query parser injection attacks")
+- **`Base64Url` over `Convert`** — the original was measurably broken. See the status
+  banner.
+- **Header validated before the signature is computed** — `alg` is attacker-controlled.
+- **Fixed 256/512-byte stack buffers** — a header or payload larger than that is not a
+  token this system issued, so overflow returns `Malformed` rather than growing a buffer
+  on attacker input.
+- **`TimeProvider` injected** — expiry is testable without `Thread.Sleep`.
 
-Phase 10's `QueryParser` already produces a typed `QueryAst` rather than building/executing a string-concatenated query — this is the primary mitigation the Risk Register calls out ("Parser produces typed AST; no string concatenation"), and it's already true by construction from how Phase 10 was built, not something added here. What Phase 14 adds is input-length/complexity bounding, since the tokenizer itself doesn't limit input size:
+A `JwtIssuer` in the same project mints tokens with the same key. Keep issue and validate
+adjacent; a mismatch between them is the classic source of "works locally, 401 in prod."
 
-```csharp
-app.MapPost("/api/query", async (QueryRequest request, IQueryExecutor executor, CancellationToken ct) =>
-{
-    const int maxQueryLength = 2048;
-    if (request.Query.Length > maxQueryLength)
-        return Results.Problem("Query exceeds maximum length", statusCode: 400);
+### 14.1.5 `POST /api/token`
 
-    try
-    {
-        var result = await executor.ExecuteAsync(request.Query, ct);
-        return Results.Json(result, LoomJsonSerializerContext.Default.QueryResponse);
-    }
-    catch (QuerySyntaxException ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 400);
-    }
-});
+```
+Request   {"username":"operator","password":"..."}
+200       {"token":"eyJ...","expiresIn":3600}
+401       {"error":"Invalid credentials"}          <- identical for unknown user and bad password
+429       Retry-After: <seconds>
 ```
 
-**Explanation (ELI5):**
-> An unbounded query string is a resource-exhaustion vector even for a parser that's otherwise safe from injection (a query with thousands of chained `AND` conditions or absurdly nested tokens could still cost meaningful CPU to tokenize/parse) — the length cap is a cheap, blunt guard against that, applied at the API boundary rather than inside `QueryParser` itself so the parser's own logic stays focused on grammar, not policy.
+- The 401 body and timing are **identical** for both failure modes (14.1.1).
+- **Throttle:** 5 failed attempts per remote IP per 15-minute fixed window, then 429.
+  The attempt table is a bounded dictionary — **cap 1024 entries, evict oldest on
+  insert** — so spoofed source addresses cannot grow it without limit.
+- **Honest limitation:** behind a loopback bind, every request presents as `127.0.0.1`,
+  so this degrades to a global throttle and one attacker can lock out the operator. That
+  is the correct trade for a single-operator tool, but it is a trade, not a free win.
+  The 74 ms KDF is the real brute-force control.
+- Log failures at Warning with username and source IP. **Never log the password, the
+  token, or any part of either.**
 
-## Step 14.4: Alert Webhook Destination Validation (New Surface)
+`POST /api/token/refresh` takes a currently-valid token and returns a new 60-minute one,
+subject to the 12-hour absolute cap. Stateless; no store.
 
-`NotifyWebhook`-style targets (Phase 11's `WebhookAlertTarget`) take a URL from app configuration, but that configuration could still point at an internal-network address the Loom process can reach but shouldn't be told to probe (SSRF):
+### 14.1.6 Key and credential provisioning
 
-```csharp
-// Added to WebhookAlertTarget.NotifyAsync (Phase 11), before the HTTP call
-private static bool IsAllowedWebhookHost(Uri uri, IReadOnlyList<string> allowlist) =>
-    allowlist.Any(allowed => uri.Host.Equals(allowed, StringComparison.OrdinalIgnoreCase));
-```
-
-Wire the allowlist from `appsettings.json` (`Loom:Alerting:AllowedWebhookHosts`) using the same `IOptionsMonitor`/source-generated-binder pattern established in Phase 9 — a config change here should hot-reload the same way a sampling-rule change does, without restarting the process.
-
-## Step 14.5: Verify
+**Signing key:** `LOOM_JWT_KEY_FILE`, default `/var/secrets/loom/jwt.key`, containing
+base64 of at least 32 random bytes. **Startup fails** if the file is missing, unreadable,
+or decodes to fewer than 32 bytes. There is no generated-on-the-fly fallback in any
+environment — an ephemeral dev key is exactly the kind of convenience that ships to
+production by accident.
 
 ```bash
-dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
-curl -I https://localhost:5443/api/health   # HSTS header present
-curl -I http://localhost:5080/api/health    # redirects to https
-curl -X POST https://localhost:5443/api/query -d "{\"query\":\"$(python3 -c 'print("SELECT " + "x,"*2000)')\"}"  # 400, length cap
+openssl rand -base64 32 > /var/secrets/loom/jwt.key
+chmod 400 /var/secrets/loom/jwt.key
+chown root:loomd /var/secrets/loom/jwt.key
 ```
 
-### 🔍 Checkpoint 14.1
+**Windows development** has no `/var/secrets`. Add to `Loom.DevTools`:
+
 ```
-✓ Phase 14 Complete: Security Hardening
-✓ Manual HS256 JWT (ADR-3) — Span<byte>/stackalloc, FixedTimeEquals, no reflection-based libraries
-✓ HTTPS enforcement + HSTS, strict CORS (fails closed, not open)
-✓ Security headers (CSP, X-Frame-Options, X-Content-Type-Options)
-✓ Query length cap — resource-exhaustion guard on top of Phase 10's already-safe typed-AST design
-✓ Alert webhook host allowlist — SSRF guard, hot-reloadable
+loom auth init                          # writes key + empty users file under
+                                        #   %LOCALAPPDATA%\Loom\dev-secrets\
+loom auth add-user <name>               # prompts for a password, appends a PBKDF2 line
+loom auth hash                          # prompts, prints one users-file line to stdout
+```
+
+`loom auth init` prints the two `LOOM_*` environment variables to set. It refuses to
+overwrite an existing key file.
+
+---
+
+## Step 14.2: Enforcement Middleware — Both Hosts
+
+`Loom.Security/AuthenticationMiddleware.cs`, registered by both hosts through one shared
+extension so the two pipelines cannot drift apart.
+
+- Reads `Authorization: Bearer <token>`.
+- On success, stashes the subject in `HttpContext.Items["loom.sub"]`. **No
+  `ClaimsPrincipal`, no `HttpContext.User`** — populating those pulls in the ASP.NET Core
+  authentication stack this ADR exists to avoid.
+- On failure: `401` with `WWW-Authenticate: Bearer`, and a body that names only the
+  failure class (`invalid_token` / `expired_token`), never the internal `JwtFailure`
+  value.
+- **Exemptions are an explicit allow-list in code**, not a prefix match. A path-prefix
+  exemption is how `/api/token/../logs` becomes a bypass.
+
+**`Loom.Web.Api/Program.cs` — corrected pipeline order:**
+
+```csharp
+app.UseSecurityHeaders();      // MOVED: was after UseHttpsRedirection, so 307 redirects
+                               // went out bare. Fixes the known low-severity gap.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+if (corsOrigins.Length > 0) app.UseCors();
+app.UseWebSockets(...);
+app.UseLoomAuthentication();   // NEW - after CORS so preflight OPTIONS is not 401'd
+app.MapApiEndpoints();
+```
+
+Auth sits **after** `UseCors`. A CORS preflight `OPTIONS` carries no `Authorization`
+header; rejecting it produces a browser error that looks like a CORS misconfiguration and
+costs an afternoon to diagnose.
+
+**`Loom.Dashboard`** gets the same call in the same position. Its exemption list is
+`POST /api/token`, the SPA fallback, and the embedded static assets — nothing else.
+`/api/logs/*`, `/api/logs/explain`, `/prometheus`, `/ws/logs`, and `/ws/metrics` are all
+protected.
+
+---
+
+## Step 14.3: WebSocket Authentication
+
+Browsers cannot set request headers on a WebSocket handshake. The token rides the
+subprotocol negotiation instead.
+
+**Client:**
+```ts
+new WebSocket(url, ['loom.v1', `loom.token.${token}`])
+```
+
+**Server**, before `AcceptWebSocketAsync`:
+
+```csharp
+var requested = context.WebSockets.WebSocketRequestedProtocols;
+var carrier = requested.FirstOrDefault(p => p.StartsWith("loom.token.", StringComparison.Ordinal));
+if (carrier is null || validator.Validate(carrier.AsSpan(11), out var sub) != JwtFailure.None)
+{
+    context.Response.StatusCode = 401;   // reject the handshake; do not accept then close
+    return;
+}
+await context.WebSockets.AcceptWebSocketAsync("loom.v1");   // echo the REAL subprotocol only
+```
+
+Three rules:
+
+- **Reject before accepting.** Accepting and then closing with a policy code leaks that
+  the endpoint exists and burns a connection slot.
+- **Echo `loom.v1`, never the token subprotocol.** Echoing it back puts the credential in
+  the response headers.
+- Applies to `/ws/metrics` on both hosts and `/ws/logs` on the Dashboard.
+
+**Known gap, accepted:** the token is validated at handshake only. A connection opened at
+minute 59 survives past token expiry for as long as it stays open. Bounding that needs
+per-message re-validation or a server-side connection registry; both are more machinery
+than a loopback-bound diagnostic socket warrants. Recorded here so it is a decision, not
+an omission.
+
+---
+
+## Step 14.4: Transport Hardening — DONE
+
+Shipped; see 14.0.3. The only change is the middleware **ordering fix** in 14.2.
+
+The original text here specified `app.Configuration.GetSection("Loom:Cors:AllowedOrigins").Get<string[]>()`.
+The shipped implementation uses the `LOOM_CORS_ORIGINS` environment variable instead:
+`IConfiguration.Get<T>()` binds by reflection, which `CreateSlimBuilder` does not root and
+the trimmer may remove. The shipped form is correct; this text is corrected to match.
+
+---
+
+## Step 14.5: Query Parser Input Safety — DONE
+
+Shipped in `7f147e1` / `289422b`. Two deviations from the original text, both deliberate:
+
+- **The cap is 4096, not 2048, and lives in `QueryParser` itself**, not at the endpoint.
+  The endpoint is not the only caller — `Loom.DevTools` and `Loom.Dashboard` both parse
+  queries — so a bound at one endpoint left the other paths unguarded.
+- **The bound is taken off `queryText.AsSpan()`**, because `AsSpan()` is null-safe and
+  `.Length` on a null string throws. `QueryRequest.Query` can be null: `required` demands
+  only that the JSON property be *present*, not non-null.
+
+Also fixed here: `int.Parse` on `LIMIT` threw `FormatException` / `OverflowException`,
+neither of which is a `QuerySyntaxException`, so both escaped as unhandled 500s on
+unauthenticated input.
+
+---
+
+## Step 14.6: Alert Webhook Validation — OUT OF SCOPE
+
+The original text framed this as SSRF mitigation. It is not: the URL comes from
+`LOOM_ALERT_WEBHOOK_URL`, set by the operator, not supplied by an attacker. An operator
+who can set that variable can already reach the network directly. An allow-list here adds
+configuration surface and blocks nothing. Revisit only if webhook destinations ever
+become user-supplied through the API.
+
+---
+
+## Step 14.7: Client Updates
+
+Auth is not shippable without these. A grep of every `.cs` and `.ts` outside
+`obj`/`bin`/`node_modules` for `Authorization|Bearer|jwt|LOOM_TOKEN` returns **zero
+hits** — no client sends a token today, so enforcement breaks all three at once.
+
+### 14.7.1 Angular (`Loom.Web.Frontend`)
+
+- Login component posting to `/api/token`.
+- An `HttpInterceptor` attaching `Authorization: Bearer`, and routing any 401 back to
+  login.
+- WebSocket construction updated to the subprotocol form in 14.3.
+- A refresh timer firing at ~50 minutes.
+- **Token storage: `sessionStorage`.** In-memory-only would force a re-login on every
+  page refresh, which operators will work around by writing the token somewhere worse.
+  `sessionStorage` is readable by injected script, so this is a real XSS exposure —
+  acceptable because the Dashboard serves only its own embedded bundle with no
+  user-generated HTML, and unacceptable the moment that stops being true.
+
+### 14.7.2 `Loom.DevTools`
+
+`loom logs` and `loom search` call the Dashboard API. Both need `--token`, falling back to
+the `LOOM_TOKEN` environment variable, with a clear error when neither is present.
+
+### 14.7.3 Prometheus — **needs your sign-off**
+
+Decision 2 protects `/metrics` and `/prometheus`. Prometheus authenticates with a static
+`bearer_token_file` and **cannot refresh a JWT**, so a 60-minute token breaks scraping an
+hour after every login.
+
+Recommended resolution: a **service token** — a long-lived, non-interactive token minted
+by the operator, `sub: prometheus`, TTL measured in months, exempt from the 12-hour
+absolute cap by carrying no `iat` ceiling.
+
+```
+loom auth token --sub prometheus --ttl 365d > /var/secrets/loom/prometheus.token
+```
+
+```yaml
+scrape_configs:
+  - job_name: loom
+    authorization:
+      type: Bearer
+      credentials_file: /var/secrets/loom/prometheus.token
+```
+
+This reintroduces operator-minted tokens as a **service** path alongside interactive
+login. It is a genuine widening of decision 1 and is written here as a proposal, not as a
+settled design. The alternative is to accept that Prometheus scraping does not work while
+Phase 14 is on. **Confirm before this is built.**
+
+---
+
+## Step 14.8: Verification
+
+```powershell
+dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
+dotnet test Loom.slnx -c Debug          # baseline 509 passing before this phase
+dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r win-x64
+```
+
+**Binary size.** 14.784 MB at `289422b` against a 17 MB hard limit — **2.216 MB of
+headroom**. `Loom.Security` adds PBKDF2, HMAC, and two more source-generated DTOs. Measure
+after; do not assume.
+
+```powershell
+Get-ChildItem Loom.Web.Api/bin/Release/net10.0/win-x64/publish/ -Filter *.exe |
+  Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
+```
+
+**Correction to the original verification block:** it curled `https://localhost:5443/api/health`
+against `Loom.Web.Api`. **That host has no health endpoint** — `/api/health` exists only
+in `Loom.Dashboard` (`EndpointExtensions.cs:51`). Probe a real route.
+
+Required test coverage in `Loom.Telemetry.Tests`:
+
+| Area | Cases |
+|---|---|
+| `JwtValidator` | valid; expired; not-yet-valid; past 12-hour absolute cap; tampered payload; tampered signature; `alg: none`; `alg: RS256`; missing/extra dots; empty token; oversized header; oversized payload; base64url signature containing `-` and `_` (the regression the original code failed) |
+| `JwtIssuer` | round-trips through `JwtValidator`; honours TTL |
+| Credentials | correct password; wrong password; unknown user; malformed users line fails startup; missing file fails startup |
+| Timing | unknown-user and wrong-password paths both perform a KDF derivation |
+| Throttle | 6th attempt returns 429; window expiry resets; dictionary stays at its 1024 cap |
+| Middleware | each exempt route reachable anonymously; a representative protected route on **each host** returns 401 |
+| WebSocket | handshake without carrier → 401; with expired token → 401; accepted response echoes `loom.v1` and not the token |
+
+Use `TimeProvider` / `FakeTimeProvider` for every expiry test. No `Thread.Sleep`.
+
+### Checkpoint 14.1
+
+```
+Phase 14 Complete: Security Hardening
+  Manual HS256 JWT - Base64Url decode, alg pinned to HS256, exp/nbf/absolute-cap
+    enforced, FixedTimeEquals, no reflection-based libraries
+  Interactive login at POST /api/token; PBKDF2-SHA256 600k, uniform failure timing
+  Enforcement on BOTH hosts through one shared middleware
+  WebSocket auth via Sec-WebSocket-Protocol on /ws/metrics and /ws/logs
+  HTTPS + HSTS, strict CORS, security headers - headers now emitted on redirects too
+  Query length cap and LIMIT parse guard (shipped earlier in the phase)
+  Angular login + interceptor; loom CLI --token; Prometheus service token
+  Binary size re-measured against the 17 MB limit
+  Test suite green, above the 509 baseline
 
 Ready for Phase 15 (Production Build & Deployment)? [Y/N]
 ```

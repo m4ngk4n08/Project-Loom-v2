@@ -410,6 +410,30 @@ of keys. It becomes a real cost if multiple rows ever expand at once, or if payl
 
 ---
 
+### 4.7 Security Headers Absent on Production Redirects 🟢 LOW
+
+**Location:** `Loom.Web.Api/Program.cs` — the header middleware is registered *after*
+`app.UseHttpsRedirection()`.
+
+`UseHttpsRedirection` short-circuits the pipeline: it writes a 307 and returns without
+calling `next()`. The header middleware sits downstream of it, so it never runs for a
+redirect. Every plain-HTTP request in Production therefore receives a response carrying
+no `X-Content-Type-Options`, no `X-Frame-Options`, no CSP, and no `Referrer-Policy`.
+
+**Not urgent because:** the redirect body is empty and the `Location` header is the only
+thing a client acts on, and both hosts bind loopback. It matters if a browser is ever
+pointed at the HTTP port directly, since the response is then a bare document with no
+framing or sniffing protection.
+
+**Fix:** move `app.UseSecurityHeaders()` above the `UseHsts()` / `UseHttpsRedirection()`
+block so it wraps the redirect. Already specified as part of Phase 14 Step 14.2 in
+`IMPLEMENTATION-METHODOLOGY.md`; filed here so it is tracked if Phase 14 slips.
+
+**Effort:** 5 minutes
+**Priority:** 🟢 LOW
+
+---
+
 ## 5. Documentation Gaps
 
 ### 5.1 Binary Size Target Documentation 🟡 MEDIUM (COMPLETED)
@@ -907,6 +931,7 @@ notifications shipped in `3bd0d8b`), § 2.1 (Option A taken), § 4.3 and § 4.4
 
 10. 🟢 Log row `role="button"` ARIA nesting (§ 4.5) - 15-30 min
 11. 🟢 `parseArguments` runs twice per change-detection cycle (§ 4.6) - 30 min
+12. 🟢 Security headers absent on production redirects (§ 4.7) - 5 min
 
 **Total Low Priority Work:** ~18-29 hours (§ 6.4 excluded - blocked on dependencies)
 
@@ -1115,6 +1140,53 @@ to a specific root. TLS still functions in the slim build (verified by running i
 - **Phase 12 Testing Results:** `TESTING.md` § 11
 - **AOT Compliance Guidelines:** `CLAUDE.md` § Critical Architectural Constraints
 - **Binary Size Specifications:** `CLAUDE.md` § Project Overview
+
+---
+
+### 2026-08-28: Phase 14 Specified in Full Before Any Auth Code Is Written
+
+**Decision:** Resolve the three open Phase 14 scope questions, rewrite the phase in
+`IMPLEMENTATION-METHODOLOGY.md` end-to-end, and write no authentication code until that
+document is settled.
+
+**Scope answers (user, 2026-08-28):** interactive login at `POST /api/token`; every
+endpoint protected with no discretionary exceptions; WebSocket tokens carried in
+`Sec-WebSocket-Protocol`.
+
+**Rationale:**
+
+- The methodology's Step 14.1 sample was not merely abbreviated, it was **wrong**. Its
+  `TryBase64UrlDecode` called `Convert.TryFromBase64Chars`, which rejects base64url.
+  Measured on .NET 10.0.11: that call returns `False` on `"----Pn8"` where
+  `System.Buffers.Text.Base64Url.TryDecodeFromChars` returns `True` with a correct
+  round-trip. Implementing the phase as written would have produced a validator that
+  rejects nearly every real token — and would have looked like a key-mismatch bug.
+  The stub also had no `alg` check, so `alg: none` forgery was unguarded.
+- **Phase 14 was scoped to the wrong host set.** It named `Loom.Web.Api` only.
+  `Loom.Dashboard` is a second HTTP host with roughly 25 endpoints, including
+  `/api/logs/*`, `/api/logs/explain`, `/ws/logs`, and `/prometheus` — the most sensitive
+  surface in the product — and it is the host operators actually run. Shipping auth on
+  one host would have produced a complete bypass while reading as "Phase 14 complete."
+- **No client sends a token today.** A grep across every `.cs` and `.ts` outside
+  `obj`/`bin`/`node_modules` for `Authorization|Bearer|jwt|LOOM_TOKEN` returns zero hits.
+  Enforcement breaks the Angular app, `Loom.Dashboard`, and `Loom.DevTools`
+  simultaneously, so client work is part of the phase, not follow-up.
+- Writing the spec first converted four decisions that would otherwise have been invented
+  mid-implementation — credential storage, KDF choice, token lifetime, WebSocket carrier —
+  into recorded ones.
+
+**Deliberately left open:** the Prometheus service-token proposal (methodology § 14.7.3).
+Protecting `/metrics` while Prometheus can only present a static `bearer_token_file`
+forces either a long-lived service token or accepting that scraping stops. That widens
+the interactive-login decision and needs the user's confirmation, so it is written as a
+proposal rather than built.
+
+**Deliberately rejected:** the original Step 14.4 alert-webhook allowlist. The URL is
+operator-set via `LOOM_ALERT_WEBHOOK_URL`, not attacker-supplied, so it is not an SSRF
+surface. An allowlist there adds configuration and blocks nothing.
+
+**Also filed:** § 4.7, the security headers missing from Production redirects, found while
+reading the middleware order.
 
 ---
 

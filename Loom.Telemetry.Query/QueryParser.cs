@@ -9,15 +9,20 @@ public static class QueryParser
 
     public static QueryAst Parse(string queryText)
     {
+        // Take the span FIRST. string.AsSpan() is null-safe and yields an empty span,
+        // where queryText.Length throws - and QueryRequest.Query can be null, because
+        // `required` only demands that the JSON property be present, not non-null.
+        // Guarding on source.Length keeps a null query on its original path: empty span,
+        // tokenizer, QuerySyntaxException, 400.
+        var source = queryText.AsSpan();
+
         // The tokenizer has no input bound, and /api/query takes `q` straight from the
         // query string. 4096 is far above any legitimate LoomQL statement.
-        if (queryText.Length > MaxQueryLength)
+        if (source.Length > MaxQueryLength)
         {
             throw new QuerySyntaxException(
                 $"Query exceeds the maximum length of {MaxQueryLength} characters.");
         }
-
-        var source = queryText.AsSpan();
         var tokenizer = new Tokenizer(source);
         var current = tokenizer.Next();
 

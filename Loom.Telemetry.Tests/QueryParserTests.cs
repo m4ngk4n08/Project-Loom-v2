@@ -162,6 +162,12 @@ public class QueryParserTests
     }
 
     [Fact]
+    public void Parser_NullQuery_ThrowsSyntaxException_NotNullReference()
+    {
+        Assert.Throws<QuerySyntaxException>(() => QueryParser.Parse(null!));
+    }
+
+    [Fact]
     public void Parser_ParsesComplexQuery()
     {
         var query = "SELECT method, AVG(duration) FROM telemetry WHERE method = 'test' AND duration > 100 GROUP BY method ORDER BY AVG(duration) DESC LIMIT 10";

@@ -137,6 +137,31 @@ public class QueryParserTests
     }
 
     [Fact]
+    public void Parser_ThrowsQuerySyntaxException_ForNonNumericLimit()
+    {
+        var query = "SELECT method FROM telemetry LIMIT abc";
+
+        Assert.Throws<QuerySyntaxException>(() => QueryParser.Parse(query));
+    }
+
+    [Fact]
+    public void Parser_ThrowsQuerySyntaxException_ForOverflowingLimit()
+    {
+        var query = "SELECT method FROM telemetry LIMIT 99999999999";
+
+        Assert.Throws<QuerySyntaxException>(() => QueryParser.Parse(query));
+    }
+
+    [Fact]
+    public void Parser_ThrowsQuerySyntaxException_ForOverLengthQuery()
+    {
+        var query = "SELECT method FROM telemetry WHERE method = '"
+            + new string('a', QueryParser.MaxQueryLength) + "'";
+
+        Assert.Throws<QuerySyntaxException>(() => QueryParser.Parse(query));
+    }
+
+    [Fact]
     public void Parser_ParsesComplexQuery()
     {
         var query = "SELECT method, AVG(duration) FROM telemetry WHERE method = 'test' AND duration > 100 GROUP BY method ORDER BY AVG(duration) DESC LIMIT 10";

@@ -5,8 +5,18 @@ namespace Loom.Telemetry.Query;
 /// a fixed, known set (the Tokenizer's Keywords array).</summary>
 public static class QueryParser
 {
+    public const int MaxQueryLength = 4096;
+
     public static QueryAst Parse(string queryText)
     {
+        // The tokenizer has no input bound, and /api/query takes `q` straight from the
+        // query string. 4096 is far above any legitimate LoomQL statement.
+        if (queryText.Length > MaxQueryLength)
+        {
+            throw new QuerySyntaxException(
+                $"Query exceeds the maximum length of {MaxQueryLength} characters.");
+        }
+
         var source = queryText.AsSpan();
         var tokenizer = new Tokenizer(source);
         var current = tokenizer.Next();
@@ -64,7 +74,16 @@ public static class QueryParser
         if (IsKeyword(current, source, "LIMIT"))
         {
             current = tokenizer.Next();
-            limit = int.Parse(current.Slice(source));
+            // int.Parse here threw FormatException on "LIMIT abc" and OverflowException
+            // on "LIMIT 99999999999". Neither is a QuerySyntaxException, so both escaped
+            // /api/query's catch as an unhandled 500 on user-controlled input. Malformed
+            // input is a syntax error and must be reported as one.
+            if (!int.TryParse(current.Slice(source), out var parsedLimit))
+            {
+                throw new QuerySyntaxException(
+                    $"LIMIT expects an integer but found '{current.Slice(source)}' at position {current.Start}");
+            }
+            limit = parsedLimit;
         }
 
         return new QueryAst(columns, conditions, groupBy, orderBy, descending, limit);

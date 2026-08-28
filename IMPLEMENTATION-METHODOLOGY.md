@@ -5246,6 +5246,11 @@ What this phase defends against, stated plainly so the design can be judged agai
 - **In scope.** JWT algorithm confusion and `alg: none` forgery (14.1.4).
 - **Out of scope, by design.** An attacker with local code execution as the `loomd` user.
   They can read `jwt.key` directly; no token scheme survives that.
+- **Out of scope for JWT, governed by the OS instead.** `Loom.DevTools` attaches to target
+  processes over the .NET diagnostic IPC channel and has no network surface at all, so no
+  token applies to it. Its authorization boundary is the OS user that owns the target
+  process — which is why the "never run `loom` elevated" rule in 14.7.2 is a security
+  control, not a style preference.
 - **Out of scope, unchanged from today.** Both hosts bind loopback
   (`options.ListenLocalhost(port)` in `Loom.Dashboard/Program.cs:104`), so remote access
   already requires an SSH tunnel. Authentication is defence in depth on top of that, not
@@ -5305,9 +5310,15 @@ Comparison uses `CryptographicOperations.FixedTimeEquals`. Never `SequenceEqual`
 ```
 Header   {"alg":"HS256","typ":"JWT"}
 Payload  {"sub":"operator","iss":"loom","iat":<unix>,"exp":<unix>}
+Payload  {"sub":"prometheus","iss":"loom","scope":"metrics","iat":<unix>,"exp":<unix>}
 ```
 
-- **TTL 60 minutes.** Absolute session lifetime 12 hours, enforced from `iat` — after
+- **`scope` is optional and defaults to full operator authority when absent.** The only
+  defined value is `metrics`, which restricts a token to the two scrape routes
+  (14.2, 14.7.3). Interactive logins never set it, so decision 1 is unaffected.
+  A token carrying an *unrecognised* `scope` is rejected outright rather than treated as
+  unscoped — an unknown scope must never fail open into full authority.
+- **TTL 60 minutes** for interactive logins. Absolute session lifetime 12 hours, enforced from `iat` — after
   that, refresh stops working and the operator logs in again.
 - **Clock skew leeway: 60 seconds** on `exp` and `nbf`.
 - Stateless. No server-side token store, no revocation list. Rotating `jwt.key`
@@ -5493,6 +5504,11 @@ extension so the two pipelines cannot drift apart.
   value.
 - **Exemptions are an explicit allow-list in code**, not a prefix match. A path-prefix
   exemption is how `/api/token/../logs` becomes a bypass.
+- **Scope enforcement.** After a token validates, a `scope: metrics` claim restricts it
+  to `/metrics` and `/prometheus`; anything else returns **403, not 401** — the
+  credential is valid, the authority is not, and a 401 would send a correctly-configured
+  scraper into a pointless re-authentication loop. An unrecognised scope value is
+  rejected as invalid. Route matching here is exact, for the same reason exemptions are.
 
 **`Loom.Web.Api/Program.cs` — corrected pipeline order:**
 
@@ -5617,23 +5633,106 @@ hits** — no client sends a token today, so enforcement breaks all three at onc
   acceptable because the Dashboard serves only its own embedded bundle with no
   user-generated HTML, and unacceptable the moment that stops being true.
 
-### 14.7.2 `Loom.DevTools`
+### 14.7.2 `Loom.DevTools` — no token, and that is correct
 
-`loom logs` and `loom search` call the Dashboard API. Both need `--token`, falling back to
-the `LOOM_TOKEN` environment variable, with a clear error when neither is present.
+**Correction.** An earlier revision of this step claimed `loom logs` and `loom search`
+call the Dashboard API and therefore need a `--token` flag. **They do not.** Verified by
+reading the source: `LogsCommand` constructs its own `InMemoryMetricStore` /
+`InMemoryLogStore` and an `EventPipeCollector`, then attaches directly to the target
+process. A scan of every `.cs` in `Loom.DevTools` for
+`HttpClient|HttpListener|Socket|WebApplication|Kestrel|TcpListener|WebSocket` returns
+**zero matches**. The tool has no network surface in either direction. Do not add a
+`--token` flag; there is nothing for it to authenticate to.
 
-### 14.7.3 Prometheus — **needs your sign-off**
+**`Loom.DevTools` is therefore outside Phase 14's authentication boundary — but not
+outside its threat model.** Its authorization is the operating system's:
+
+| Platform | Diagnostic IPC endpoint | Who may attach |
+|---|---|---|
+| Windows | named pipe `dotnet-diagnostic-<pid>-*` | the target process's user, and Administrators |
+| Linux / macOS | Unix domain socket under `TMPDIR` | the target process's user, and root |
+
+`new DiagnosticsClient(pid)` (`EventPipeCollector.cs:62`) inherits exactly that. The
+security property to preserve is one operational rule, and it belongs in the runbook:
+
+> **Never run `loom` as root or Administrator.** EventPipe attach authority is the OS
+> user boundary and nothing else. Elevated, `loom logs <pid>` will dump the captured
+> logs — and therefore any secret those logs contain — of *any* process on the machine.
+> This is the single highest-impact misuse of the tool and it requires no exploit.
+
+This also means `loom` must **not** be given a setuid bit, a capability grant, or a
+sudoers entry as a convenience for attaching to services running as other users.
+
+### 14.7.2.1 CLI command execution — audited, no injection surface
+
+`Loom.DevTools` starts exactly one external process, in `DashboardCommand.LaunchDashboard`
+(`DashboardCommand.cs:70` and `:97`):
+
+```csharp
+Process.Start(new ProcessStartInfo("loom-dashboard", pid.ToString()) { UseShellExecute = false, ... })
+```
+
+Assessed and found sound; recorded so it is not re-litigated:
+
+- **No argument injection.** The only argument is `pid.ToString()` on an `int` — digits
+  and possibly a leading `-`. No caller-supplied string reaches the argument list.
+- **No shell.** `UseShellExecute = false` means no `cmd.exe` and no `/bin/sh`, so shell
+  metacharacters have no interpreter even if one were somehow introduced.
+- **No current-directory binary planting.** The bare image name `"loom-dashboard"` raised
+  the question of whether the working directory is searched. **Measured, not assumed:**
+  with a decoy `loom-dashboard.exe` in the working directory and no `loom-dashboard`
+  anywhere on `PATH`, this call throws
+  `Win32Exception: The system cannot find the file specified`. .NET does not search the
+  current directory for `UseShellExecute = false`, and `SafeProcessSearchMode` is unset
+  (default) on the test machine. **This is not a finding.**
+- **`PATH` order is the residual risk, and it is out of scope.** An attacker who can
+  write to a directory earlier in the operator's `PATH` controls what `loom dashboard`
+  executes — but that attacker already owns the account. This is standard for every bare
+  process launch and is not specific to Loom. Not filed.
+
+**Standing constraint, re-verified this phase:** `CLAUDE.md` forbids interactive shell
+execution over SSH/HTTP. No endpoint on either host executes a command, and
+`Loom.DevTools` has no network surface, so no remote-command path exists anywhere in the
+platform. Phase 14 must not introduce one — in particular, no "run diagnostic command"
+endpoint, however convenient it looks next to the query endpoint.
+
+### 14.7.2.2 What Phase 14 *does* change for `Loom.DevTools`
+
+One thing, and it is a diagnosability trap rather than a security hole.
+
+`loom dashboard <pid>` spawns `loom-dashboard`, which after this phase refuses to start
+without `LOOM_JWT_KEY_FILE` and `LOOM_AUTH_USERS_FILE` (14.1.6). The child inherits the
+parent's environment, so a correctly configured shell works unchanged. A missing key does
+not.
+
+The trap: `DashboardCommand.cs:68-93` wraps the `--version` probe in a bare `catch` that
+prints **"Dashboard package not found. Install with: dotnet tool install -g Loom.Dashboard"**
+for *every* failure. After this phase the most likely failure is a missing signing key,
+which would be reported as a missing package — sending the operator to reinstall a tool
+that is already installed. Two required changes:
+
+1. `loom-dashboard --version` must short-circuit and print the version **before** loading
+   the key or users file. A version probe must never require credentials.
+2. Widen the catch: report the child's actual exit code and stderr, and keep the
+   "not installed" message for `Win32Exception` specifically, which is what an absent
+   executable actually raises (measured above).
+
+Filed as `BACKLOG.md` § 4.8.
+
+### 14.7.3 Prometheus — scoped service token (decided 2026-08-28)
 
 Decision 2 protects `/metrics` and `/prometheus`. Prometheus authenticates with a static
-`bearer_token_file` and **cannot refresh a JWT**, so a 60-minute token breaks scraping an
-hour after every login.
+`bearer_token_file` and **cannot refresh a JWT**, so a 60-minute token would break
+scraping an hour after every login.
 
-Recommended resolution: a **service token** — a long-lived, non-interactive token minted
-by the operator, `sub: prometheus`, TTL measured in months, exempt from the 12-hour
-absolute cap by carrying no `iat` ceiling.
+**Resolution: a scope-restricted service token.** Long-lived, non-interactive, minted by
+the operator, exempt from the 12-hour absolute cap because it carries no interactive
+session to cap.
 
 ```
-loom auth token --sub prometheus --ttl 365d > /var/secrets/loom/prometheus.token
+loom auth token --sub prometheus --scope metrics --ttl 90d \
+  > /var/secrets/loom/prometheus.token
+chmod 400 /var/secrets/loom/prometheus.token      # owned by the prometheus service user
 ```
 
 ```yaml
@@ -5644,10 +5743,33 @@ scrape_configs:
       credentials_file: /var/secrets/loom/prometheus.token
 ```
 
-This reintroduces operator-minted tokens as a **service** path alongside interactive
-login. It is a genuine widening of decision 1 and is written here as a proposal, not as a
-settled design. The alternative is to accept that Prometheus scraping does not work while
-Phase 14 is on. **Confirm before this is built.**
+Four decisions inside that command, each load-bearing:
+
+- **`--scope metrics` is not optional.** This token is the weakest-protected credential in
+  the system: static, on disk, read by a service account, and near-certain to end up in
+  configuration management and backups. Without a scope it would carry the same authority
+  as an operator login, so a leaked scrape token would read `/api/logs/*` and
+  `/api/logs/explain` — the most sensitive surface in the product. Scoped, a leak yields
+  a metrics dump and nothing else. Enforced at 14.2.
+- **90 days, not a year.** There is no revocation list. The only other revocation lever is
+  rotating `jwt.key`, which also invalidates the operator's own sessions. TTL *is*
+  revocation for service tokens, so the window has to be one somebody would actually
+  accept a leak across.
+- **Expiry is self-alarming, which is what makes the long TTL safe.** When the token
+  lapses, scrapes 401 and `up{job="loom"}` goes to 0 — a condition Prometheus already
+  alerts on. A forgotten rotation is loud, not silent. Put the rotation date in
+  `RUNBOOK-staging-trial.md`.
+- **This widens decision 1** from "interactive login only" to "interactive login, plus
+  operator-minted scoped service tokens." Recorded explicitly so the widening is visible
+  rather than inferred from the code later.
+
+**Rejected alternative:** a systemd timer minting a fresh 60-minute token into the
+credentials file, eliminating long-lived tokens entirely. It depends on Prometheus
+re-reading `credentials_file` on every scrape — plausible for recent versions but
+**not verified against any specific version here, so do not build on it without checking**.
+Even if true, it trades a static credential for a timer that can fail silently, which is
+the worse failure mode for a loopback-bound single-operator tool. Revisit only if Loom is
+ever exposed beyond the SSH tunnel.
 
 ---
 
@@ -5682,6 +5804,7 @@ Required test coverage in `Loom.Telemetry.Tests`:
 | Timing | unknown-user and wrong-password paths both perform a KDF derivation |
 | Throttle | 6th attempt returns 429; window expiry resets; dictionary stays at its 1024 cap |
 | Middleware | each exempt route reachable anonymously; a representative protected route on **each host** returns 401 |
+| Scope | `scope: metrics` token accepted on `/metrics` and `/prometheus`; **403 not 401** on `/api/logs`; unscoped operator token accepted everywhere; unrecognised scope value rejected rather than treated as unscoped |
 | WebSocket | handshake without carrier → 401; with expired token → 401; accepted response echoes `loom.v1` and not the token |
 
 Use `TimeProvider` / `FakeTimeProvider` for every expiry test. No `Thread.Sleep`.
@@ -5697,7 +5820,11 @@ Phase 14 Complete: Security Hardening
   WebSocket auth via Sec-WebSocket-Protocol on /ws/metrics and /ws/logs
   HTTPS + HSTS, strict CORS, security headers - headers now emitted on redirects too
   Query length cap and LIMIT parse guard (shipped earlier in the phase)
-  Angular login + interceptor; loom CLI --token; Prometheus service token
+  Angular login + interceptor
+  Prometheus scrape via a scope-restricted 90-day service token; scope enforced as 403
+  Loom.DevTools confirmed out of the auth boundary (no network surface); "never run
+    loom elevated" recorded in the runbook; loom-dashboard --version no longer requires
+    credentials
   Binary size re-measured against the 17 MB limit
   Test suite green, above the 509 baseline
 

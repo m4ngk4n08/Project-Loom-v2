@@ -434,6 +434,33 @@ block so it wraps the redirect. Already specified as part of Phase 14 Step 14.2 
 
 ---
 
+### 4.8 `loom dashboard` Reports Every Launch Failure as "Package Not Found" 🟢 LOW
+
+**Location:** `Loom.DevTools/Commands/DashboardCommand.cs:68-93`
+
+The `loom-dashboard --version` probe is wrapped in a bare `catch` that prints
+`Dashboard package not found. / Install with: dotnet tool install -g Loom.Dashboard`
+for *any* failure — a non-zero exit, a crash on startup, a missing config file. Only one
+of those is actually a missing package.
+
+**Why it matters more after Phase 14:** the dashboard will refuse to start without
+`LOOM_JWT_KEY_FILE` and `LOOM_AUTH_USERS_FILE`. If `--version` also loads credentials,
+a missing key surfaces as "package not found", sending the operator to reinstall a tool
+that is already installed correctly.
+
+**Fix (specified in `IMPLEMENTATION-METHODOLOGY.md` § 14.7.2.2):**
+
+1. `loom-dashboard --version` short-circuits before loading the key or users file. A
+   version probe must not require credentials.
+2. Narrow the catch to `Win32Exception` for the "not installed" message — measured, that
+   is what an absent executable actually raises. Report the child's exit code and stderr
+   for everything else.
+
+**Effort:** 30 minutes
+**Priority:** 🟢 LOW (raise to MEDIUM if Phase 14 ships before it)
+
+---
+
 ## 5. Documentation Gaps
 
 ### 5.1 Binary Size Target Documentation 🟡 MEDIUM (COMPLETED)
@@ -932,6 +959,7 @@ notifications shipped in `3bd0d8b`), § 2.1 (Option A taken), § 4.3 and § 4.4
 10. 🟢 Log row `role="button"` ARIA nesting (§ 4.5) - 15-30 min
 11. 🟢 `parseArguments` runs twice per change-detection cycle (§ 4.6) - 30 min
 12. 🟢 Security headers absent on production redirects (§ 4.7) - 5 min
+13. 🟢 `loom dashboard` reports every launch failure as "package not found" (§ 4.8) - 30 min
 
 **Total Low Priority Work:** ~18-29 hours (§ 6.4 excluded - blocked on dependencies)
 
@@ -1175,11 +1203,39 @@ endpoint protected with no discretionary exceptions; WebSocket tokens carried in
   mid-implementation — credential storage, KDF choice, token lifetime, WebSocket carrier —
   into recorded ones.
 
-**Deliberately left open:** the Prometheus service-token proposal (methodology § 14.7.3).
-Protecting `/metrics` while Prometheus can only present a static `bearer_token_file`
-forces either a long-lived service token or accepting that scraping stops. That widens
-the interactive-login decision and needs the user's confirmation, so it is written as a
-proposal rather than built.
+**Resolved same day — Prometheus scrape authentication (methodology § 14.7.3).** A
+**scope-restricted** 90-day service token, `--scope metrics`, enforced as 403 on any
+other route. Three reasons the scope is the load-bearing part: this is the
+weakest-protected credential in the system (static file, service account, config
+management, backups); unscoped it would carry full operator authority over
+`/api/logs/explain` and the rest; and expiry is self-alarming via `up{job="loom"} == 0`,
+which is what makes a 90-day TTL acceptable when the only other revocation lever is
+rotating `jwt.key` and logging the operator out. Rejected: a systemd timer refreshing a
+short-lived token, which depends on unverified Prometheus `credentials_file` re-read
+behaviour and trades a static credential for a timer that fails silently. This widens
+decision 1 to "interactive login **plus** operator-minted scoped service tokens."
+
+**`Loom.DevTools` audited and found outside the authentication boundary.** It has no
+network surface — a scan of every `.cs` in the project for
+`HttpClient|HttpListener|Socket|WebApplication|Kestrel|TcpListener|WebSocket` returns
+zero matches. `loom logs` attaches directly via `DiagnosticsClient(pid)`. An earlier
+revision of § 14.7.2 wrongly claimed it was an API client needing a `--token` flag; that
+is corrected. Its real boundary is the OS user owning the target process, making
+**"never run `loom` elevated"** a security control rather than a style note.
+
+**CLI process execution audited, no finding.** The single `Process.Start` in
+`DashboardCommand` passes an `int` PID with `UseShellExecute = false`, so there is no
+shell and no injection. The bare image name `"loom-dashboard"` raised a
+current-directory binary-planting question, which was **measured rather than assumed**:
+with a decoy in the working directory and nothing on `PATH`, the call throws
+`Win32Exception: The system cannot find the file specified`. .NET does not search the CWD
+for `UseShellExecute = false` (`SafeProcessSearchMode` unset). Not filed. The residual
+`PATH`-order risk requires write access to a `PATH` directory, which is already account
+compromise, and is not Loom-specific.
+
+**Also filed from that audit:** § 4.8, `loom dashboard` reporting every launch failure as
+"package not found" — a diagnosability trap that Phase 14 makes materially more likely by
+adding a startup credential requirement.
 
 **Deliberately rejected:** the original Step 14.4 alert-webhook allowlist. The URL is
 operator-set via `LOOM_ALERT_WEBHOOK_URL`, not attacker-supplied, so it is not an SSRF

@@ -3,7 +3,7 @@ using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using System.Diagnostics;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateSlimBuilder(args);
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {

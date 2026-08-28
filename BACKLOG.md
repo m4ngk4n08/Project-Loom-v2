@@ -250,6 +250,66 @@ which tracked the same documentation change from the docs side.
 
 ---
 
+### 3.3 `Loom.Web.Api` Cannot Serve HTTPS 🔴 HIGH — Phase 15 blocker
+
+**Location:** `Loom.Web.Api/Program.cs` — `WebApplication.CreateSlimBuilder` with no
+`UseKestrelHttpsConfiguration()` and no HTTPS listener anywhere.
+
+`CreateSlimBuilder` does not wire HTTPS configuration. Binding an `https://` address
+therefore fails at startup, verified in isolation on .NET 10.0.11:
+
+```
+CreateSlimBuilder + https://localhost:5443
+  -> InvalidOperationException: Call UseKestrelHttpsConfiguration() on IWebHostBuilder
+     to automatically enable HTTPS when an https:// address is used.
+     Hosting failed to start.
+```
+
+A grep of `Loom.Web.Api` for `UseKestrelHttpsConfiguration|ListenAnyIP|UseHttps|5443`
+returns only the `UseHttpsRedirection()` call itself.
+
+**Why this matters more than it looks:**
+
+- `CLAUDE.md`'s security architecture specifies HTTPS on 5443 with an HTTP redirect on
+  5080. Neither is achievable as configured.
+- Phase 14's "HSTS + HTTPS enforcement" was **nominal**. With no HTTPS port,
+  `UseHttpsRedirection` logs `Failed to determine the https port for redirect` and passes
+  the request straight through — there was no redirect in Production at all. This is also
+  why § 4.7 was unobservable for so long: the redirect it described never happened.
+- The fix costs binary size, and `CreateSlimBuilder` was adopted in `d277a58` precisely to
+  save 3.58 MB.
+
+**Measured cost of the fix** (`builder.WebHost.UseKestrelHttpsConfiguration()`, Release
+`win-x64`, publish clean both times):
+
+| Build | Size | Headroom to 17 MB |
+|---|---|---|
+| `149b57f` as committed | 15.124 MB | 1.876 MB |
+| with HTTPS configuration | **16.070 MB** | **0.930 MB** |
+| delta | **+0.946 MB** | |
+
+**Verified working end to end** with that one line added: the Production binary bound
+`http://localhost:5080` and `https://localhost:5443` together, an HTTP request returned
+`307` to the HTTPS address **carrying all four security headers**, and the HTTPS endpoint
+returned `401` without a token. That observation is what actually closed § 4.7.
+
+**Two options for Phase 15:**
+
+1. **Enable it** — one line plus certificate provisioning. Costs 969 KB and leaves
+   930 KB of headroom, which is workable: `Loom.Web.Api` has no `wwwroot` (the Angular
+   bundle lives in `Loom.Dashboard`), and Phase 14D touches Angular, DevTools, and the
+   Dashboard rather than this host. Brings in a real dependency on certificate path, file
+   permissions for the `loomd` user, and renewal.
+2. **Terminate TLS at a reverse proxy**, leaving Loom HTTP-only on loopback. Zero binary
+   cost and defensible, since both hosts already sit behind an SSH tunnel. **If this is
+   chosen, `UseHsts()` and `UseHttpsRedirection()` must be deleted rather than left in
+   place** — they would imply a protection the process does not provide.
+
+**Effort:** 1 hour (option 1, excluding certificate provisioning)
+**Priority:** 🔴 HIGH — blocks Phase 15
+
+---
+
 ## 4. Code Quality & Maintainability
 
 ### 4.1 LINQ in PrometheusFormatter Cold Path 🟢 LOW (COMPLETED)
@@ -410,7 +470,28 @@ of keys. It becomes a real cost if multiple rows ever expand at once, or if payl
 
 ---
 
-### 4.7 Security Headers Absent on Production Redirects 🟢 LOW
+### 4.7 Security Headers Absent on Production Redirects 🟢 LOW (COMPLETED)
+
+**Status:** ✅ **RESOLVED** in Phase 14C (`149b57f`) — the header middleware moved to the
+front of the `Loom.Web.Api` pipeline.
+
+**Verification was only possible after § 3.3 was understood.** With `CreateSlimBuilder`
+unable to bind HTTPS, `UseHttpsRedirection` passed requests through and no 307 was ever
+emitted, so this defect could not be observed. Adding
+`UseKestrelHttpsConfiguration()` temporarily and binding both ports produced the redirect
+and confirmed the fix:
+
+```
+HTTP/1.1 307 Temporary Redirect
+Location: https://localhost:5443/api/metrics/cpu
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
+```
+
+The original report below is retained for context.
+
 
 **Location:** `Loom.Web.Api/Program.cs` — the header middleware is registered *after*
 `app.UseHttpsRedirection()`.
@@ -458,6 +539,37 @@ that is already installed correctly.
 
 **Effort:** 30 minutes
 **Priority:** 🟢 LOW (raise to MEDIUM if Phase 14 ships before it)
+
+---
+
+### 4.9 `/api/health` Now Requires a Token, Breaking Liveness Probes 🟢 LOW
+
+**Location:** `Loom.Dashboard/Extensions/EndpointExtensions.cs:52`
+
+Phase 14C enforces authentication on every endpoint that is not explicitly marked, and
+`/api/health` is not marked. It now returns 401 without a bearer token.
+
+This is **correct per the Phase 14 scope decision** ("everything protected, no
+exceptions") and is not a defect. It is filed because Phase 15 will run into it: a
+systemd `ExecStartPost` check, a container `HEALTHCHECK`, or any external monitor cannot
+hold a 60-minute JWT, so the probe fails permanently and the unit looks unhealthy while
+the process is fine.
+
+**What the endpoint exposes:** `Status`, `Timestamp`, `UptimeSeconds`, `MemoryUsageMb`.
+No telemetry, no logs, no configuration.
+
+**Three options, needing a decision rather than a fix:**
+
+1. Mark it `LoomAllowAnonymous`. Simplest, and the payload is close to inert — though
+   uptime and working-set size are a small unauthenticated information leak.
+2. Give probes a scope-restricted service token, reusing the § 14.7.3 mechanism with a
+   new `health` scope. Consistent with the Prometheus decision, but adds a scope value
+   and a credential to provision.
+3. Leave it protected and let the probe authenticate. Realistically means embedding a
+   long-lived token in a systemd unit, which is option 2 with worse ergonomics.
+
+**Effort:** 15 minutes once decided
+**Priority:** 🟢 LOW — no impact until Phase 15 deployment
 
 ---
 
@@ -918,13 +1030,14 @@ the same evaluation loop they affect.
 
 ### High Priority (Pre-1.0 Release)
 
-**None open.** § 1.1 (test isolation) and § 3.1 (ingest endpoint), the only two HIGH
-items this document ever tracked, are both completed.
+**One open: § 3.3, and it blocks Phase 15.**
 
-1. 🔴 ~~Test isolation fix (§ 1.1)~~ ✅ COMPLETED
-2. 🔴 ~~Missing ingest endpoint (§ 3.1)~~ ✅ COMPLETED
+1. 🔴 `Loom.Web.Api` cannot serve HTTPS (§ 3.3) - 1 hour, plus a certificate decision
+2. 🔴 ~~Test isolation fix (§ 1.1)~~ ✅ COMPLETED
+3. 🔴 ~~Missing ingest endpoint (§ 3.1)~~ ✅ COMPLETED
 
-**Total High Priority Work:** 0 hours
+**Total High Priority Work:** ~1 hour of code; the real cost is deciding whether Loom
+terminates TLS itself or hands that to a reverse proxy.
 
 ---
 
@@ -958,8 +1071,9 @@ notifications shipped in `3bd0d8b`), § 2.1 (Option A taken), § 4.3 and § 4.4
 
 10. 🟢 Log row `role="button"` ARIA nesting (§ 4.5) - 15-30 min
 11. 🟢 `parseArguments` runs twice per change-detection cycle (§ 4.6) - 30 min
-12. 🟢 Security headers absent on production redirects (§ 4.7) - 5 min
+12. 🟢 ~~Security headers absent on production redirects (§ 4.7)~~ ✅ COMPLETED in Phase 14C
 13. 🟢 `loom dashboard` reports every launch failure as "package not found" (§ 4.8) - 30 min
+14. 🟢 `/api/health` now requires a token, breaking liveness probes (§ 4.9) - 15 min once decided
 
 **Total Low Priority Work:** ~18-29 hours (§ 6.4 excluded - blocked on dependencies)
 
@@ -1243,6 +1357,42 @@ surface. An allowlist there adds configuration and blocks nothing.
 
 **Also filed:** § 4.7, the security headers missing from Production redirects, found while
 reading the middleware order.
+
+---
+
+### 2026-08-28: HTTPS Was Never Actually Enabled; Measuring It Before Phase 15 Commits
+
+**Decision:** File the HTTPS gap as § 3.3 HIGH rather than fixing it inside Phase 14, and
+measure the cost of the fix now so Phase 15 chooses its TLS termination point with a
+number in hand.
+
+**Rationale:**
+
+- The gap surfaced from a Sonnet deviation report that under-called its own finding. It
+  read as "could not verify the 307 redirect locally"; the actual cause is that
+  `CreateSlimBuilder` cannot bind an `https://` address at all, so **`Loom.Web.Api` has
+  never been able to serve HTTPS**. Phase 14's "HSTS + HTTPS enforcement" line was
+  nominal, and § 4.7's missing-headers-on-redirect defect described a redirect that never
+  fired. Reproduced in isolation before being believed.
+- Measuring beat estimating. `UseKestrelHttpsConfiguration()` costs **+0.946 MB**
+  (15.124 → 16.070 MB), leaving 0.930 MB of headroom. That is affordable, but only
+  because `Loom.Web.Api` is nearly feature-complete — it has no `wwwroot`, and 14D touches
+  other projects. Guessing "a few hundred KB" would have been wrong by a factor of three.
+- Fixing it inside Phase 14 was rejected. It is a deployment-shape decision (does Loom
+  terminate TLS, or does a reverse proxy?) with certificate provisioning, file
+  permissions, and renewal attached. That belongs to Phase 15 with the rest of the
+  deployment work, not bolted onto an authentication phase.
+- The temporary fix was kept long enough to verify § 4.7 end to end and then reverted, so
+  the finding is recorded with evidence rather than with an argument.
+
+**Consequence worth stating plainly:** if Phase 15 chooses a reverse proxy instead,
+`UseHsts()` and `UseHttpsRedirection()` must be **removed** from `Program.cs`. Left in
+place with no HTTPS listener they are inert, and inert security code reads as protection
+that exists.
+
+**Also filed:** § 4.9, `/api/health` becoming authenticated under 14C's blanket
+enforcement. Correct per the phase's scope decision, but it breaks liveness probes and
+needs a deliberate answer before deployment rather than a discovery during it.
 
 ---
 

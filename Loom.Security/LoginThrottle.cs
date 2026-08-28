@@ -56,6 +56,13 @@ public sealed class LoginThrottle(TimeProvider clock)
         }
     }
 
+    /// <summary>Live entry count. Exists so the bounding behaviour is testable - without
+    /// it the cap is unobservable and its test cannot fail.</summary>
+    public int TrackedClients
+    {
+        get { lock (_gate) { return _clients.Count; } }
+    }
+
     public void Reset(string client)
     {
         lock (_gate) { _clients.Remove(client); }

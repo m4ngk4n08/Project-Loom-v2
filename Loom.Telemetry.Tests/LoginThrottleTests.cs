@@ -66,6 +66,8 @@ public class LoginThrottleTests
         var throttle = new LoginThrottle(_clock);
         for (var i = 0; i < 1100; i++) throttle.RecordFailure($"client-{i}");
 
+        Assert.True(throttle.TrackedClients <= 1024);
+
         for (var i = 0; i < 4; i++) throttle.RecordFailure("client-1099");
         Assert.True(throttle.IsBlocked("client-1099", out _));
     }

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
 using Loom.Dashboard;
+using Loom.Security;
 using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
@@ -475,7 +476,7 @@ namespace Loom.Dashboard.Extensions
                 // IBufferWriter<byte> - write straight to it, no intermediate string.
                 PrometheusFormatter.Format(store, context.Response.BodyWriter);
                 await context.Response.BodyWriter.FlushAsync(ct);
-            });
+            }).WithMetadata(new LoomMetricsScopeAllowed());
 
             return app;
         }
@@ -491,7 +492,7 @@ namespace Loom.Dashboard.Extensions
                     return;
                 }
 
-                using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                using var webSocket = await context.WebSockets.AcceptWebSocketAsync(AuthenticationMiddleware.WebSocketSubprotocol);
                 using var handler = new MetricsWebSocketHandler(webSocket);
                 await handler.StreamMetricsAsync(
                     metricsBuilder.GetMetricsStreamAsync(store, context.RequestAborted),
@@ -513,7 +514,7 @@ namespace Loom.Dashboard.Extensions
                     return;
                 }
 
-                using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                using var webSocket = await context.WebSockets.AcceptWebSocketAsync(AuthenticationMiddleware.WebSocketSubprotocol);
                 using var handler = new MetricsWebSocketHandler(webSocket);
                 await handler.StreamAsync(
                     ReadLogStreamAsync(store, context.RequestAborted),
@@ -559,7 +560,7 @@ namespace Loom.Dashboard.Extensions
                 }
                 context.Response.StatusCode = 404;
                 await context.Response.WriteAsync("Dashboard assets not found. Build Angular and repack: cd Loom.Web.Frontend && ng build");
-            });
+            }).WithMetadata(new LoomAllowAnonymous());
 
             return app;
         }

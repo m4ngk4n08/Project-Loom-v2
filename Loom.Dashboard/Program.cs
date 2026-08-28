@@ -127,6 +127,12 @@ catch (InvalidOperationException)
     Console.WriteLine("  Then repack: dotnet pack Loom.Dashboard -c Release\n");
 }
 
+// Routing before authentication so the middleware can read endpoint metadata. Static
+// files are registered ABOVE this point and short-circuit before it, which is what keeps
+// the Angular bundle loadable before a token exists.
+app.UseRouting();
+app.UseLoomAuthentication();
+
 var metricsBuilder = app.Services.GetRequiredService<MetricsResponseBuilder>();
 app.MapLoomTokenEndpoints();
 app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc, embeddedProvider, metricsBuilder);

@@ -41,32 +41,14 @@ var app = builder.Build();
 // Enable WebSockets
 // ============================================================================
 
-if (corsOrigins.Length > 0)
-{
-    app.UseCors();
-}
-
-app.UseWebSockets(new WebSocketOptions
-{
-    KeepAliveInterval = TimeSpan.FromSeconds(30)
-});
-
 // ============================================================================
 // Configure Middleware Pipeline
 // ============================================================================
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseDeveloperExceptionPage();
-}
-
-if(!app.Environment.IsDevelopment())
-{
-    app.UseHsts();
-    app.UseHttpsRedirection();
-}
-
-
+// MOVED to the front of the pipeline. It used to sit after UseHttpsRedirection, which
+// short-circuits with a 307 and never calls next() - so every Production redirect went
+// out with no CSP, no nosniff, and no framing protection. (BACKLOG 4.7.)
+//
 // Static, allocation-free response headers. Loom.Web.Api serves JSON and WebSockets
 // only - it has no HTML surface and no wwwroot - so a maximally restrictive CSP costs
 // nothing here and blocks the browser from treating any response as a document.
@@ -79,6 +61,32 @@ app.Use(async (context, next) =>
     headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'";
     await next();
 });
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
+
+if(!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
+if (corsOrigins.Length > 0)
+{
+    app.UseCors();
+}
+
+app.UseWebSockets(new WebSocketOptions
+{
+    KeepAliveInterval = TimeSpan.FromSeconds(30)
+});
+
+// Routing must be explicit so authentication can run AFTER it and read endpoint
+// metadata, and BEFORE the endpoints themselves.
+app.UseRouting();
+app.UseLoomAuthentication();
 
 app.MapLoomTokenEndpoints();
 app.MapApiEndpoints();

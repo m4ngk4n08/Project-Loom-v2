@@ -51,7 +51,8 @@ public static class TokenEndpoints
                 LoomJsonSerializerContext.Default.TokenResponse);
         })
         .WithName("IssueToken")
-        .WithTags("Auth");
+        .WithTags("Auth")
+        .WithMetadata(new LoomAllowAnonymous());
 
         app.MapPost("/api/token/refresh", (
             HttpContext context,
@@ -79,7 +80,8 @@ public static class TokenEndpoints
                 LoomJsonSerializerContext.Default.TokenResponse);
         })
         .WithName("RefreshToken")
-        .WithTags("Auth");
+        .WithTags("Auth")
+        .WithMetadata(new LoomAllowAnonymous());
 
         return app;
     }

@@ -61,6 +61,12 @@ public static class AuthCommand
 
     private static string ReadPassword()
     {
+        // Console.ReadKey throws when stdin is redirected, which is every non-interactive
+        // path: CI, Docker, config management, `echo pw | loom auth hash`. Fall back to a
+        // plain line read there. No prompt is written in that case - it would corrupt the
+        // stdout that a caller is capturing.
+        if (Console.IsInputRedirected) return Console.ReadLine() ?? string.Empty;
+
         Console.Write("Password: ");
         var buffer = new StringBuilder();
         while (true)

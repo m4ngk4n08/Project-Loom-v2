@@ -1,4 +1,5 @@
-﻿using Loom.Web.Api.Interfaces;
+﻿using Loom.Security;
+using Loom.Web.Api.Interfaces;
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using Loom.Web.RealTime;
@@ -123,7 +124,7 @@ namespace Loom.Web.Api.Extensions
                 }
 
                 // Accept the WebSocket connection
-                using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                using var webSocket = await context.WebSockets.AcceptWebSocketAsync(AuthenticationMiddleware.WebSocketSubprotocol);
 
                 // Create handler and stream metrics
                 using var handler = new MetricsWebSocketHandler(webSocket);
@@ -339,7 +340,8 @@ namespace Loom.Web.Api.Extensions
             })
             .WithName("PrometheusMetrics")
             .WithTags("Exporters")
-            .Produces<string>(200, "text/plain");
+            .Produces<string>(200, "text/plain")
+            .WithMetadata(new LoomMetricsScopeAllowed());
 
             return app;
         }

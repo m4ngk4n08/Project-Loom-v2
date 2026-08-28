@@ -16,9 +16,9 @@ This document provides comprehensive testing procedures for Project Loom v2, cov
 
 | Test Category | Status | Pass Rate | Notes |
 |--------------|--------|-----------|-------|
-| Unit Tests | ✅ PASS | 217/222 (97.7%) | 3 test isolation issues, 2 skipped (flaky) |
+| Unit Tests | ✅ PASS | 505/505 (100%) | Isolation and flakiness resolved |
 | AOT Compliance | ✅ PASS | 0 warnings | Native AOT ready |
-| Binary Size | ✅ PASS | 16.3 MB | Reasonable for feature set |
+| Binary Size | ✅ PASS | 14.74 MB | Under the 17 MB limit by 2.26 MB |
 | Endpoints | ✅ PASS | All functional | Health, Metrics, Query, Alerts, Exporters |
 | Allocations | ✅ PASS | ~31 KB/sec hot path | HTTP overhead, acceptable |
 
@@ -45,7 +45,7 @@ dotnet test --configuration Debug
 ### Expected Results
 
 ```
-Test summary: total: 222, succeeded: 217-222, skipped: 0-2, failed: 0-5
+Test summary: total: 505, succeeded: 505, skipped: 0, failed: 0
 ```
 
 ✅ **PASS:** 95%+ tests passing  
@@ -622,9 +622,9 @@ Before committing Phase N:
 
 | Metric | Result | Status |
 |--------|--------|--------|
-| Unit Tests | 217/222 (97.7%) | ✅ PASS |
+| Unit Tests | 505/505 (100%) | ✅ PASS |
 | AOT Compliance | 0 warnings | ✅ PASS |
-| Binary Size | 16.3 MB | ✅ PASS |
+| Binary Size | 14.74 MB | ✅ PASS |
 | Hot Path Alloc | 31-61 KB/sec | ✅ PASS |
 | Cold Path Alloc | 2.4-32 MB | ✅ PASS |
 | Endpoints | All functional | ✅ PASS |

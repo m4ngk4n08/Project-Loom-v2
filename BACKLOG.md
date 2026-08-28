@@ -122,6 +122,15 @@ this is specifically about the endpoint's own clamping wrapper)
 
 ### 2.1 Binary Size Target Adjustment 🟡 MEDIUM (COMPLETED)
 
+> **Superseded 2026-08-28.** The 16.3 MB figure below is stale and the reasoning is
+> wrong. Measured on `d277a58`: **14.737 MB** — under the 17 MB limit by 2.26 MB, and
+> under the original 15 MB target. Option B's headline lever
+> (`IlcGenerateStackTraceData=false`) was measured at **27 KB**, not megabytes, so
+> "aggressive trimming" was never the trade-off this entry assumed. The actual cost was
+> `WebApplication.CreateBuilder` rooting IIS, HTTP/3/QUIC, regex route constraints and
+> unused config/logging providers — a subsystem-rooting problem, not a trimming
+> problem. Fixed in `d277a58` by switching to `CreateSlimBuilder`.
+
 **Status:** ✅ **RESOLVED** — Option A was taken. `CLAUDE.md` now states `<17 MB` in
 every place it names the target, and `TESTING.md`'s thresholds match. See also § 5.1,
 which tracked the same documentation change from the docs side.
@@ -1072,6 +1081,32 @@ expanded.
 Filed rather than fixed because the log view had taken nine consecutive commits and further
 polish there was worth less than moving on. Both are cheap enough to fold into whatever
 next touches that component, and neither blocks anything.
+
+---
+
+### 2026-08-28: Binary Size Resolved by Builder Choice, Not Trimming
+
+**Decision:** Switch `Loom.Web.Api` to `WebApplication.CreateSlimBuilder`; keep the
+17 MB limit as stated rather than re-baselining it a second time.
+
+**Rationale:**
+- The gate had not been run for several commits because `'vswhere.exe' is not
+  recognized` was recorded as a missing toolchain. It is a PATH problem. Once run,
+  the binary measured 18.32 MB — over the hard limit by 1.32 MB.
+- An ILC map-file breakdown attributed the excess to framework subsystems Loom never
+  calls: `System.Text.RegularExpressions` 223 KB (route-constraint map),
+  `Microsoft.AspNetCore.Server.IIS` 114 KB, `System.Net.Quic` + Kestrel QUIC transport
+  140 KB, and 317 KB of `System.Security.Cryptography`.
+- `CreateSlimBuilder` removed 8,812 methods and 4,990 types. Six per-method and
+  per-type tables in the binary scale off those counts, which is why a one-line change
+  moved 3.58 MB rather than the ~1 MB the named assemblies account for.
+- Loom's own code is 286 KB of the binary. No amount of optimizing Loom code could have
+  closed a 1.32 MB gap; only the root set mattered.
+
+**Action:** `d277a58`. Docs reconciled in the follow-up commit. § 2.1 marked superseded.
+
+**Unresolved:** the 317 KB `System.Security.Cryptography` reduction has not been traced
+to a specific root. TLS still functions in the slim build (verified by running it).
 
 ---
 

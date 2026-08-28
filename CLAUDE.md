@@ -231,7 +231,7 @@ This directory contains design documentation for Project Loom v2. Implementation
 Project Loom v2 is a lightweight, real-time diagnostic terminal companion for production .NET applications. It provides insights into CPU hotpaths, memory allocations, and thread blockages through a web-based interface.
 
 **Target Specifications:**
-- Binary size: <17 MB (15 MB basic diagnostic core + ~2 MB telemetry platform — see `BACKLOG.md` §2.1)
+- Binary size: <17 MB hard limit; **14.74 MB measured** on `d277a58` (see `BACKLOG.md` §2.1)
 - Memory footprint: <20 MB background execution
 - Access protocol: HTTPS (replacing original SSH design)
 - Frontend: Angular 21.2 with WebSocket real-time streaming
@@ -258,7 +258,7 @@ Solution file is **`Loom.slnx`** (XML solution format), NOT `Loom.sln`.
 `dotnet build/test Loom.sln` fails with `MSBUILD : error MSB1009`.
 
 ```
-Loom.slnx                      (12 projects)
+Loom.slnx                      (13 projects)
 ├── Loom.Telemetry/            → Core: MetricRecord, LogRecord, ring buffers,
 │                                collectors, sampling. NO project references.
 ├── Loom.Web.Contracts/        → Shared DTOs + LoomJsonSerializerContext.
@@ -270,6 +270,10 @@ Loom.slnx                      (12 projects)
 ├── Loom.Telemetry.Query/      → SQL-like query language (tokenizer/parser/executor).
 ├── Loom.Telemetry.Alerting/   → Alert rules, evaluation, dispatch, targets.
 ├── Loom.Telemetry.Exporters/  → Console exporter + Prometheus formatter.
+├── Loom.Telemetry.Assist/     → Remote LLM "Explain" client over raw HTTP (not the
+│                                Anthropic SDK — it is not AOT-clean). Transmits only
+│                                message templates and argument NAMES, never values.
+│                                NO project references.
 ├── Loom.Web.RealTime/         → WebSocket handlers (zero-allocation).
 ├── Loom.Web.Api/              → ASP.NET Core Minimal APIs. **The Native AOT
 │                                publish target** (PublishAot/PublishTrimmed/
@@ -291,7 +295,8 @@ no separate host — `Loom.Web.Api` and the two dotnet tools are the entry point
 
 **Dependency Flow** (arrows point to dependencies):
 ```
-Loom.Telemetry, Loom.Web.Contracts, Loom.Telemetry.Generators   ← foundation, no refs
+Loom.Telemetry, Loom.Web.Contracts, Loom.Telemetry.Generators,
+Loom.Telemetry.Assist                                           ← foundation, no refs
 
 Loom.Storage             → Loom.Telemetry, Loom.Web.Contracts
 Loom.Web.RealTime        → Loom.Web.Contracts
@@ -302,7 +307,9 @@ Loom.Telemetry.Exporters → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
 
 Loom.Web.Api    → Loom.Storage, Loom.Telemetry.Exporters, Loom.Telemetry.Query,
                   Loom.Telemetry.Alerting, Loom.Web.Contracts, Loom.Web.RealTime
-Loom.Dashboard  → the above minus Loom.Web.Api, plus Loom.Telemetry
+Loom.Dashboard  → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
+                  Loom.Telemetry.Alerting, Loom.Telemetry.Assist,
+                  Loom.Telemetry.Exporters, Loom.Web.Contracts, Loom.Web.RealTime
 Loom.DevTools   → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
 ```
 
@@ -352,7 +359,7 @@ dotnet run --project Loom.Dashboard -- <pid> [--port <n>]
 dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r win-x64
 dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r linux-x64
 
-# Verify binary size (<17 MB target; 16.3 MB as of BACKLOG §2.1)
+# Verify binary size (<17 MB target; 14.74 MB as of d277a58)
 Get-ChildItem Loom.Web.Api/bin/Release/net10.0/win-x64/publish/ -Filter *.exe |
   Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
 
@@ -384,7 +391,7 @@ directory — ignore it). Tests run with parallelization disabled assembly-wide 
 `[assembly: CollectionBehavior(DisableTestParallelization = true)]` in `AssemblyInfo.cs`.
 
 ```powershell
-# IL execution (rapid feedback) - current baseline: 324 passing, 0 skipped
+# IL execution (rapid feedback) - current baseline: 505 passing, 0 skipped
 dotnet test Loom.slnx -c Debug
 
 # AOT trim verification: publish must emit no IL2026/IL3050 warnings
@@ -578,6 +585,13 @@ chown root:loomd /var/secrets/loom/jwt.key
 
 **Problem:** Binary size >17 MB
 **Solution:**
+- **Check `WebApplication.CreateSlimBuilder` is used, not `CreateBuilder`.** This is by
+  far the largest lever: measured 18.32 MB → 14.74 MB. `CreateBuilder` roots IIS
+  integration, HTTP/3 + QUIC, the regex route-constraint map, and the
+  INI/XML/KeyPerFile/user-secrets and EventLog/EventSource/Debug/TraceSource providers.
+  ILC cannot elide them because the calls are unconditional and the opt-out is a
+  runtime decision.
+- Do **not** reach for `IlcGenerateStackTraceData=false` — measured at 27 KB.
 - Enable `InvariantGlobalization=true` (saves ~2 MB)
 - Use `PublishTrimmed=true` and `TrimMode=link`
 - Strip debug symbols with `strip --strip-debug`
@@ -668,7 +682,7 @@ dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r win-x64
 Get-ChildItem Loom.Web.Api/bin/Release/net10.0/win-x64/publish/ -Filter *.exe |
   Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
 
-# 4. All tests pass - baseline 324 passing, 0 skipped
+# 4. All tests pass - baseline 505 passing, 0 skipped
 dotnet test Loom.slnx -c Debug
 
 # 5. Zero allocations in hot paths
@@ -809,6 +823,10 @@ claimed pass rate.
 **Environment facts (verified; do not rediscover):**
 - Solution file is `Loom.slnx`, **not** `Loom.sln` — `dotnet test Loom.sln` fails MSB1009.
 - The Bash tool has no coreutils here (`cat`, `ls` exit 127). Use PowerShell.
+- **AOT publish works.** The `'vswhere.exe' is not recognized` / `MSB3073` failure is
+  only a PATH problem, not a missing toolchain — no Developer PowerShell needed.
+  Prepend the Installer directory and publish normally:
+  `$env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"`
 - PowerShell here-strings break `git commit -m`; use `git commit -F <file>` — and write
   that file with `[System.IO.File]::WriteAllText`, not `Set-Content -Encoding utf8`,
   which adds a BOM to the subject line. See **PowerShell BOM Trap** above.

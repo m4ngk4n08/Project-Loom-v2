@@ -71,6 +71,7 @@ Loom.slnx
 ├── Loom.Telemetry.Query/          → Query engine (SQL-like tokenizer/parser/planner/executor)
 ├── Loom.Telemetry.Alerting/       → Alert rules, window conditions, notification dispatch
 ├── Loom.Telemetry.Exporters/      → Prometheus, Console
+├── Loom.Telemetry.Assist/         → Remote LLM "Explain" client (templates + argument names only)
 ├── Loom.DevTools/                 → `dotnet loom dev` CLI tool (local dev mode)
 ├── Loom.Telemetry.Tests/          → Unit & integration tests
 └── Loom.Dashboard/                → `loom-dashboard <pid>` dev-time CLI tool; embeds the Angular dashboard, attaches to a target process via EventPipe
@@ -93,7 +94,7 @@ Loom.Telemetry.Alerting → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, 
 Loom.Telemetry.Exporters→ Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
 Loom.DevTools           → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
 Loom.Dashboard          → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
-                          Loom.Telemetry.Alerting, Loom.Telemetry.Exporters,
+                          Loom.Telemetry.Alerting, Loom.Telemetry.Assist, Loom.Telemetry.Exporters,
                           Loom.Web.Contracts, Loom.Web.RealTime
 
 Loom.Telemetry.Generators (analyzer, referenced by consuming projects, no runtime dep)
@@ -209,7 +210,7 @@ strip --strip-debug \
   Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 
 # Verify the binary stays under 17 MB (see BACKLOG.md § 2.1 for why the target moved
-# from 15 MB; 16.3 MB was the last measurement, taken before two exporters were deleted)
+# from 15 MB; 14.74 MB measured on d277a58, back under even the original 15 MB target)
 ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
 ```
 

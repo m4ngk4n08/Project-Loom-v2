@@ -1,5 +1,6 @@
 using Loom.Dashboard;
 using Loom.Dashboard.Extensions;
+using Loom.Security;
 using Loom.Storage;
 using Loom.Web.Contracts;
 using Microsoft.Extensions.FileProviders;
@@ -96,6 +97,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddDashboardServices(targetPid);
 builder.Services.AddSingleton<MetricsResponseBuilder>();
+builder.Services.AddLoomSecurity();
 
 // Kestrel config
 builder.WebHost.ConfigureKestrel(options =>
@@ -126,6 +128,7 @@ catch (InvalidOperationException)
 }
 
 var metricsBuilder = app.Services.GetRequiredService<MetricsResponseBuilder>();
+app.MapLoomTokenEndpoints();
 app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc, embeddedProvider, metricsBuilder);
 
 var dashboardUrl = $"http://localhost:{port}";

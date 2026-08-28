@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="Loom.Dashboard/Loom.Dashboard.csproj" />
   <Project Path="Loom.DevTools/Loom.DevTools.csproj" />
+  <Project Path="Loom.Security/Loom.Security.csproj" />
   <Project Path="Loom.Storage/Loom.Storage.csproj" />
   <Project Path="Loom.Telemetry.Alerting/Loom.Telemetry.Alerting.csproj" />
   <Project Path="Loom.Telemetry.Assist/Loom.Telemetry.Assist.csproj" />

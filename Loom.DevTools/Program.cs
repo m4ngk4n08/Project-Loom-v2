@@ -53,6 +53,41 @@ switch (args)
     case ["metrics", var pidArg, var category] when int.TryParse(pidArg, out var metricsPid2):
         await MetricsCommand.RunAsync(metricsPid2, category, cts.Token);
         break;
+    case ["auth", "init"]:
+        AuthCommand.Init();
+        break;
+    case ["auth", "add-user", var newUser]:
+        AuthCommand.AddUser(newUser);
+        break;
+    case ["auth", "hash"]:
+        AuthCommand.Hash();
+        break;
+    case ["auth", "token", ..] when args.Length >= 4:
+        {
+            string? sub = null;
+            var metricsScope = false;
+            var ttl = TimeSpan.FromDays(90);
+            var bad = false;
+            for (var i = 2; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--sub" when i + 1 < args.Length: sub = args[++i]; break;
+                    case "--scope" when i + 1 < args.Length:
+                        metricsScope = args[++i] == "metrics";
+                        break;
+                    case "--ttl" when i + 1 < args.Length:
+                        if (!AuthCommand.TryParseTtl(args[++i], out ttl)) bad = true;
+                        break;
+                    default: bad = true; break;
+                }
+            }
+            if (bad || string.IsNullOrEmpty(sub))
+                Console.WriteLine("Usage: loom auth token --sub <name> [--scope metrics] [--ttl 90d]");
+            else
+                AuthCommand.Token(sub, metricsScope, ttl);
+        }
+        break;
     default:
         Console.WriteLine("Usage:");
         Console.WriteLine("  loom dev [--all]                        Discover Loom-instrumented processes");
@@ -64,5 +99,9 @@ switch (args)
         Console.WriteLine("  loom query <pid> \"SELECT...\"            Execute LoomQL query");
         Console.WriteLine("  loom logs <pid> [--count N] [--category X] [--seconds N]   Show recent captured logs");
         Console.WriteLine("  loom search <pid> \"<query>\" [--max N] [--seconds N]        BM25 search over captured logs");
+        Console.WriteLine("  loom auth init                          Create a dev signing key and users file");
+        Console.WriteLine("  loom auth add-user <name>               Append a user (prompts for a password)");
+        Console.WriteLine("  loom auth hash                          Print one users-file line to stdout");
+        Console.WriteLine("  loom auth token --sub <name> [--scope metrics] [--ttl 90d]  Mint a service token");
         break;
 }

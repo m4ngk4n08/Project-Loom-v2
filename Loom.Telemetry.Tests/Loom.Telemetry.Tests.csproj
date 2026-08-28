@@ -28,6 +28,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Loom.Security\Loom.Security.csproj" />
 		<ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
 		<ProjectReference Include="..\Loom.Telemetry.Generators\Loom.Telemetry.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	  <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />

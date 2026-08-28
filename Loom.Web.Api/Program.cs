@@ -2,6 +2,7 @@ using Loom.Web.Api.Extensions;
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using System.Diagnostics;
+using Loom.Security;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -11,6 +12,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 builder.Services.AddServices();
+builder.Services.AddLoomSecurity();
 
 // Origins come from LOOM_CORS_ORIGINS as a comma-separated list. When it is unset no
 // policy is registered at all, so the browser's same-origin default applies - that is
@@ -78,6 +80,7 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.MapLoomTokenEndpoints();
 app.MapApiEndpoints();
 
 app.Run();

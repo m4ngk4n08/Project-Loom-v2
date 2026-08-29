@@ -430,6 +430,10 @@
           <input id="export-limit" type="number" min="1" max="10000" [(ngModel)]="exportLimit" />
         </div>
 
+        @if (exportError()) {
+          <p class="explain-error" role="status">{{ exportError() }}</p>
+        }
+
         <div class="export-modal-actions">
           <button class="toolbar-btn" type="button" (click)="closeExportModal()">Cancel</button>
           <button class="toolbar-btn active" type="button" (click)="runExport()">Export</button>

@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { DashboardStateService } from '../../core/services/dashboard-state.service';
+import { AuthService } from '../../core/auth/auth.service';
 
 @Component({
   selector: 'app-top-bar',
@@ -34,6 +35,8 @@ import { DashboardStateService } from '../../core/services/dashboard-state.servi
             {{ stateService.isConnected() ? 'Connected' : 'Disconnected' }}
           </span>
         </div>
+
+        <button type="button" class="logout" (click)="auth.logout()">Sign out</button>
       </div>
     </header>
   `,
@@ -122,6 +125,22 @@ import { DashboardStateService } from '../../core/services/dashboard-state.servi
       font-weight: 500;
     }
 
+    .logout {
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+
+      &:hover {
+        color: var(--text-primary);
+        border-color: var(--text-muted);
+      }
+    }
+
     .connection-status.connected .status-label {
       color: var(--accent);
     }
@@ -143,4 +162,5 @@ import { DashboardStateService } from '../../core/services/dashboard-state.servi
 })
 export class TopBarComponent {
   stateService = inject(DashboardStateService);
+  protected readonly auth = inject(AuthService);
 }

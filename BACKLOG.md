@@ -542,7 +542,11 @@ block so it wraps the redirect. Already specified as part of Phase 14 Step 14.2 
 
 ---
 
-### 4.8 `loom dashboard` Reports Every Launch Failure as "Package Not Found" 🟢 LOW
+### 4.8 `loom dashboard` Reports Every Launch Failure as "Package Not Found" 🟢 LOW (COMPLETED)
+
+**Status:** ✅ **RESOLVED 2026-08-29** — item 2 fixed in `LaunchDashboard`; item 1 required
+no change, since `loom-dashboard --version` already short-circuits at
+`Loom.Dashboard/Program.cs:17-21`, before `AddLoomSecurity()` at line 100.
 
 **Location:** `Loom.DevTools/Commands/DashboardCommand.cs:68-93`
 

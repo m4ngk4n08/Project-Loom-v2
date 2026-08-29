@@ -1,6 +1,8 @@
-import { Injectable, inject, signal, DestroyRef } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Injectable, inject, signal, effect } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { WebSocketService } from './websocket.service';
+import { AuthService } from '../auth/auth.service';
 
 interface CpuMetricResponse {
   cpuUsagePercent: number;
@@ -47,7 +49,8 @@ interface SessionInfo {
 })
 export class DashboardStateService {
   private wsService = inject(WebSocketService);
-  private destroyRef = inject(DestroyRef);
+  private readonly auth = inject(AuthService);
+  private readonly http = inject(HttpClient);
 
   cpuData = signal<CpuMetricResponse | null>(null);
   memoryData = signal<MemoryMetricResponse | null>(null);
@@ -56,23 +59,31 @@ export class DashboardStateService {
   sessionInfo = signal<SessionInfo | null>(null);
 
   constructor() {
-    this.wsService.connect('/ws/metrics')
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
+    // Keyed to the token, not to construction: logout closes the socket (the observable's
+    // teardown does it), and a later login opens a fresh one carrying the new credential.
+    // The server authorizes a socket only at handshake, so a socket outliving its token
+    // would keep streaming to a page whose session has ended.
+    effect((onCleanup) => {
+      if (!this.auth.token()) {
+        this.isConnected.set(false);
+        return;
+      }
+
+      const sub = this.wsService.connect('/ws/metrics').subscribe({
         next: (msg) => this.handleMessage(msg),
         error: () => this.isConnected.set(false),
         complete: () => this.isConnected.set(false)
       });
+
+      onCleanup(() => sub.unsubscribe());
+    });
 
     this.loadSessionInfo();
   }
 
   private async loadSessionInfo(): Promise<void> {
     try {
-      const response = await fetch(`${location.origin}/api/session`);
-      if (response.ok) {
-        this.sessionInfo.set(await response.json() as SessionInfo);
-      }
+      this.sessionInfo.set(await firstValueFrom(this.http.get<SessionInfo>('/api/session')));
     } catch (error) {
       console.error('Failed to load session info:', error);
     }

@@ -1,5 +1,6 @@
 using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Diagnostics.Tracing;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.Tracing;
 
@@ -70,25 +71,40 @@ public static class DashboardCommand
             var check = Process.Start(new ProcessStartInfo("loom-dashboard", "--version")
             {
                 RedirectStandardOutput = true,
+                RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             });
 
-            if (check != null)
+            if (check == null)
+                throw new InvalidOperationException("Process.Start returned null.");
+
+            // Start both reads before awaiting exit: a blocking read after
+            // WaitForExitAsync can deadlock on a full pipe.
+            var stdoutTask = check.StandardOutput.ReadToEndAsync();
+            var stderrTask = check.StandardError.ReadToEndAsync();
+            await check.WaitForExitAsync();
+            var stderr = await stderrTask;
+            await stdoutTask;
+
+            if (check.ExitCode != 0)
             {
-                await check.WaitForExitAsync();
-                if (check.ExitCode != 0)
-                    throw new Exception();
-            }
-            else
-            {
-                throw new Exception();
+                Console.WriteLine($"loom-dashboard --version exited with code {check.ExitCode}.");
+                if (!string.IsNullOrWhiteSpace(stderr))
+                    Console.WriteLine(stderr.TrimEnd());
+                Console.WriteLine("If the dashboard is installed, check LOOM_JWT_KEY_FILE and LOOM_AUTH_USERS_FILE.");
+                return;
             }
         }
-        catch
+        catch (Win32Exception)
         {
             Console.WriteLine("Dashboard package not found.");
             Console.WriteLine("Install with: dotnet tool install -g Loom.Dashboard");
+            return;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"{ex.GetType().Name}: {ex.Message}");
             return;
         }
 

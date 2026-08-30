@@ -37,8 +37,14 @@ public sealed class JwtValidator(byte[] secret, TimeProvider clock)
         //    exactly HS256 must be refused BEFORE a signature is computed. This is what
         //    stops `alg: none` and algorithm-confusion forgery.
         Span<byte> headerBytes = stackalloc byte[256];
-        if (!Base64Url.TryDecodeFromChars(headerSpan, headerBytes, out var headerWritten))
-            return JwtFailure.Malformed;
+        bool headerDecoded;
+        int headerWritten;
+        try
+        {
+            headerDecoded = Base64Url.TryDecodeFromChars(headerSpan, headerBytes, out headerWritten);
+        }
+        catch (FormatException) { return JwtFailure.Malformed; }
+        if (!headerDecoded) return JwtFailure.Malformed;
 
         JwtHeader? header;
         try
@@ -61,8 +67,14 @@ public sealed class JwtValidator(byte[] secret, TimeProvider clock)
         // 2. Signature. Base64Url, NOT Convert.TryFromBase64Chars - that call returns
         //    false on any base64url input containing '-' or '_' (measured on .NET 10.0.11).
         Span<byte> provided = stackalloc byte[SignatureBytes];
-        if (!Base64Url.TryDecodeFromChars(signatureSpan, provided, out var sigWritten)
-            || sigWritten != SignatureBytes)
+        bool signatureDecoded;
+        int sigWritten;
+        try
+        {
+            signatureDecoded = Base64Url.TryDecodeFromChars(signatureSpan, provided, out sigWritten);
+        }
+        catch (FormatException) { return JwtFailure.BadSignature; }
+        if (!signatureDecoded || sigWritten != SignatureBytes)
             return JwtFailure.BadSignature;
 
         var signingBytes = Encoding.UTF8.GetBytes(signingInput.ToString()); // the one allocation
@@ -73,8 +85,14 @@ public sealed class JwtValidator(byte[] secret, TimeProvider clock)
 
         // 3. Claims - only after the signature is trusted.
         Span<byte> payloadBytes = stackalloc byte[512];
-        if (!Base64Url.TryDecodeFromChars(payloadSpan, payloadBytes, out var payloadWritten))
-            return JwtFailure.Malformed;
+        bool payloadDecoded;
+        int payloadWritten;
+        try
+        {
+            payloadDecoded = Base64Url.TryDecodeFromChars(payloadSpan, payloadBytes, out payloadWritten);
+        }
+        catch (FormatException) { return JwtFailure.Malformed; }
+        if (!payloadDecoded) return JwtFailure.Malformed;
 
         JwtClaims? claims;
         try

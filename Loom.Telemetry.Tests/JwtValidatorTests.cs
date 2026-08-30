@@ -174,6 +174,19 @@ public class JwtValidatorTests
         Assert.Equal(JwtFailure.Malformed, result);
     }
 
+    [Theory]
+    [InlineData("not.a.jwt")]
+    [InlineData("aa.bb.cc")]
+    [InlineData("a.b.c")]
+    [InlineData("x.y.z")]
+    [InlineData("....")]
+    [InlineData("..")]
+    public void ThreeSegmentMalformedShapes_ReturnFailureWithoutThrowing(string token)
+    {
+        var result = _validator.Validate(token, out _);
+        Assert.True(result is JwtFailure.Malformed or JwtFailure.BadSignature);
+    }
+
     [Fact]
     public void SignatureWithUrlSafeCharacters_Validates()
     {

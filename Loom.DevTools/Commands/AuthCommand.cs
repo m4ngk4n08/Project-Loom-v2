@@ -20,7 +20,16 @@ public static class AuthCommand
         {
             Console.WriteLine($"Refusing to overwrite an existing signing key at {keyPath}.");
             Console.WriteLine("Delete it deliberately if you intend to rotate - every outstanding token dies with it.");
-            Console.WriteLine("(--persist is also skipped - nothing was written or changed.)");
+
+            if (persist)
+            {
+                Console.WriteLine();
+                var existingUsersPath = File.Exists(usersPath) ? usersPath : null;
+                if (existingUsersPath is null)
+                    Console.WriteLine($"No users file found at {usersPath} - persisting only {KeyMaterial.KeyFileVariable}.");
+                PersistEnvironmentVariables(keyPath, existingUsersPath);
+            }
+
             return;
         }
 
@@ -50,7 +59,7 @@ public static class AuthCommand
         Console.WriteLine("Then add an operator:  loom auth add-user operator");
     }
 
-    private static void PersistEnvironmentVariables(string keyPath, string usersPath)
+    private static void PersistEnvironmentVariables(string keyPath, string? usersPath)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -60,12 +69,19 @@ public static class AuthCommand
         }
 
         WarnIfDifferentExistingValue(KeyMaterial.KeyFileVariable, keyPath);
-        WarnIfDifferentExistingValue(KeyMaterial.UsersFileVariable, usersPath);
-
         Environment.SetEnvironmentVariable(KeyMaterial.KeyFileVariable, keyPath, EnvironmentVariableTarget.User);
-        Environment.SetEnvironmentVariable(KeyMaterial.UsersFileVariable, usersPath, EnvironmentVariableTarget.User);
 
-        Console.WriteLine($"Persisted {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable} for your user account.");
+        if (usersPath is null)
+        {
+            Console.WriteLine($"Persisted {KeyMaterial.KeyFileVariable} for your user account.");
+        }
+        else
+        {
+            WarnIfDifferentExistingValue(KeyMaterial.UsersFileVariable, usersPath);
+            Environment.SetEnvironmentVariable(KeyMaterial.UsersFileVariable, usersPath, EnvironmentVariableTarget.User);
+            Console.WriteLine($"Persisted {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable} for your user account.");
+        }
+
         Console.WriteLine("Open a NEW terminal to pick them up - this terminal's environment does not change.");
     }
 

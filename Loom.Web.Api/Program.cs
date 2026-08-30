@@ -12,7 +12,23 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 builder.Services.AddServices();
-builder.Services.AddLoomSecurity();
+
+try
+{
+    builder.Services.AddLoomSecurity();
+}
+catch (InvalidOperationException ex)
+{
+    // Missing or malformed key/users file. An operator-fixable configuration error, not a
+    // defect: the message from KeyMaterial already says exactly what to do. A stack trace
+    // here buries that under frames nobody can act on.
+    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine();
+    Console.Error.WriteLine("Loom fails closed: there is no generated-on-the-fly key in any environment.");
+    Console.Error.WriteLine("  Windows dev setup:  loom auth init");
+    Console.Error.WriteLine($"  Then set {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable}.");
+    return 1;
+}
 
 // Origins come from LOOM_CORS_ORIGINS as a comma-separated list. When it is unset no
 // policy is registered at all, so the browser's same-origin default applies - that is
@@ -99,3 +115,4 @@ app.MapLoomTokenEndpoints();
 app.MapApiEndpoints();
 
 app.Run();
+return 0;

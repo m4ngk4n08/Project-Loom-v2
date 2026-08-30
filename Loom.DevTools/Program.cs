@@ -54,7 +54,10 @@ switch (args)
         await MetricsCommand.RunAsync(metricsPid2, category, cts.Token);
         break;
     case ["auth", "init"]:
-        AuthCommand.Init();
+        AuthCommand.Init(persist: false);
+        break;
+    case ["auth", "init", "--persist"]:
+        AuthCommand.Init(persist: true);
         break;
     case ["auth", "add-user", var newUser]:
         AuthCommand.AddUser(newUser);
@@ -99,7 +102,8 @@ switch (args)
         Console.WriteLine("  loom query <pid> \"SELECT...\"            Execute LoomQL query");
         Console.WriteLine("  loom logs <pid> [--count N] [--category X] [--seconds N]   Show recent captured logs");
         Console.WriteLine("  loom search <pid> \"<query>\" [--max N] [--seconds N]        BM25 search over captured logs");
-        Console.WriteLine("  loom auth init                          Create a dev signing key and users file");
+        Console.WriteLine("  loom auth init [--persist]              Create a dev signing key and users file");
+        Console.WriteLine("                                          (--persist also sets the env vars for your user account)");
         Console.WriteLine("  loom auth add-user <name>               Append a user (prompts for a password)");
         Console.WriteLine("  loom auth hash                          Print one users-file line to stdout");
         Console.WriteLine("  loom auth token --sub <name> [--scope metrics] [--ttl 90d]  Mint a service token");

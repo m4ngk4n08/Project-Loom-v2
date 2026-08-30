@@ -127,14 +127,14 @@ public static class DashboardCommand
         // EndOfStream: that property blocks synchronously (CA2024), and it can also report
         // false immediately before the stream ends, in which case the awaited read returns
         // null and the old code printed a blank line at exit.
-        _ = Task.Run(async () =>
+        var stdoutPump = Task.Run(async () =>
         {
             string? line;
             while ((line = await dashboard.StandardOutput.ReadLineAsync()) is not null)
                 Console.WriteLine(line);
         });
 
-        _ = Task.Run(async () =>
+        var stderrPump = Task.Run(async () =>
         {
             string? line;
             while ((line = await dashboard.StandardError.ReadLineAsync()) is not null)
@@ -142,6 +142,15 @@ public static class DashboardCommand
         });
 
         await dashboard.WaitForExitAsync();
+        await Task.WhenAll(stdoutPump, stderrPump);
+
+        if (dashboard.ExitCode != 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"Dashboard exited with code {dashboard.ExitCode}. See the output above.");
+            Console.WriteLine("A configuration error is the usual cause - check LOOM_JWT_KEY_FILE and");
+            Console.WriteLine("LOOM_AUTH_USERS_FILE, or run 'loom auth init' if this machine has no dev key.");
+        }
     }
 
     private static string GetProcessName(int pid)

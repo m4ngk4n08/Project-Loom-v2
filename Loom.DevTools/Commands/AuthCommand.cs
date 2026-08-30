@@ -102,13 +102,21 @@ public static class AuthCommand
         Console.WriteLine(issuer.Issue(subject, ttl, metricsScope ? JwtScope.Metrics : JwtScope.Full));
     }
 
+    /// <summary>Pure. Strips a leading UTF-8 BOM from a password read off redirected stdin.
+    /// PowerShell prepends U+FEFF to a piped stream, and Console.ReadLine hands it back as
+    /// the first character - so `"pw" | loom auth add-user x` used to hash the wrong string and
+    /// create an account whose password nothing could ever match. Same three bytes as the
+    /// Set-Content BOM trap in CLAUDE.md, arriving on stdin instead of in a file.</summary>
+    public static string NormalizePipedPassword(string? line) =>
+        (line ?? string.Empty).TrimStart((char)0xFEFF);
+
     private static string ReadPassword()
     {
         // Console.ReadKey throws when stdin is redirected, which is every non-interactive
         // path: CI, Docker, config management, `echo pw | loom auth hash`. Fall back to a
         // plain line read there. No prompt is written in that case - it would corrupt the
         // stdout that a caller is capturing.
-        if (Console.IsInputRedirected) return Console.ReadLine() ?? string.Empty;
+        if (Console.IsInputRedirected) return NormalizePipedPassword(Console.ReadLine());
 
         Console.Write("Password: ");
         var buffer = new StringBuilder();

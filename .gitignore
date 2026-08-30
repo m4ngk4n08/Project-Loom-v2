@@ -85,3 +85,4 @@ logs/
 # Local dev convenience scripts
 # ============================================================
 /Loom.DevTools/reinstall-loom.ps1
+/manage-devtools.ps1

@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { WebSocketService } from './websocket.service';
 
@@ -95,6 +95,15 @@ export class LogsService {
     if (filters.to) params.push(`to=${encodeURIComponent(filters.to)}`);
     if (filters.limit) params.push(`limit=${encodeURIComponent(String(filters.limit))}`);
     return `/api/logs/export?${params.join('&')}`;
+  }
+
+  /** Fetches the export through HttpClient so the auth interceptor attaches the bearer
+   *  token. An anchor-click navigation cannot carry a header and 401s after Phase 14. */
+  exportLogs(filters: LogExportFilters): Observable<HttpResponse<Blob>> {
+    return this.http.get(this.buildExportUrl(filters), {
+      observe: 'response',
+      responseType: 'blob'
+    });
   }
 
   search(query: string, maxResults = 20): Observable<LogSearchResponse> {

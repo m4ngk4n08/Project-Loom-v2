@@ -34,7 +34,7 @@ public static class DevCommand
                         loomProcesses.Add((pid, name, hasLoom));
                 }
 
-                Console.Clear();
+                if (!Console.IsOutputRedirected) Console.Clear();
                 Console.WriteLine($"Loom dev — {loomProcesses.Count} process(es) — {DateTime.Now:T}");
                 Console.WriteLine(showAll ? "Showing all .NET processes" : "Showing only Loom-instrumented processes");
                 Console.WriteLine("Press Ctrl+C to stop.\n");

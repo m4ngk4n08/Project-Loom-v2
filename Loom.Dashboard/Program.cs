@@ -17,13 +17,13 @@ if (args.Length == 0 || !int.TryParse(args[0], out var targetPid))
     if (args is ["--version"])
     {
         Console.WriteLine("loom-dashboard 1.0.0");
-        return;
+        return 0;
     }
     Console.WriteLine("Usage: loom-dashboard <pid> [--port <n>]");
     Console.WriteLine("  Starts the Loom dashboard, pulling metrics from the specified process.");
     Console.WriteLine("  Listen port precedence: --port <n>  >  LOOM_DASHBOARD_PORT env var  >  5209 (falls back to a free port if taken).");
     Console.WriteLine("  --port and LOOM_DASHBOARD_PORT are explicit: if that port is taken, the dashboard fails instead of picking another one.");
-    return;
+    return 0;
 }
 
 // --port <n> takes precedence over LOOM_DASHBOARD_PORT, which takes precedence
@@ -37,7 +37,7 @@ for (var i = 1; i < args.Length; i++)
     if (i + 1 >= args.Length)
     {
         Console.WriteLine("Error: --port requires a value.");
-        return;
+        return 1;
     }
     portArg = args[i + 1];
     break;
@@ -60,7 +60,7 @@ if (portArg is not null)
     if (!int.TryParse(portArg, out var parsedPort) || parsedPort is < 1 or > 65535)
     {
         Console.WriteLine($"Error: Invalid {portSource} value '{portArg}'. Must be an integer between 1 and 65535.");
-        return;
+        return 1;
     }
     explicitPort = parsedPort;
 }
@@ -74,7 +74,7 @@ try
 catch
 {
     Console.WriteLine($"Error: Process {targetPid} not found.");
-    return;
+    return 1;
 }
 
 var sessionStartedAtUtc = DateTime.UtcNow;
@@ -97,7 +97,23 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddDashboardServices(targetPid);
 builder.Services.AddSingleton<MetricsResponseBuilder>();
-builder.Services.AddLoomSecurity();
+
+try
+{
+    builder.Services.AddLoomSecurity();
+}
+catch (InvalidOperationException ex)
+{
+    // Missing or malformed key/users file. An operator-fixable configuration error, not a
+    // defect: the message from KeyMaterial already says exactly what to do. A stack trace
+    // here buries that under frames nobody can act on.
+    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine();
+    Console.Error.WriteLine("Loom fails closed: there is no generated-on-the-fly key in any environment.");
+    Console.Error.WriteLine("  Windows dev setup:  loom auth init");
+    Console.Error.WriteLine($"  Then set {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable}.");
+    return 1;
+}
 
 // Kestrel config
 builder.WebHost.ConfigureKestrel(options =>
@@ -165,8 +181,7 @@ catch (IOException) when (portSource is not null)
 {
     Console.WriteLine($"\nError: Could not bind to port {port} — it's already in use.");
     Console.WriteLine($"  ({portSource} was set explicitly, so the automatic fallback is disabled.)");
-    Environment.ExitCode = 1;
-    return;
+    return 1;
 }
 
 // Session summary — emitted on clean shutdown so external consumers
@@ -185,6 +200,8 @@ summaryLogger.LogInformation(
     (long)(DateTime.UtcNow - Process.GetCurrentProcess().StartTime.ToUniversalTime()).TotalSeconds,
     metricNames.Count,
     totalRecords);
+
+return 0;
 
 // Probes loopback binding for the preferred port; falls back to an OS-assigned
 // free port (TcpListener bound to port 0) if it's taken. Cross-platform: both

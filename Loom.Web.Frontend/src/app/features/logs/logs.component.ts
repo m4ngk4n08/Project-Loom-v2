@@ -287,6 +287,7 @@ export class LogsComponent implements OnInit {
 
   logLevels = LOG_LEVELS;
   showExportModal = signal(false);
+  exportError = signal<string | null>(null);
   exportFormat: LogExportFilters['format'] = 'json';
   exportCategory = '';
   exportMinLevel = '';
@@ -620,31 +621,56 @@ export class LogsComponent implements OnInit {
 
   openExportModal(): void {
     this.exportCategory = this.categoryFilter();
+    this.exportError.set(null);
     this.showExportModal.set(true);
   }
 
   closeExportModal(): void {
     this.showExportModal.set(false);
+    this.exportError.set(null);
   }
 
   runExport(): void {
-    const url = this.logsService.buildExportUrl({
+    this.exportError.set(null);
+
+    const filters: LogExportFilters = {
       format: this.exportFormat,
       category: this.exportCategory || undefined,
       minLevel: this.exportMinLevel || undefined,
       from: toUtcIso(this.exportFrom),
       to: toUtcIso(this.exportTo),
       limit: this.exportLimit || undefined
+    };
+
+    this.logsService.exportLogs(filters).subscribe({
+      next: (response) => {
+        const blob = response.body;
+        if (!blob) return;
+
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = exportFileName(filters.format, response.headers.get('Content-Disposition'));
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+
+        this.closeExportModal();
+      },
+      error: (error: unknown) => {
+        console.error('Log export failed:', error);
+        this.exportError.set('Export failed. Check the dashboard connection and try again.');
+      }
     });
-
-    // Real anchor-click navigation (not window.location, not target="_blank") so the
-    // browser downloads via Content-Disposition without leaving or opening a tab.
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-
-    this.closeExportModal();
   }
+}
+
+/** Pure. The filename to save an export under. The server sets Content-Disposition for
+ *  csv and text (Results.File) but NOT for json (Results.Json), so the fallback is not
+ *  optional. */
+export function exportFileName(format: string, contentDisposition: string | null): string {
+  const match = contentDisposition?.match(/filename="?([^";]+)"?/i);
+  if (match) return match[1];
+  return `loom-logs.${format === 'text' ? 'txt' : format}`;
 }

@@ -10,7 +10,7 @@ public static class AuthCommand
     private static string DevSecretsDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Loom", "dev-secrets");
 
-    public static void Init()
+    public static void Init(bool persist = false)
     {
         Directory.CreateDirectory(DevSecretsDirectory);
         var keyPath = Path.Combine(DevSecretsDirectory, "jwt.key");
@@ -20,6 +20,16 @@ public static class AuthCommand
         {
             Console.WriteLine($"Refusing to overwrite an existing signing key at {keyPath}.");
             Console.WriteLine("Delete it deliberately if you intend to rotate - every outstanding token dies with it.");
+
+            if (persist)
+            {
+                Console.WriteLine();
+                var existingUsersPath = File.Exists(usersPath) ? usersPath : null;
+                if (existingUsersPath is null)
+                    Console.WriteLine($"No users file found at {usersPath} - persisting only {KeyMaterial.KeyFileVariable}.");
+                PersistEnvironmentVariables(keyPath, existingUsersPath);
+            }
+
             return;
         }
 
@@ -32,8 +42,57 @@ public static class AuthCommand
         Console.WriteLine("Set these before starting Loom.Web.Api or loom-dashboard:");
         Console.WriteLine($"  $env:{KeyMaterial.KeyFileVariable} = \"{keyPath}\"");
         Console.WriteLine($"  $env:{KeyMaterial.UsersFileVariable} = \"{usersPath}\"");
+
+        if (persist)
+        {
+            Console.WriteLine();
+            PersistEnvironmentVariables(keyPath, usersPath);
+        }
+        else
+        {
+            Console.WriteLine();
+            Console.WriteLine("Those last only for this terminal. Re-run with --persist to set them for your user");
+            Console.WriteLine("account permanently.");
+        }
+
         Console.WriteLine();
         Console.WriteLine("Then add an operator:  loom auth add-user operator");
+    }
+
+    private static void PersistEnvironmentVariables(string keyPath, string? usersPath)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.WriteLine("--persist writes a Windows user environment variable and does nothing here.");
+            Console.WriteLine("Add the exports above to your shell profile instead.");
+            return;
+        }
+
+        WarnIfDifferentExistingValue(KeyMaterial.KeyFileVariable, keyPath);
+        Environment.SetEnvironmentVariable(KeyMaterial.KeyFileVariable, keyPath, EnvironmentVariableTarget.User);
+
+        if (usersPath is null)
+        {
+            Console.WriteLine($"Persisted {KeyMaterial.KeyFileVariable} for your user account.");
+        }
+        else
+        {
+            WarnIfDifferentExistingValue(KeyMaterial.UsersFileVariable, usersPath);
+            Environment.SetEnvironmentVariable(KeyMaterial.UsersFileVariable, usersPath, EnvironmentVariableTarget.User);
+            Console.WriteLine($"Persisted {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable} for your user account.");
+        }
+
+        Console.WriteLine("Open a NEW terminal to pick them up - this terminal's environment does not change.");
+    }
+
+    private static void WarnIfDifferentExistingValue(string variable, string newValue)
+    {
+        var existing = Environment.GetEnvironmentVariable(variable, EnvironmentVariableTarget.User);
+        if (!string.IsNullOrEmpty(existing) && existing != newValue)
+        {
+            Console.WriteLine($"Warning: {variable} is already set for your user account to '{existing}'.");
+            Console.WriteLine($"  It will be replaced with '{newValue}'.");
+        }
     }
 
     public static void AddUser(string username)
@@ -52,12 +111,20 @@ public static class AuthCommand
 
     public static void Hash() => Console.WriteLine(PasswordHasher.Hash(ReadPassword()));
 
-    public static void Token(string subject, bool metricsScope, TimeSpan ttl)
+    public static void Token(string subject, JwtScope scope, TimeSpan ttl)
     {
         var key = KeyMaterial.LoadSigningKey(KeyMaterial.ResolveKeyFile());
         var issuer = new JwtIssuer(key, TimeProvider.System);
-        Console.WriteLine(issuer.Issue(subject, ttl, metricsScope ? JwtScope.Metrics : JwtScope.Full));
+        Console.WriteLine(issuer.Issue(subject, ttl, scope));
     }
+
+    /// <summary>Pure. Strips a leading UTF-8 BOM from a password read off redirected stdin.
+    /// PowerShell prepends U+FEFF to a piped stream, and Console.ReadLine hands it back as
+    /// the first character - so `"pw" | loom auth add-user x` used to hash the wrong string and
+    /// create an account whose password nothing could ever match. Same three bytes as the
+    /// Set-Content BOM trap in CLAUDE.md, arriving on stdin instead of in a file.</summary>
+    public static string NormalizePipedPassword(string? line) =>
+        (line ?? string.Empty).TrimStart((char)0xFEFF);
 
     private static string ReadPassword()
     {
@@ -65,7 +132,7 @@ public static class AuthCommand
         // path: CI, Docker, config management, `echo pw | loom auth hash`. Fall back to a
         // plain line read there. No prompt is written in that case - it would corrupt the
         // stdout that a caller is capturing.
-        if (Console.IsInputRedirected) return Console.ReadLine() ?? string.Empty;
+        if (Console.IsInputRedirected) return NormalizePipedPassword(Console.ReadLine());
 
         Console.Write("Password: ");
         var buffer = new StringBuilder();
@@ -82,6 +149,21 @@ public static class AuthCommand
         }
         Console.WriteLine();
         return buffer.ToString();
+    }
+
+    /// <summary>Accepts "metrics" and "full". Rejects anything else rather than guessing.
+    /// A typo must not silently widen authority: an unvalidated comparison against "metrics"
+    /// turns `--scope metrcs` into a full-scope token, which for a 90-day service credential
+    /// hands an unattended scraper full operator authority.</summary>
+    public static bool TryParseScope(string value, out JwtScope scope)
+    {
+        scope = JwtScope.Full;
+        switch (value)
+        {
+            case "metrics": scope = JwtScope.Metrics; return true;
+            case "full": scope = JwtScope.Full; return true;
+            default: return false;
+        }
     }
 
     /// <summary>Accepts 30d, 12h, 45m. Rejects anything else rather than guessing.</summary>

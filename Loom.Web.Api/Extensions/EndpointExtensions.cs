@@ -55,7 +55,12 @@ namespace Loom.Web.Api.Extensions
                 );
             })
             .WithName("GetHealth")
-            .Produces<HealthCheckResponse>(200);
+            .Produces<HealthCheckResponse>(200)
+            // Same decision as the Dashboard's /api/health (BACKLOG 4.9, option 1), and it
+            // matters more here: this is the host that runs under systemd, where the
+            // liveness probe cannot carry a 60-minute JWT. On a loopback-only service the
+            // payload - status, uptime, working-set size - is not a meaningful disclosure.
+            .WithMetadata(new LoomAllowAnonymous());
 
             return app;
         }

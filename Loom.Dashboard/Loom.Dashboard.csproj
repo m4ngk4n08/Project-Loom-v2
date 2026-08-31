@@ -8,6 +8,13 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>loom-dashboard</ToolCommandName>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+    <!-- Emits compile-time interceptors for the Map* calls in EndpointExtensions, replacing
+         the reflective delegate binding that trips IL2026 under EnableTrimAnalyzer. Without
+         it a CI job that turns the trim analyzer on solution-wide fails with 24 errors here,
+         because this project otherwise sets no analyzer properties at all. Suppression is
+         not an alternative: interceptors apply only within the compilation holding the call
+         site, so suppressing would leave the reflective path live at runtime. -->
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.607501" />

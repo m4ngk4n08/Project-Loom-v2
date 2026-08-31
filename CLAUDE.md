@@ -233,7 +233,7 @@ Project Loom v2 is a lightweight, real-time diagnostic terminal companion for pr
 **Target Specifications:**
 - Binary size: <17 MB hard limit; **14.74 MB measured** on `d277a58` (see `BACKLOG.md` §2.1)
 - Memory footprint: <20 MB background execution
-- Access protocol: HTTPS (replacing original SSH design)
+- Access protocol: plain HTTP bound to loopback; an SSH tunnel carries the remote leg
 - Frontend: Angular 21.2 with WebSocket real-time streaming
 - Backend: .NET 10 Native AOT (reflection-free)
 - Deployment: Hardened Linux (x64/ARM64), Windows (x64)
@@ -560,7 +560,13 @@ public static void ProcessVectors(ReadOnlySpan<float> data, Span<float> results)
 - Unprivileged user: `loomd`
 - Systemd sandboxing: `ProtectSystem=strict`, `ProtectHome=true`, `MemoryDenyWriteExecute=true`
 - File access: `/var/cache/loom/` (700 permissions), `/var/secrets/loom/jwt.key` (400 permissions)
-- Network: HTTPS (port 5443), HTTP redirect (port 5080)
+- Network: HTTP on loopback only (port 5080, `LOOM_HTTP_PORT` to change). Loom does not
+  terminate TLS: it binds `127.0.0.1` in code, so no environment variable can publish it
+  to an interface. A remote operator reaches it through an SSH tunnel, which already
+  encrypts the only leg that leaves the machine. In-process TLS was measured at +0.946 MB
+  against a 17 MB ceiling and would defend a hop that never crosses the network — see
+  `BACKLOG.md` § 3.3. If non-tunnel access is ever required, front this port with a
+  reverse proxy and let it own the certificate lifecycle.
 - Authentication: Manual JWT implementation (no reflection-based libraries)
 - CORS: Strict whitelist (no wildcards)
 

@@ -12,7 +12,23 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 builder.Services.AddServices();
-builder.Services.AddLoomSecurity();
+
+try
+{
+    builder.Services.AddLoomSecurity();
+}
+catch (InvalidOperationException ex)
+{
+    // Missing or malformed key/users file. An operator-fixable configuration error, not a
+    // defect: the message from KeyMaterial already says exactly what to do. A stack trace
+    // here buries that under frames nobody can act on.
+    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine();
+    Console.Error.WriteLine("Loom fails closed: there is no generated-on-the-fly key in any environment.");
+    Console.Error.WriteLine("  Windows dev setup:  loom auth init");
+    Console.Error.WriteLine($"  Then set {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable}.");
+    return 1;
+}
 
 // Origins come from LOOM_CORS_ORIGINS as a comma-separated list. When it is unset no
 // policy is registered at all, so the browser's same-origin default applies - that is
@@ -27,12 +43,21 @@ if (corsOrigins.Length > 0)
         policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod()));
 }
 
+// Port is configurable; the loopback bind is not. An explicit Listen* call overrides
+// ASPNETCORE_URLS entirely, which is the point: the service cannot be published to a
+// network interface by changing an environment variable or a launch profile. Remote
+// access is an SSH tunnel, or a reverse proxy in front of this port.
+var httpPort = int.TryParse(Environment.GetEnvironmentVariable("LOOM_HTTP_PORT"), out var configuredPort)
+    ? configuredPort
+    : 5080;
+
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.AddServerHeader = false;
     options.Limits.MaxRequestBodySize = 1_048_576; // 1 MB
     options.Limits.MaxConcurrentConnections = 1000;
     options.Limits.MaxRequestLineSize = 8192; // 8 KB
+    options.ListenLocalhost(httpPort);
 });
 
 var app = builder.Build();
@@ -67,11 +92,9 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
-if(!app.Environment.IsDevelopment())
-{
-    app.UseHsts();
-    app.UseHttpsRedirection();
-}
+// No UseHsts / UseHttpsRedirection here. This process serves plain HTTP on loopback and
+// never terminates TLS - see BACKLOG.md 3.3. Both calls were inert without an HTTPS
+// listener, and leaving them in place implied a protection that did not exist.
 
 if (corsOrigins.Length > 0)
 {
@@ -92,3 +115,4 @@ app.MapLoomTokenEndpoints();
 app.MapApiEndpoints();
 
 app.Run();
+return 0;

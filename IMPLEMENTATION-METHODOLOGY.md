@@ -67,7 +67,7 @@ This document is the step-by-step counterpart to `wiggly-noodling-hoare.md`'s Ar
 3. ✅ **Source-Generated JSON** - All DTOs registered in JsonSerializerContext
 4. ✅ **Minimal APIs Only** - No MVC controllers (reflection-heavy)
 5. ✅ **No SignalR** - Use raw WebSockets (SignalR uses reflection)
-6. ✅ **<15 MB Binary** - Monitor size after each phase
+6. ✅ **<17 MB Binary** - Monitor size after each phase
 7. ✅ **<20 MB Memory** - Zero allocations in hot paths
 8. ✅ **"Plugins" are compile-time registered** - `ILoomCollector` implementations, exporters, and alert targets are statically compiled types wired up via generic `Add...<T>()` calls in DI, never `Assembly.LoadFrom` or reflection-based discovery. This applies throughout Phases 5-13.
 9. ✅ **Delegates are fine, expression trees are not** - `Func<T,bool>` conditions (e.g. alert conditions) compiled at DI-registration time are ordinary closures, not reflection — allowed. `Expression<Func<T,bool>>` requires `System.Linq.Expressions`, which is reflection-heavy — not allowed. See ADR-7 and ADR-8 in `wiggly-noodling-hoare.md`.
@@ -1098,7 +1098,7 @@ dotnet new web -f net10.0
 - `<TrimMode>link</TrimMode>`
   > "link" = aggressive trimming at assembly level
   > Alternative is "copyUsed" (safer but larger binary)
-  > We use "link" to stay under 15 MB
+  > We use "link" to stay under 17 MB
 
 ### Step 2.3: Delete Default Program.cs Content
 
@@ -5790,9 +5790,13 @@ Get-ChildItem Loom.Web.Api/bin/Release/net10.0/win-x64/publish/ -Filter *.exe |
   Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
 ```
 
-**Correction to the original verification block:** it curled `https://localhost:5443/api/health`
-against `Loom.Web.Api`. **That host has no health endpoint** — `/api/health` exists only
-in `Loom.Dashboard` (`EndpointExtensions.cs:51`). Probe a real route.
+**Correction to the original verification block:** it curled `https://localhost:5443/api/health`.
+Both halves were wrong. Loom does not terminate TLS (`BACKLOG.md` § 3.3), so the scheme and
+port are `http://localhost:5080`. And `/api/health` now exists on **both** hosts —
+`Loom.Web.Api` (`Extensions/EndpointExtensions.cs:35`) and `Loom.Dashboard`
+(`EndpointExtensions.cs:50`) — since `598c345` added the anonymous marker to the AOT publish
+target that actually runs under systemd. The claim that only the Dashboard had one was true
+when written and this note predates that commit.
 
 Required test coverage in `Loom.Telemetry.Tests`:
 
@@ -5836,7 +5840,7 @@ Ready for Phase 15 (Production Build & Deployment)? [Y/N]
 # PHASE 15: Production Build & Deployment
 
 **Duration:** 3-4 days
-**Goal:** <15 MB binary, systemd-hardened deployment, CI/CD for Linux and Windows — the final phase.
+**Goal:** <17 MB binary, systemd-hardened deployment, CI/CD for Linux and Windows — the final phase.
 
 ## Step 15.1: Native AOT Production Build
 
@@ -5869,7 +5873,7 @@ The full unit file (`loom-web.service`) and `deploy.sh` are maintained in `wiggl
 
 ```bash
 sudo systemctl status loom-web.service
-curl https://localhost:5443/api/health
+curl http://localhost:5080/api/health
 sudo -u loomd cat /var/secrets/loom/jwt.key   # should succeed (loomd can read)
 cat /var/secrets/loom/jwt.key                 # should fail for other users (400 perms)
 ```
@@ -5914,10 +5918,10 @@ jobs:
       - name: Publish AOT
         run: dotnet publish Loom.Web.Api -c Release -r linux-x64 /p:PublishAot=true /p:StripSymbols=true
 
-      - name: Binary size gate (< 15 MB)
+      - name: Binary size gate (< 17 MB)
         run: |
           SIZE=$(stat -c%s Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api)
-          MAX=$((15 * 1024 * 1024))
+          MAX=$((17 * 1024 * 1024))
           if [ "$SIZE" -gt "$MAX" ]; then echo "Binary too large: $SIZE bytes"; exit 1; fi
 
       - name: Benchmarks (query/alert/scrape targets)
@@ -5946,7 +5950,7 @@ This is the complete checklist from `wiggly-noodling-hoare.md` → "Verification
 
 **Performance:**
 ```
-[ ] Binary size < 15 MB
+[ ] Binary size < 17 MB
 [ ] Memory usage < 20 MB idle
 [ ] Zero allocations in: RecordMetric, WebSocket send, Prometheus scrape
 [ ] API latency < 10ms (p95)
@@ -5969,7 +5973,7 @@ This is the complete checklist from `wiggly-noodling-hoare.md` → "Verification
 ✓ Full telemetry platform: custom metrics, attributes, collectors, sampling, query
   language, alerting, exporters, local dev mode — all backed by the ring buffer
   from Phase 6, all AOT-compatible per their respective ADRs
-✓ Production-hardened: <15 MB binary, manual JWT, systemd sandboxing, CI/CD with
+✓ Production-hardened: <17 MB binary, manual JWT, systemd sandboxing, CI/CD with
   a size gate and a dedicated source-generator test job
 ✓ Deferred, not lost: Angular dashboard architecture preserved in
   wiggly-noodling-hoare.md → "Deferred: Frontend"

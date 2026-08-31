@@ -1,0 +1,137 @@
+name: Loom CI
+
+# Derived from IMPLEMENTATION-METHODOLOGY.md Step 15.3, with three corrections that
+# were found by running every step locally first (see the notes on each job).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '20'
+  # The hard limit from CLAUDE.md. The methodology originally gated at 15 MB, which
+  # would have failed on a healthy 15.108 MB win-x64 build. Corrected in e3c4bda.
+  MAX_BINARY_MB: 17
+
+jobs:
+  build-and-test:
+    name: Build & test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # The solution file is Loom.slnx (XML format). `Loom.sln` does not exist and
+      # fails with MSB1009.
+      - name: Restore
+        run: dotnet restore Loom.slnx
+
+      # Trim and AOT analyzers as errors. This passes as of 3c6a660: Loom.Dashboard
+      # sets EnableRequestDelegateGenerator (clearing 24 IL2026), and the test project
+      # exempts xUnit1031 via WarningsNotAsErrors. Two NETSDK1212 warnings remain by
+      # design - Loom.Telemetry.Generators targets netstandard2.0, where the trim
+      # analyzer is not supported.
+      - name: Build (trim/AOT analyzers as errors)
+        run: dotnet build Loom.slnx -c Release --no-restore /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
+
+      # Loom.Telemetry.Tests is the only test project. Parallelization is disabled
+      # assembly-wide in AssemblyInfo.cs. Baseline at 3c6a660: 592 passing, 0 skipped.
+      - name: Unit + integration tests (IL mode)
+        run: dotnet test Loom.slnx -c Debug
+
+      # The methodology named this filter LoomProfileGeneratorTests, which does not
+      # exist. The actual class is GeneratorTests.
+      - name: Source generator tests
+        run: dotnet test Loom.Telemetry.Tests -c Debug --filter FullyQualifiedName~GeneratorTests
+
+  aot-publish-linux:
+    name: Native AOT publish (linux-x64)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Native AOT cannot cross-compile between operating systems - publishing
+      # linux-x64 from Windows fails with "Cross-OS native compilation is not
+      # supported". This job is the only way the Linux artifact gets built in CI.
+      - name: Install native toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      # PublishAot, PublishTrimmed, TrimMode=link and InvariantGlobalization are all
+      # already set in Loom.Web.Api.csproj - do not pass them again here, or the csproj
+      # stops being the single source of truth for how the shipped binary is built.
+      - name: Publish AOT
+        run: dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r linux-x64
+
+      - name: Binary size gate (< ${{ env.MAX_BINARY_MB }} MB)
+        run: |
+          BIN=Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
+          SIZE=$(stat -c%s "$BIN")
+          MAX=$((${{ env.MAX_BINARY_MB }} * 1024 * 1024))
+          echo "Binary: $(( SIZE / 1024 )) KB / $(( MAX / 1024 )) KB allowed"
+          if [ "$SIZE" -gt "$MAX" ]; then
+            echo "::error::Binary is $SIZE bytes, over the $MAX byte limit"
+            exit 1
+          fi
+
+      # The publish output is a native ELF executable with no managed assemblies
+      # alongside it. If a Loom.Web.Api.dll appears here, PublishAot silently did not
+      # engage and the size gate above would be measuring the wrong thing.
+      - name: Assert the output is actually native
+        run: |
+          DIR=Loom.Web.Api/bin/Release/net10.0/linux-x64/publish
+          file "$DIR/Loom.Web.Api"
+          if [ -f "$DIR/Loom.Web.Api.dll" ]; then
+            echo "::error::Managed assembly present - this is not an AOT publish"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-web-api-linux-x64
+          path: Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
+          if-no-files-found: error
+
+  frontend:
+    name: Angular tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Loom.Web.Frontend/package-lock.json
+
+      - name: Install
+        working-directory: Loom.Web.Frontend
+        run: npm ci
+
+      # `ng test` runs vitest via @angular/build:unit-test - one pass, no watch, no
+      # browser. Baseline: 3 files, 94 passing.
+      - name: Test
+        working-directory: Loom.Web.Frontend
+        run: npx ng test
+
+      # Loom.Web.Frontend/dist is gitignored, and Loom.Dashboard.csproj embeds it with
+      # a wildcard. On a fresh clone that wildcard matches nothing, so the Dashboard
+      # still compiles but ships an empty wwwroot. Building here proves the bundle is
+      # producible; any job that packs loom-dashboard must run this first.
+      - name: Production build
+        working-directory: Loom.Web.Frontend
+        run: npx ng build --configuration production

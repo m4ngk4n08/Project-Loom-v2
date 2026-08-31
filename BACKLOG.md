@@ -619,6 +619,32 @@ No telemetry, no logs, no configuration.
 
 ---
 
+### 4.10 Setup Instructions Are Windows-Only on the Platform That Ships 🟢 LOW
+
+**Issue:** Two operator-facing messages hardcode Windows syntax and print unchanged on
+Linux. Both were hit while smoke-testing the Linux AOT binary in WSL on 2026-08-31.
+
+1. **`AuthCommand.Init` prints PowerShell.** `Loom.DevTools/Commands/AuthCommand.cs:43-44`
+   emits `$env:LOOM_JWT_KEY_FILE = "..."` regardless of platform. On Linux the correct
+   form is `export LOOM_JWT_KEY_FILE=...`. Anyone pasting what `loom auth init` tells
+   them to paste gets a shell error.
+2. **The startup failure message says "Windows dev setup".** The fail-closed path for a
+   missing signing key prints `Windows dev setup:  loom auth init` on Linux.
+
+**Why it matters more than it looks:** Phase 15 deploys to Linux under systemd. These
+are the two messages an operator sees at first-run and at first-failure, and both
+describe a platform they are not on. Neither breaks anything — `auth init` still writes
+correct files, and the startup failure is still correctly diagnosed and actionable.
+
+**Fix:** branch on `OperatingSystem.IsWindows()` and emit `export VAR=value` otherwise.
+`PersistEnvironmentVariables` already does exactly this check (`AuthCommand.cs:64`), so
+the pattern is established in the same file.
+
+**Effort:** 20 minutes, plus a test — the printed text is not currently covered.
+**Priority:** 🟢 LOW — cosmetic, but on the first-run path for the shipping platform
+
+---
+
 ## 5. Documentation Gaps
 
 ### 5.1 Binary Size Target Documentation 🟡 MEDIUM (COMPLETED)

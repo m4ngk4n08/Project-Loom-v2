@@ -111,11 +111,11 @@ public static class AuthCommand
 
     public static void Hash() => Console.WriteLine(PasswordHasher.Hash(ReadPassword()));
 
-    public static void Token(string subject, bool metricsScope, TimeSpan ttl)
+    public static void Token(string subject, JwtScope scope, TimeSpan ttl)
     {
         var key = KeyMaterial.LoadSigningKey(KeyMaterial.ResolveKeyFile());
         var issuer = new JwtIssuer(key, TimeProvider.System);
-        Console.WriteLine(issuer.Issue(subject, ttl, metricsScope ? JwtScope.Metrics : JwtScope.Full));
+        Console.WriteLine(issuer.Issue(subject, ttl, scope));
     }
 
     /// <summary>Pure. Strips a leading UTF-8 BOM from a password read off redirected stdin.
@@ -149,6 +149,21 @@ public static class AuthCommand
         }
         Console.WriteLine();
         return buffer.ToString();
+    }
+
+    /// <summary>Accepts "metrics" and "full". Rejects anything else rather than guessing.
+    /// A typo must not silently widen authority: an unvalidated comparison against "metrics"
+    /// turns `--scope metrcs` into a full-scope token, which for a 90-day service credential
+    /// hands an unattended scraper full operator authority.</summary>
+    public static bool TryParseScope(string value, out JwtScope scope)
+    {
+        scope = JwtScope.Full;
+        switch (value)
+        {
+            case "metrics": scope = JwtScope.Metrics; return true;
+            case "full": scope = JwtScope.Full; return true;
+            default: return false;
+        }
     }
 
     /// <summary>Accepts 30d, 12h, 45m. Rejects anything else rather than guessing.</summary>

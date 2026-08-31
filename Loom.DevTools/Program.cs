@@ -1,4 +1,5 @@
 using Loom.DevTools.Commands;
+using Loom.Security;
 
 // Windows terminals (cmd.exe, older PowerShell hosts) default to a legacy OEM
 // codepage that can't render the block-drawing sparkline glyphs or the "●" live
@@ -68,7 +69,7 @@ switch (args)
     case ["auth", "token", ..] when args.Length >= 4:
         {
             string? sub = null;
-            var metricsScope = false;
+            var scope = JwtScope.Full;
             var ttl = TimeSpan.FromDays(90);
             var bad = false;
             for (var i = 2; i < args.Length; i++)
@@ -77,7 +78,7 @@ switch (args)
                 {
                     case "--sub" when i + 1 < args.Length: sub = args[++i]; break;
                     case "--scope" when i + 1 < args.Length:
-                        metricsScope = args[++i] == "metrics";
+                        if (!AuthCommand.TryParseScope(args[++i], out scope)) bad = true;
                         break;
                     case "--ttl" when i + 1 < args.Length:
                         if (!AuthCommand.TryParseTtl(args[++i], out ttl)) bad = true;
@@ -86,9 +87,9 @@ switch (args)
                 }
             }
             if (bad || string.IsNullOrEmpty(sub))
-                Console.WriteLine("Usage: loom auth token --sub <name> [--scope metrics] [--ttl 90d]");
+                Console.WriteLine("Usage: loom auth token --sub <name> [--scope metrics|full] [--ttl 90d]");
             else
-                AuthCommand.Token(sub, metricsScope, ttl);
+                AuthCommand.Token(sub, scope, ttl);
         }
         break;
     default:
@@ -105,7 +106,8 @@ switch (args)
         Console.WriteLine("  loom auth init [--persist]              Create a dev signing key and users file");
         Console.WriteLine("                                          (--persist also sets the env vars for your user account)");
         Console.WriteLine("  loom auth add-user <name>               Append a user (prompts for a password)");
-        Console.WriteLine("  loom auth hash                          Print one users-file line to stdout");
-        Console.WriteLine("  loom auth token --sub <name> [--scope metrics] [--ttl 90d]  Mint a service token");
+        Console.WriteLine("  loom auth hash                          Print a password hash to stdout");
+        Console.WriteLine("                                          (the users-file line is <name>:<hash>)");
+        Console.WriteLine("  loom auth token --sub <name> [--scope metrics|full] [--ttl 90d]  Mint a service token");
         break;
 }

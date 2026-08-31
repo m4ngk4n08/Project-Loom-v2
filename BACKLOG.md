@@ -1469,6 +1469,134 @@ needs a deliberate answer before deployment rather than a discovery during it.
 
 ---
 
+## 11. Packaging & Distribution
+
+### 11.1 Loom Ships as NuGet Packages, Not Only as a Host 🟡 MEDIUM (PLANNED)
+
+**Current state.** Only `Loom.Dashboard` and `Loom.DevTools` are packable, both via
+`PackAsTool`. None of the nine libraries carries a `PackageId`, description, license, or
+repository URL. The consumer-facing story today is "run the host" or "run the CLI"; there
+is no "reference the library" story despite the library surface already existing.
+
+**Target state.** Three tiers, plus a metapackage:
+
+| Package | Contains | Consumer writes |
+|---|---|---|
+| `Loom.Telemetry` | attribute + generator + recording | `[LoomProfile]`, `AddLoomTelemetry()` |
+| `Loom.Dashboard.AspNetCore` | mountable dashboard | `AddLoomDashboard()` / `MapLoomDashboard()` |
+| `Loom` (metapackage) | no code; depends on the others | one-line "everything" install |
+| `loom` / `loom-dashboard` | CLI tools | unchanged, already ship this way |
+
+**Work items:**
+
+1. Package metadata (`PackageId`, `Description`, `PackageLicenseExpression`,
+   `RepositoryUrl`, README) across the libraries intended for publication.
+2. Ship `Loom.Telemetry.Generators` **inside** `Loom.Telemetry.nupkg` at
+   `analyzers/dotnet/cs/`. Today the generator is wired by a hand-written
+   `OutputItemType="Analyzer" ReferenceOutputAssembly="false"` `ProjectReference`
+   (`examples/SampleMonitoredApp/SampleMonitoredApp.csproj:12`). No consumer should type
+   that line; a single `PackageReference` must deliver both attribute and generator.
+   The generator's `netstandard2.0` target — currently visible only as the ignorable
+   `NETSDK1212` warning — is a prerequisite for this, not an accident.
+3. Extract `Loom.Web.Api`'s wiring behind `AddLoomDashboard()` / `MapLoomDashboard()` and
+   reduce `Program.cs` to a thin host over them. **This is a refactor, not a repack:**
+   `Program.cs` currently owns `CreateSlimBuilder`, the Kestrel loopback bind, the
+   security bootstrap, and a `return 1` on misconfiguration. A library cannot terminate
+   its host's process.
+4. Add a consumer-AOT CI gate (see § 11.3).
+
+### 11.2 A Single All-In-One Package Is Rejected 🟢 LOW (DECIDED)
+
+Considered and rejected in favour of § 11.1's split. NuGet dependencies are transitive
+and non-optional, so one package forces all of Loom into every consumer. Three concrete
+costs, each verified:
+
+- **ASP.NET Core enters non-web apps.** `Loom.Web.Contracts.csproj:16` declares
+  `<FrameworkReference Include="Microsoft.AspNetCore.App" />`, and Storage, Query,
+  Alerting, and Exporters all depend on Web.Contracts. A console worker referencing Loom
+  to time one method would acquire a web framework it never calls.
+- **`IL2104` becomes the consumer's problem.** `Microsoft.Diagnostics.Tracing.TraceEvent`
+  (`Loom.Dashboard.csproj:21`, `Loom.DevTools.csproj:12`) emits `IL2104` when trimmed.
+  Confined to the tools today; a merged package puts it in every consumer's build log.
+- **`Loom.Telemetry.Assist` is an adoption blocker in a default install.**
+  `AnthropicExplainClient.cs:31` sends `x-api-key` to an external LLM endpoint. It is
+  opt-in and inert without `LOOM_LLM_API_KEY`, but dependency review assesses capability,
+  not configuration. An outbound AI client in the transitive graph of a telemetry library
+  is a plausible rejection at any organisation with a security gate. **Assist must not be
+  in the default install path**, including via the `Loom` metapackage.
+
+A fourth cost is versioning: one package means one version line, so a dashboard-only fix
+forces a release on consumers who use only the attribute.
+
+**Invariant this establishes:** `Loom.Telemetry` must retain **zero** project references
+to other Loom assemblies. It currently references only
+`Microsoft.Extensions.DependencyInjection.Abstractions`. This is what makes the tier
+split viable and what quarantines both TraceEvent and Assist away from the package most
+consumers will install. Treat a new reference here as a breaking change.
+
+### 11.3 Consumer-AOT Gate Is Missing 🟡 MEDIUM (PLANNED)
+
+The 17 MB gate measures Loom's own standalone binary. Under a package-first distribution
+that binary is not what consumers download, so the gate protects an artefact of declining
+relevance. It should remain, but it is no longer the most valuable check.
+
+The check that matters instead: **a consumer's AOT publish must not break because Loom is
+referenced.** `Loom.Telemetry` already sets `IsAotCompatible` and `EnableTrimAnalyzer`,
+but nothing proves the packaged form is clean. Gate: a minimal consumer app referencing
+the **packed `.nupkg`** (not a `ProjectReference`) publishes with `PublishAot` and emits
+zero `IL2026`/`IL3050`. Referencing the project instead of the package would not exercise
+the `analyzers/dotnet/cs/` path from § 11.1 item 2 and could pass while the real package
+is broken.
+
+---
+
+### 2026-09-01: Loom Distributes as NuGet Packages; Split Over Monolith; Private Before Public
+
+**Decision:** Reorient Loom's primary distribution from "a host you run" to "a package you
+reference." Ship the tier split in § 11.1 rather than a single all-in-one package. Publish
+to a private feed first and to nuget.org only after the HIM integration has exercised the
+install path.
+
+**Rationale:**
+
+- The in-process surface already exists and is demonstrated end to end:
+  `examples/SampleMonitoredApp` is an ordinary `Host.CreateApplicationBuilder` app that
+  gets instrumented purely by `[LoomProfile]` and the source generator, with no Loom host
+  in the process. The gap is packaging, not capability.
+- A single package's cost is blast radius and trust, not megabytes — see § 11.2 for the
+  three verified costs. The metapackage recovers the one-line install without forcing the
+  transitive graph on consumers who do not want it.
+- Public publication is irreversible in two ways that matter: a pushed version can be
+  unlisted but never deleted or re-pushed, and the package ID is claimed permanently. The
+  API surface of v1 therefore becomes a compatibility promise at the moment of first push.
+- HIM is Loom's first real consumer and the correct place to discover rough edges in
+  naming and install ergonomics, while those are still free to change. A private feed —
+  initially a local directory of `.nupkg` files, requiring no feed server or credentials —
+  reproduces the consumer install mechanic exactly.
+
+**Consequences:**
+
+- Supersedes the recommendation in `handoff.md` § 5 that HIM integration shape **(b)**
+  (out-of-process EventPipe attach) precede **(a)** (library inside `him-ai`). Under a
+  package-first Loom, **(a) is the rehearsal**: HIM stops being an integration target and
+  becomes the first consumer of the package. (b) remains available and unaffected.
+- Reduces the urgency of Phase 15 Step 15.2 (systemd units, `loomd` user, secrets
+  provisioning). That work provisions the standalone host, whose role shrinks under
+  package-first distribution. It stays deferred behind HIM; the HIM rehearsal should now
+  also inform whether 15.2 is still needed in its planned form.
+- Adds § 11.3 as a release gate alongside the 17 MB check.
+
+**Open, needs the user:**
+
+1. Whether the standalone `Loom.Web.Api` host remains a shipping artefact or becomes
+   dev-only scaffolding once the dashboard is mountable. Decides whether the 17 MB gate
+   stays a release gate or demotes to an internal smoke check.
+2. Package ID naming pass before any public push, since IDs are permanent.
+
+**Action:** None yet — no code or project files changed. Recorded ahead of implementation.
+
+---
+
 **Document Owner:** Project Loom v2 Team  
 **Last Review:** 2026-08-24  
 **Next Review:** Phase 13 completion or pre-1.0 release

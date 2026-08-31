@@ -9,6 +9,13 @@
 		<IsTestProject>true</IsTestProject>
 		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
 		<CompilerGeneratedFilesOutputPath>Generated</CompilerGeneratedFilesOutputPath>
+		<!-- xUnit1031 fires at InMemoryMetricStoreTests.cs:372 and :387, where blocking on the
+		     task IS the behaviour under test. Both are long-documented as expected in CLAUDE.md.
+		     Without this, the CI build in IMPLEMENTATION-METHODOLOGY.md Step 15.3 - which passes
+		     TreatWarningsAsErrors=true solution-wide - fails on two warnings it is not there to
+		     catch. Scoped to this one rule rather than TreatWarningsAsErrors=false so a genuinely
+		     new warning in the test project still fails the build. -->
+		<WarningsNotAsErrors>xUnit1031</WarningsNotAsErrors>
 	</PropertyGroup>
 
 	<ItemGroup>

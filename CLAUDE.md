@@ -27,7 +27,7 @@ than improvise past a mismatch.
 4. **Follow the phase order strictly.** Do not skip ahead, combine phases, or implement Phase N+1 code while working on Phase N.
 5. **When the plan has code, use THAT code** (with the fixes already applied to these documents). Do not rewrite, "improve," or offer alternatives unless the user explicitly asks.
 
-**WHAT THIS MEANS IN PRACTICE:**
+**IN PRACTICE:**
 - Before writing any code, identify which Phase and Step you're implementing
 - Quote or reference the specific section of `IMPLEMENTATION-METHODOLOGY.md` you're following
 - If you notice a gap or ambiguity in the plan, flag it — don't fill it silently
@@ -35,157 +35,69 @@ than improvise past a mismatch.
 
 ---
 
-## Working Style & Collaboration Approach
+## Working Style
 
-**DEFAULT MODE: Terse, Token-Efficient Code Delivery**
+**DEFAULT MODE: terse, token-efficient code delivery.**
 
-**Default behavior (to conserve tokens):**
-- Provide code with minimal explanation
-- Focus on the implementation, not pedagogy
-- Code + terse comments only where non-obvious
-- Don't explain standard C#/.NET behavior
+- Code with minimal explanation; implementation, not pedagogy
+- Terse inline comments only where non-obvious
+- No preamble, no restating the question, no filler
+- Don't explain standard C#/.NET behavior — assume fundamentals
+- Prefer diffs and snippets over full file reprints
 - The user will manually TYPE every keystroke you provide — accuracy is critical
 
-**ELI5 Educator Mode (Opt-In Only):**
+**Token discipline.** This file and the large docs are cached; don't re-summarize them.
 
-The user can trigger **ELI5 Educator Mode** by saying:
-- "explain this"
-- "ELI5 mode on"
-- "teach me this part"
+- Before reading a file, check whether it's already in the conversation
+- Read a file once. Don't re-read unmodified files to "verify" context you have
+- Reference earlier explanations ("as established above") rather than repeating them
+- Reference documentation by name instead of quoting long sections
+- When providing code, show the new or changed parts, not the whole file
+- Batch related questions instead of multiple round trips
+- Avoid generating large boilerplate blocks
 
-**When ELI5 mode is active:**
-- Break down complex concepts into simple, digestible explanations
-- Explain WHY each line of code exists, not just WHAT it does
-- Provide code in small, manageable chunks
-- After each code block, explain the structure and purpose
-- Use analogies and real-world examples when explaining technical concepts
-- Assume the user is learning by doing - typing builds muscle memory and understanding
+### ELI5 Educator Mode (opt-in)
 
-**Example ELI5 Approach:**
-```
-"We're going to create a DTO class. Think of a DTO like a shipping box - it just holds 
-data and passes it between parts of the application without any logic. Here's the code:"
+**On:** "explain this", "ELI5 mode on", "teach me this part".
+**Off:** "just the code", "ELI5 mode off".
 
-[provide code block]
+The user learns by physically typing code while understanding what each part does.
+Typing builds muscle memory; the explanation is what makes it stick. When the mode is
+active:
 
-"Notice how each property has `{ get; init; }` - this means you can set the value once 
-when creating the object, but can't change it later. It's like writing in permanent 
-marker instead of pencil."
-```
+- Break complex concepts into simple, digestible pieces
+- Explain WHY each line exists, not just WHAT it does
+- Explain WHY architectural decisions were made, and WHAT trade-offs they carry
+- Explain HOW a pattern satisfies the Native AOT constraints
+- Give context for non-obvious implementations
+- Deliver code in small chunks, explaining structure and purpose after each block
+- Use analogies and real-world examples
+- Reference relevant .NET documentation where it helps
 
-**Mode switching:**
-- User says "ELI5 mode on" or "explain this" → Full educational explanations
-- User says "just the code" or "ELI5 mode off" → Back to terse default
-
-The user learns best by physically typing the code while understanding each component's purpose.
-
----
-
-## Token Usage Optimization
-
-**CRITICAL: Minimize Token Consumption**
-
-This project must utilize efficient tokenization strategies to minimize costs and maximize context window usage:
-
-### Prompt Caching Strategy
-
-1. **Use Cache Extensively** - Leverage Claude's prompt caching to avoid recreating tokens for:
-   - This CLAUDE.md file (should be cached)
-   - Large documentation files (IMPLEMENTATION-METHODOLOGY.md, wiggly-noodling-hoare.md)
-   - Core project structure and architecture descriptions
-   - Frequently referenced code patterns and constraints
-
-2. **Read Files Once** - When working on a task:
-   - Read necessary files at the beginning of the session
-   - Reference information from earlier in the conversation instead of re-reading
-   - Don't repeatedly read the same files unless they've been modified
-
-3. **Efficient Context Management**:
-   - Provide concise, focused responses
-   - Don't repeat information already established in the conversation
-   - Reference earlier explanations: "As explained earlier..." instead of re-explaining
-   - Keep code examples focused on the specific task at hand
-
-4. **Minimize Redundant Operations**:
-   - Don't re-read files just to verify context you already have
-   - Use conversation memory effectively
-   - When explaining concepts, be thorough but concise
-   - Avoid generating large blocks of boilerplate that could be templated
-
-### Best Practices for Token Efficiency
-
-- **Before reading a file**, check if the information is already in the conversation context
-- **When providing code**, focus on the new/changed parts, not entire files
-- **Use diffs and snippets** instead of full file reprints when editing
-- **Reference documentation** by name instead of quoting large sections
-- **Batch related questions** instead of multiple back-and-forth exchanges
-- **Trust the cache** - large project docs are cached and don't need re-summarization
-
-**Goal**: Make every token count while maintaining code quality and educational value.
-
----
-
-## Checkpointing Strategy to Prevent Drift
-
-**CRITICAL: Use Checkpoints in Long Conversations**
-
-During extended implementation sessions, Claude must use checkpoints to prevent drift and maintain focus on project constraints.
-
-### When to Checkpoint
-
-Apply checkpoints at these key moments:
-
-1. **After completing a major phase** (e.g., finished Phase 1: Foundation & Contracts)
-2. **Before starting complex implementations** (e.g., WebSocket handlers, SIMD code)
-3. **Every 50-100 messages** in long conversations
-4. **When user indicates confusion** or asks for clarification
-5. **Before making architectural decisions** that affect multiple components
-6. **After user has typed significant code** and before moving to next component
-
-### What to Include in Checkpoints
-
-Each checkpoint should verify:
+Target register:
 
 ```
-✓ Current phase/task: [What we're working on]
-✓ What we just completed: [Last finished component]
-✓ What's next: [Next immediate task]
-✓ Critical constraints still in focus:
-  - Native AOT compliance (no reflection)
-  - Zero-allocation hot paths
-  - <17 MB binary size
-  - Source-generated JSON serialization
-  - Minimal APIs only (no MVC controllers)
-✓ Files created/modified: [List]
-✓ User understanding checkpoint: "Does this make sense so far?"
+"A DTO is like a shipping box — it holds data and passes it between parts of the
+application without any logic of its own. Here's the code:"
+
+[code block]
+
+"Each property is `{ get; init; }`: you set the value once when creating the object
+and can't change it after. Permanent marker, not pencil."
 ```
 
-### Checkpoint Example
+### Checkpointing
 
-```
-"Let's checkpoint where we are:
+Long sessions drift. Checkpoint after completing a major phase, before starting a
+complex implementation (WebSocket handlers, SIMD), every 50-100 messages, when the user
+signals confusion, before an architectural decision affecting multiple components, and
+after the user has typed a significant amount of code. The user can trigger one at any
+time with "checkpoint" or "let's pause and review".
 
-✓ We just finished: Loom.Web.Contracts with all DTO classes and JsonSerializerContext
-✓ You typed: 5 DTO classes, all with proper source generator attributes
-✓ Up next: Create Loom.Web.Api project with Minimal APIs setup
-✓ Still maintaining: Native AOT, zero-allocation, <17 MB binary
-
-Before we move forward - does the DTO structure make sense? Any questions 
-about why we used 'init' properties or the JsonSerializable attributes?"
-```
-
-### Benefits of Checkpointing
-
-- **Prevents drift** from Native AOT constraints
-- **Confirms user understanding** before building on concepts
-- **Maintains focus** on the current implementation phase
-- **Provides natural break points** for long typing sessions
-- **Allows course correction** if something was misunderstood
-- **Reinforces learning** by summarizing what was just completed
-
-### User Can Request Checkpoints
-
-User can say: "checkpoint" or "let's pause and review" at any time to trigger a status check.
+A checkpoint states: current phase/task · what was just completed · what's next · files
+created or modified · the constraints still in force (Native AOT / no reflection,
+zero-allocation hot paths, <17 MB binary, source-generated JSON, Minimal APIs only) ·
+and asks whether it makes sense so far.
 
 ---
 
@@ -203,10 +115,9 @@ is silent, wiggly-noodling-hoare.md fills in. If both are silent, ASK the user.
 **Exception — facts about the current codebase.** On project structure, file paths,
 build commands, dependency graph, and tool/package versions, **this file wins.** The
 methodology is a build narrative written before delivery and has since drifted (it
-references `Loom.Core`, `Loom.Host`, and `Loom.sln`, none of which exist — see its
-"Structural corrections" banner). Never take a structural claim from the methodology
-without checking it against **Project Structure (Actual)** below, or against the
-filesystem.
+references `Loom.Core`, `Loom.Host`, and `Loom.sln`, none of which exist). Never take a
+structural claim from the methodology without checking it against **Project Structure
+(Actual)** below, or against the filesystem.
 
 **DO NOT:**
 - Invent code patterns not in these documents
@@ -217,21 +128,16 @@ filesystem.
 
 ---
 
-## Project Status
-
-**This project is transitioning from PLANNING to IMPLEMENTATION.**
-
-This directory contains design documentation for Project Loom v2. Implementation follows the methodology document phase-by-phase.
-
-**Active Plan**: `wiggly-noodling-hoare.md` - Architecture & migration decisions
-**Build Guide**: `IMPLEMENTATION-METHODOLOGY.md` - Step-by-step implementation (Phases 0-3 detailed, 4-11 overview)
-
 ## Project Overview
 
-Project Loom v2 is a lightweight, real-time diagnostic terminal companion for production .NET applications. It provides insights into CPU hotpaths, memory allocations, and thread blockages through a web-based interface.
+Project Loom v2 is a lightweight, real-time diagnostic terminal companion for production
+.NET applications. It surfaces CPU hotpaths, memory allocations, and thread blockages
+through a web interface. Implementation follows `IMPLEMENTATION-METHODOLOGY.md`
+phase-by-phase; `wiggly-noodling-hoare.md` carries architecture and deployment.
 
 **Target Specifications:**
-- Binary size: <17 MB hard limit; **14.74 MB measured** on `d277a58` (see `BACKLOG.md` §2.1)
+- Binary size: <17 MB hard limit. Measured: **15.108 MB** win-x64, **14.706 MB**
+  linux-x64 (Linux runs ~400 KB smaller). See `BACKLOG.md` §2.1
 - Memory footprint: <20 MB background execution
 - Access protocol: plain HTTP bound to loopback; an SSH tunnel carries the remote leg
 - Frontend: Angular 21.2 with WebSocket real-time streaming
@@ -258,13 +164,16 @@ Solution file is **`Loom.slnx`** (XML solution format), NOT `Loom.sln`.
 `dotnet build/test Loom.sln` fails with `MSBUILD : error MSB1009`.
 
 ```
-Loom.slnx                      (13 projects)
+Loom.slnx                      (14 projects)
 ├── Loom.Telemetry/            → Core: MetricRecord, LogRecord, ring buffers,
 │                                collectors, sampling. NO project references.
 ├── Loom.Web.Contracts/        → Shared DTOs + LoomJsonSerializerContext.
 │                                NO project references (CRITICAL for AOT).
 ├── Loom.Telemetry.Generators/ → Roslyn source generators (netstandard2.0).
 │                                NO project references.
+├── Loom.Security/             → Manual JWT: issuer, validator, PBKDF2 password
+│                                hashing, user store, login throttle, auth
+│                                middleware, token endpoints.
 ├── Loom.Storage/              → IMetricStore/ILogStore, in-memory ring-buffer
 │                                stores, ILoggerProvider capture.
 ├── Loom.Telemetry.Query/      → SQL-like query language (tokenizer/parser/executor).
@@ -288,16 +197,18 @@ Not in the solution:
   Loom.Tests/                  → EMPTY directory, no csproj. Ignore it.
 ```
 
-**Does NOT exist** despite older docs referencing them: `Loom.Core` (SIMD engine)
-and `Loom.Host` (bootstrap entry point). Both were planned and never built. There is
-no separate host — `Loom.Web.Api` and the two dotnet tools are the entry points.
-`Loom.Storage` has no memory-mapped cache and no RAG ingestor; it is in-memory only.
+**Does NOT exist** despite older docs referencing them: `Loom.Core` (SIMD engine),
+`Loom.Host` (bootstrap entry point), and `Loom.Benchmarks`. All were planned and never
+built. There is no separate host — `Loom.Web.Api` and the two dotnet tools are the entry
+points. `Loom.Storage` has no memory-mapped cache and no RAG ingestor; it is in-memory
+only.
 
 **Dependency Flow** (arrows point to dependencies):
 ```
 Loom.Telemetry, Loom.Web.Contracts, Loom.Telemetry.Generators,
 Loom.Telemetry.Assist                                           ← foundation, no refs
 
+Loom.Security            → Loom.Web.Contracts
 Loom.Storage             → Loom.Telemetry, Loom.Web.Contracts
 Loom.Web.RealTime        → Loom.Web.Contracts
 Loom.Telemetry.Query     → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
@@ -305,42 +216,32 @@ Loom.Telemetry.Alerting  → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
                            Loom.Web.Contracts
 Loom.Telemetry.Exporters → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
 
-Loom.Web.Api    → Loom.Storage, Loom.Telemetry.Exporters, Loom.Telemetry.Query,
-                  Loom.Telemetry.Alerting, Loom.Web.Contracts, Loom.Web.RealTime
-Loom.Dashboard  → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
+Loom.Web.Api    → Loom.Security, Loom.Storage, Loom.Telemetry.Exporters,
+                  Loom.Telemetry.Query, Loom.Telemetry.Alerting, Loom.Web.Contracts,
+                  Loom.Web.RealTime
+Loom.Dashboard  → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
                   Loom.Telemetry.Alerting, Loom.Telemetry.Assist,
                   Loom.Telemetry.Exporters, Loom.Web.Contracts, Loom.Web.RealTime
-Loom.DevTools   → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
+Loom.DevTools   → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
+                  Loom.Web.Contracts
 ```
 
 ### Technology Stack
 
-**Backend:**
-- .NET 10 SDK (10.0.100+)
-- ASP.NET Core Minimal APIs
-- Kestrel HTTP server
-- WebSockets (native .NET, NOT SignalR)
-- System.Text.Json with source generators
+**Backend:** .NET 10 SDK (10.0.100+) · ASP.NET Core Minimal APIs · Kestrel ·
+WebSockets (native .NET, NOT SignalR) · System.Text.Json with source generators
 
-**Frontend:**
-- Angular 21.2 (`@angular/core` ^21.2.0) with standalone components
-- RxJS for reactive streams
-- Chart.js or D3.js for visualizations
-- Native WebSocket client
+**Frontend:** Angular 21.2 (`@angular/core` ^21.2.0), standalone components · RxJS ·
+Chart.js or D3.js · native WebSocket client
 
-**Build Tools:**
-- LLVM/Clang 19 (Linux native compilation)
-- MSVC v143 (Windows native compilation)
-- Node.js 20+ LTS
-- Angular CLI 21+
+**Build tools:** LLVM/Clang 19 (Linux native) · MSVC v143 (Windows native) ·
+Node.js 20+ LTS · Angular CLI 21+
 
 ## Development Commands
 
-**Primary dev environment is Windows + PowerShell.** The Bash tool in this workspace
-has no coreutils (`cat`, `ls` exit 127) — use PowerShell. Linux equivalents are noted
-where deployment targets Linux.
+**Primary dev environment is Windows + PowerShell.** The Bash tool in this workspace has
+no coreutils (`cat`, `ls` exit 127) — use PowerShell.
 
-**Backend Development:**
 ```powershell
 # Build / test (note: Loom.slnx, NOT Loom.sln)
 dotnet build Loom.slnx -c Debug
@@ -355,30 +256,40 @@ dotnet watch run --project Loom.Web.Api --no-hot-reload
 # Run the dashboard tool against a live PID
 dotnet run --project Loom.Dashboard -- <pid> [--port <n>]
 
-# Native AOT publish (Loom.Web.Api is the AOT target; AOT props are already in its csproj)
+# Native AOT publish (AOT props already live in Loom.Web.Api.csproj - don't re-pass them)
 dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r win-x64
-dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r linux-x64
 
-# Verify binary size (<17 MB target; 14.74 MB as of d277a58)
+# Verify binary size (<17 MB hard limit; 15.108 MB win-x64)
 Get-ChildItem Loom.Web.Api/bin/Release/net10.0/win-x64/publish/ -Filter *.exe |
-  Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
+  Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,3)}}
 
 # Check allocations (should be ~0 bytes/sec in hot paths)
 dotnet-counters monitor --process-id <pid> System.Runtime
 ```
 
-**Frontend Development:**
+**Linux builds must happen on Linux.** Native AOT cannot cross-compile:
+`dotnet publish -r linux-x64` from Windows fails with
+`error : Cross-OS native compilation is not supported.` Use WSL (Ubuntu 24.04, .NET SDK
+10.0.400 in `~/.dotnet`, `clang` + `zlib1g-dev` installed) or the `ubuntu-latest` CI job.
+
+```bash
+# In WSL, from the repo root
+dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r linux-x64
+```
+
+**Frontend:**
 ```powershell
 cd Loom.Web.Frontend
-
-ng serve      # dev server + proxy, http://localhost:4200
-ng build --configuration production --output-hashing all
-npm run test  # unit tests
+ng serve                                    # dev server + proxy, http://localhost:4200
+ng build --configuration production
+npx ng test                                 # vitest, one pass, no watch
 ```
 
 **Packing the dotnet tools:**
 ```powershell
-# Loom.Dashboard embeds the Angular build in wwwroot via ManifestEmbeddedFileProvider
+# Loom.Dashboard embeds the Angular build in wwwroot via ManifestEmbeddedFileProvider.
+# Loom.Web.Frontend/dist is gitignored and embedded by wildcard - on a fresh clone that
+# wildcard matches nothing and the tool ships an EMPTY wwwroot. Always build first.
 cd Loom.Web.Frontend; ng build; cd ..
 dotnet pack Loom.Dashboard -c Release   # -> loom-dashboard
 dotnet pack Loom.DevTools  -c Release   # -> loom
@@ -386,20 +297,35 @@ dotnet pack Loom.DevTools  -c Release   # -> loom
 
 ### Testing Strategy
 
-`Loom.Telemetry.Tests` is the **only** test project (`Loom.Tests/` is an empty
-directory — ignore it). Tests run with parallelization disabled assembly-wide via
+`Loom.Telemetry.Tests` is the **only** test project (`Loom.Tests/` is an empty directory
+— ignore it). Parallelization is disabled assembly-wide via
 `[assembly: CollectionBehavior(DisableTestParallelization = true)]` in `AssemblyInfo.cs`.
 
 ```powershell
-# IL execution (rapid feedback) - current baseline: 505 passing, 0 skipped
+# IL execution (rapid feedback) - baseline: 592 passing, 0 skipped
 dotnet test Loom.slnx -c Debug
 
 # AOT trim verification: publish must emit no IL2026/IL3050 warnings
 dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r win-x64
 ```
 
-**Performance Benchmarks:** no benchmark project exists yet — see `BACKLOG.md` §6.3.
-Do not reference `Loom.Benchmarks`; it has never been created.
+Frontend baseline: `npx ng test` → **3 files, 94 passing**.
+
+**Performance benchmarks:** no benchmark project exists — see `BACKLOG.md` §6.3.
+
+### CI
+
+`.github/workflows/ci.yml` runs on push to `main` and on PRs to `main`: build + test on
+ubuntu and windows, Angular tests plus a production build, then a Linux Native AOT
+publish gated at 17 MB. First green run: all four jobs, ~4 minutes.
+
+Two traps it encodes, both found by running the steps by hand first:
+- **`dotnet test --filter` treats a filter matching nothing as success.** A job filtering
+  on a class that does not exist reports green forever while testing nothing. Verify a
+  filter returns a non-zero test count before trusting it.
+- The AOT job asserts no `Loom.Web.Api.dll` sits beside the native binary. A publish that
+  silently falls back to a managed build would otherwise pass the size gate, because the
+  apphost is small — the gate would be measuring the wrong file.
 
 ## PowerShell BOM Trap
 
@@ -434,20 +360,20 @@ non-ASCII character. `-Encoding ascii` drops the BOM but turns em-dashes and acc
 ```
 On Linux/WSL, `xxd -l 3 <file>` shows `efbb bf` instead.
 
-**Optional guard.** For commit messages the hook is `commit-msg`, not `pre-commit` —
-`pre-commit` runs before the message exists and never sees it. Save as
-`.git/hooks/commit-msg`, make it executable:
-```sh
-#!/bin/sh
-# Reject a UTF-8 BOM at the start of the commit message.
-if head -c 3 "$1" | grep -q $'\xef\xbb\xbf'; then
-  echo "commit-msg: message file starts with a UTF-8 BOM. Rewrite it with" >&2
-  echo "  [System.IO.File]::WriteAllText(path, text, (New-Object System.Text.UTF8Encoding(\$false)))" >&2
-  exit 1
-fi
-```
-Not installed by default — hooks are local-only and never travel with a clone, so anyone
-working this repo would have to add it themselves.
+**Related encoding traps:**
+- **`Get-Content` on PowerShell 5.1 reads UTF-8 as ANSI.** Em-dashes come back as
+  mojibake (`â€"`) and writing that back corrupts the file. For any file you will edit
+  and write back, use `[System.IO.File]::ReadAllLines($p,[System.Text.Encoding]::UTF8)`
+  and `WriteAllLines($p,$a,(New-Object System.Text.UTF8Encoding($false)))`.
+- **.NET file APIs use the *process* working directory, not `Set-Location`.** Always pass
+  `"$PWD\..."`, or `ReadAllText` throws `FileNotFoundException` while `cd` looks correct.
+- **PowerShell here-strings expand backtick escapes.** `@"..."@` interpolates, so
+  `` `required` `` becomes a carriage return plus `equired`. Use `@'...'@` for any text
+  containing backticks.
+- **Some files carry a pre-existing BOM deliberately** — `JsonContext.cs` and
+  `Loom.Telemetry.Tests.csproj`. Preserve them; do not "fix" them.
+- **`Select-String -Path *.md` can return zero hits when matches exist.** Use
+  `Get-ChildItem -Filter *.md | Select-String -Pattern ...` instead.
 
 Prefer the Write tool over `Set-Content` whenever a file will be parsed by another tool.
 
@@ -478,13 +404,15 @@ await JsonSerializer.SerializeAsync(
 );
 ```
 
+Budget ~28 KB of binary size per source-generated type.
+
 ### Zero-Allocation WebSocket Pattern
 
 ```csharp
 public sealed class MetricsWebSocketHandler : IDisposable
 {
     private readonly ArrayPool<byte> _bufferPool = ArrayPool<byte>.Shared;
-    
+
     public async ValueTask StreamMetricsAsync(CancellationToken ct)
     {
         var buffer = _bufferPool.Rent(4096);
@@ -495,14 +423,14 @@ public sealed class MetricsWebSocketHandler : IDisposable
                 // Write JSON directly into the rented buffer
                 var writer = new Utf8JsonWriter(new FixedBufferWriter(buffer));
                 JsonSerializer.Serialize(writer, metric, LoomJsonSerializerContext.Default.MetricUpdate);
-                
+
                 await _webSocket.SendAsync(
                     buffer.AsMemory(0, (int)writer.BytesCommitted),
                     WebSocketMessageType.Text,
                     endOfMessage: true,
                     ct
                 );
-                
+
                 writer.Reset();
             }
         }
@@ -530,29 +458,15 @@ app.MapGet("/api/metrics/cpu", async (HttpContext context, IMetricsService servi
 .Produces<CpuMetricResponse>(200);
 ```
 
-### SIMD Implementation Pattern
+Any project containing `Map*` calls must set
+`<EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>`. See **Common
+Issues** below — this is not optional and suppression is not an alternative.
 
-```csharp
-// Always provide fallbacks for unsupported hardware
-public static void ProcessVectors(ReadOnlySpan<float> data, Span<float> results)
-{
-    if (Avx2.IsSupported && data.Length >= Vector256<float>.Count)
-    {
-        // Use AVX2 intrinsics
-        ProcessVectorsAvx2(data, results);
-    }
-    else if (Vector.IsHardwareAccelerated)
-    {
-        // Use portable Vector<T>
-        ProcessVectorsPortable(data, results);
-    }
-    else
-    {
-        // Scalar fallback
-        ProcessVectorsScalar(data, results);
-    }
-}
-```
+**No SIMD pattern is documented here on purpose.** The codebase contains zero
+intrinsics — no `Avx2`, no `Vector256`, no `Vector<T>` — because the SIMD engine lived
+in `Loom.Core`, which was planned and never built. If that ever changes, the rule is
+the usual one: check `Avx2.IsSupported`, fall back to portable `Vector<T>`, then to
+scalar.
 
 ## Security Architecture
 
@@ -561,46 +475,69 @@ public static void ProcessVectors(ReadOnlySpan<float> data, Span<float> results)
 - Systemd sandboxing: `ProtectSystem=strict`, `ProtectHome=true`, `MemoryDenyWriteExecute=true`
 - File access: `/var/cache/loom/` (700 permissions), `/var/secrets/loom/jwt.key` (400 permissions)
 - Network: HTTP on loopback only (port 5080, `LOOM_HTTP_PORT` to change). Loom does not
-  terminate TLS: it binds `127.0.0.1` in code, so no environment variable can publish it
-  to an interface. A remote operator reaches it through an SSH tunnel, which already
-  encrypts the only leg that leaves the machine. In-process TLS was measured at +0.946 MB
-  against a 17 MB ceiling and would defend a hop that never crosses the network — see
-  `BACKLOG.md` § 3.3. If non-tunnel access is ever required, front this port with a
-  reverse proxy and let it own the certificate lifecycle.
-- Authentication: Manual JWT implementation (no reflection-based libraries)
+  terminate TLS: it binds `127.0.0.1` in code via `ListenLocalhost`, so no environment
+  variable can publish it to an interface — verified on both Windows and Linux, where
+  `ASPNETCORE_URLS=http://0.0.0.0:5080` is overridden and Kestrel logs that it did so.
+  A remote operator reaches it through an SSH tunnel, which already encrypts the only
+  leg that leaves the machine. In-process TLS was measured at +0.946 MB against a 17 MB
+  ceiling and would defend a hop that never crosses the network — see `BACKLOG.md` § 3.3.
+  If non-tunnel access is ever required, front this port with a reverse proxy and let it
+  own the certificate lifecycle.
+- Authentication: Manual JWT (`Loom.Security`), no reflection-based libraries. Every
+  endpoint is protected; anonymous access is opt-in per endpoint via `LoomAllowAnonymous`.
+  `/api/health` is anonymous on **both** hosts so liveness probes work.
+- Scoped tokens: a wrong scope returns **403**, not 401. `loom auth token --scope` accepts
+  only `metrics` and `full` and rejects anything else — a typo must not widen authority.
 - CORS: Strict whitelist (no wildcards)
+- **Never print a key, token, or password** into a report, log, or commit message.
+  Dev secrets live outside the repo: `%LOCALAPPDATA%\Loom\dev-secrets\` on Windows,
+  `~/.local/share/Loom/dev-secrets/` on Linux.
 
 **JWT Secret Management:**
 ```bash
-# Generate secret
 openssl rand -base64 32 > /var/secrets/loom/jwt.key
 chmod 400 /var/secrets/loom/jwt.key
 chown root:loomd /var/secrets/loom/jwt.key
 ```
 
+Key material is resolved from `LOOM_JWT_KEY_FILE` and `LOOM_AUTH_USERS_FILE`, defaulting
+to `/var/secrets/loom/`. Both are required at startup and **fail closed** — a missing key
+or a users file with zero users aborts the host with an actionable message. There is no
+generated-on-the-fly fallback in any environment, deliberately: an ephemeral dev key is
+exactly the convenience that reaches production by accident.
+
 ## Common Issues & Solutions
 
 ### Native AOT Compilation Failures
 
-**Problem:** Trim warnings (`IL2026`, `IL3050`)
-**Solution:** 
-- Ensure all DTOs registered in `LoomJsonSerializerContext`
-- Avoid reflection-based serialization
-- Use `[DynamicallyAccessedMembers]` attributes where needed
-- Add custom trim rules in `rd.xml` if necessary
+**Problem:** Trim warnings (`IL2026`, `IL3050`) on a `Map*` call
+**Solution:** Set `<EnableRequestDelegateGenerator>true</...>` on the project holding the
+call site. This emits compile-time interceptors that replace the reflective delegate
+binding. **Never suppress with `[UnconditionalSuppressMessage]`** — interceptors apply
+only within the compilation holding the call site, so suppression leaves the reflective
+path live at runtime: green build, clean publish, endpoint broken once deployed. Verify
+the fix by artefact, not by the warnings going quiet — build with
+`/p:EmitCompilerGeneratedFiles=true --no-incremental` and confirm
+`GeneratedRouteBuilderExtensions.g.cs` carries one `InterceptsLocationAttribute` per call
+site. (An incremental build skips generation and leaves the directory empty, which is not
+evidence of failure.)
+
+**Problem:** Other trim warnings
+**Solution:** Register all DTOs in `LoomJsonSerializerContext`; avoid reflection-based
+serialization; use `[DynamicallyAccessedMembers]` where needed.
 
 **Problem:** Binary size >17 MB
 **Solution:**
-- **Check `WebApplication.CreateSlimBuilder` is used, not `CreateBuilder`.** This is by
-  far the largest lever: measured 18.32 MB → 14.74 MB. `CreateBuilder` roots IIS
-  integration, HTTP/3 + QUIC, the regex route-constraint map, and the
-  INI/XML/KeyPerFile/user-secrets and EventLog/EventSource/Debug/TraceSource providers.
-  ILC cannot elide them because the calls are unconditional and the opt-out is a
-  runtime decision.
+- **Check `WebApplication.CreateSlimBuilder` is used, not `CreateBuilder`.** By far the
+  largest lever: measured 18.32 MB → 14.74 MB. `CreateBuilder` roots IIS integration,
+  HTTP/3 + QUIC, the regex route-constraint map, and the INI/XML/KeyPerFile/user-secrets
+  and EventLog/EventSource/Debug/TraceSource providers. ILC cannot elide them because the
+  calls are unconditional and the opt-out is a runtime decision.
 - Do **not** reach for `IlcGenerateStackTraceData=false` — measured at 27 KB.
 - Enable `InvariantGlobalization=true` (saves ~2 MB)
 - Use `PublishTrimmed=true` and `TrimMode=link`
-- Strip debug symbols with `strip --strip-debug`
+- Linux AOT output is already stripped, with symbols split into a separate `.dbg`.
+  `StripSymbols=true` buys nothing there.
 - Compress Angular assets with Brotli before embedding
 
 ### WebSocket Connection Issues
@@ -629,39 +566,17 @@ chown root:loomd /var/secrets/loom/jwt.key
 }
 ```
 
-## Code Style & Conventions
+The production build has **no `fileReplacements`**, so `environment.prod.ts` is never
+used — `environment.ts` ships in every build. Fix `environment.ts` itself rather than
+adding a replacement entry.
 
-### Output Discipline
-
-**DEFAULT: Terse, token-efficient code delivery**
-- No preamble, no restating questions, no filler
-- Code + terse comments only where non-obvious
-- Prefer diffs/snippets over full file reprints
-- Don't explain standard C#/.NET behavior
-- Minimal explanation to conserve tokens
-
-**When ELI5 Educator Mode is active (user explicitly requests it):**
-- Full explanations with analogies (as defined in Working Style section above)
-- Break code into small chunks with explanations between
-- Educational, detailed responses
-
-**Mode switching:**
-- User says "ELI5 mode on" or "explain this" → Educational mode
-- User says "just the code" or "ELI5 mode off" → Back to terse default
-
-### Hard Constraints
+## Hard Constraints
 
 1. Never suggest code that violates Native AOT constraints
 2. Never suggest interactive shell execution over SSH/HTTP (security violation)
 3. Always use `ReadOnlySpan<T>` / `Span<T>` / `ValueTask` in hot paths
 4. Always verify binary size after changes (<17 MB hard limit)
 5. Always wrap unsafe pointer operations in `SafeHandle` or `SafeBuffer`
-
-## Important Documentation
-
-- **IMPLEMENTATION-METHODOLOGY.md** - Step-by-step build guide (Phases 0-3 detailed, ELI5 explanations available on request)
-- **wiggly-noodling-hoare.md** - Migration plan: architecture decisions, all phases overview, deployment
-- **Migration Plan** - `C:\Users\angel\.claude\plans\wiggly-noodling-hoare.md`
 
 ## Anti-Patterns to Avoid
 
@@ -671,24 +586,25 @@ chown root:loomd /var/secrets/loom/jwt.key
 ❌ Allocating strings in WebSocket hot paths
 ❌ Using `Pack = 1` in structs (ARM64 alignment faults)
 ❌ Using `Marshal.SizeOf<T>()` instead of `Unsafe.SizeOf<T>()`
-❌ Skipping hardware intrinsic checks (`Avx2.IsSupported`)
 ❌ Running as root or with elevated capabilities
 ❌ Storing secrets in code or configuration files
 
 ## Verification Before Commit
 
 ```powershell
-# 1. No trim warnings
+# 1. No trim warnings. Expect 0 errors and 4 known warnings: 2 xUnit1031 at
+#    InMemoryMetricStoreTests.cs:372/:387, and 2 NETSDK1212 for the netstandard2.0
+#    generator project. Leave all four.
 dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
 
 # 2. Native AOT compiles (Loom.Web.Api carries the AOT properties)
 dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r win-x64
 
-# 3. Binary size check - must be <17 MB
+# 3. Binary size check - must be <17 MB (currently 15.108 MB win-x64)
 Get-ChildItem Loom.Web.Api/bin/Release/net10.0/win-x64/publish/ -Filter *.exe |
-  Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,2)}}
+  Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,3)}}
 
-# 4. All tests pass - baseline 505 passing, 0 skipped
+# 4. All tests pass - baseline 592 passing, 0 skipped
 dotnet test Loom.slnx -c Debug
 
 # 5. Zero allocations in hot paths
@@ -696,25 +612,16 @@ dotnet-counters monitor --process-id <pid>
 # GC Heap Allocations should be ~0 bytes/sec for API endpoints
 ```
 
-Note: `Loom.Telemetry` and `Loom.Web.Api` already set `TreatWarningsAsErrors=true`,
-so any warning there fails the build. Fix warnings, never suppress them.
+Note: `Loom.Telemetry` and `Loom.Web.Api` set `TreatWarningsAsErrors=true` in their own
+csproj, so any warning there fails the build. Fix warnings, never suppress them.
 
-## Educational Purpose
+## Important Documentation
 
-**IMPORTANT:** By default, Claude provides terse code to conserve tokens. The user can opt into educational mode when learning is needed.
-
-**When ELI5 Educator Mode is active (user requests "explain this" or "ELI5 mode on"):**
-1. Explain WHY architectural decisions are made
-2. Explain HOW patterns satisfy Native AOT constraints
-3. Explain WHAT trade-offs are being made
-4. Provide context for non-obvious implementations
-5. Reference relevant .NET documentation when appropriate
-6. Break down complex concepts with analogies and examples
-
-**Default mode (token conservation):**
-- Code with minimal commentary
-- Terse inline comments for non-obvious logic
-- Assume user understands C#/.NET fundamentals
+- **`IMPLEMENTATION-METHODOLOGY.md`** — step-by-step build guide (Phases 0-3 detailed)
+- **`wiggly-noodling-hoare.md`** — architecture decisions, all phases, deployment
+- **`BACKLOG.md`** — open items, decision log, measurements
+- **`handoff.md`** — session state file. Gitignored and untracked by design; it is not
+  one of the seven un-ignored docs, and must not be added to that list.
 
 ---
 
@@ -834,11 +741,29 @@ claimed pass rate.
   Prepend the Installer directory and publish normally:
   `$env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"`
 - PowerShell here-strings break `git commit -m`; use `git commit -F <file>` — and write
-  that file with `[System.IO.File]::WriteAllText`, not `Set-Content -Encoding utf8`,
-  which adds a BOM to the subject line. See **PowerShell BOM Trap** above.
+  that file with `[System.IO.File]::WriteAllText`, not `Set-Content -Encoding utf8`.
+  A commit message containing a `/p:` MSBuild switch can also trip the path guard when
+  written inline; write it with the Write tool instead.
 - `Loom.Core`, `Loom.Host`, and `Loom.Benchmarks` do not exist. `IMPLEMENTATION-METHODOLOGY.md`
   still references the first two; the Project Structure section above is authoritative.
 - `.gitignore:43` ignores `*.md`; lines 44-50 un-ignore the seven authoritative docs.
+  `handoff.md` and every `PROMPT-*.md` are deliberately NOT among them.
+- **Env-var prefixes never appear in `pgrep -a` output.** `FOO=bar ./prog` puts `FOO` in
+  the environment, not `argv`. Prove a process received a variable by reading
+  `/proc/<pid>/environ`.
+
+**Method traps (learned the hard way):**
+- **A negative probe with invalid input reads exactly like a clean bill of health.** Pull
+  probe input from the test suite, never invent it.
+- **A test can be real and untestable at the same time.** When a check cannot be run, say
+  so — do not infer the result.
+- **Verify the process you are measuring is the one you started.** A `kill %1` in a new
+  shell finds no job, the relaunch silently fails, and `ss`/`netstat` then reports the
+  *old* process — which looks exactly like a pass. Check the PID changed.
+- **A find-string prompt cannot catch a second call site it does not mention.** This is
+  why a runtime probe follows a mechanical edit.
+- **Sonnet stopping is a signal, not a failure.** Read a STOP as evidence that the prompt
+  was wrong before treating it as a blocker.
 
 **Division of labor.** Opus 5 reviews, verifies, and authors execution prompts. Sonnet
 executes mechanically. When authoring a prompt for Sonnet: scope its reads explicitly
@@ -846,5 +771,8 @@ executes mechanically. When authoring a prompt for Sonnet: scope its reads expli
 full run at the end, and instruct it to STOP and report on any line-reference mismatch
 rather than guessing.
 
-**Commit rules.** Never add `Co-Authored-By` or generated-by trailers. Never push —
-local commits only. Stage only files actually touched; the tree carries unrelated WIP.
+**Commit rules.** Never add `Co-Authored-By` or generated-by trailers — on any commit or
+PR body, ever. Commits are pre-authorized; **every push needs fresh explicit
+authorization, per push** — one approval never generalizes to the next. Stage only files
+actually touched; the tree may carry unrelated WIP, and `.gitignore` in particular must
+never be staged.

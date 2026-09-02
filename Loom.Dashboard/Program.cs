@@ -95,11 +95,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, LoomJsonSerializerContext.Default);
 });
 
-builder.Services.AddLoomDashboard(targetPid);
-
+// AddLoomDashboard calls AddLoomSecurity internally, so the try/catch has to wrap THIS
+// call. It previously wrapped a separate AddLoomSecurity() on the line below, which left
+// the throw happening one line too early: the message below became unreachable and a
+// missing key produced an unhandled exception with a stack trace and exit code 255
+// instead of this text and exit 1. AddLoomSecurity is also not idempotent - it uses
+// AddSingleton, not TryAddSingleton - so calling it here as well registered two of every
+// security service and read the key and users files from disk twice.
 try
 {
-    builder.Services.AddLoomSecurity();
+    builder.Services.AddLoomDashboard(targetPid);
 }
 catch (InvalidOperationException ex)
 {

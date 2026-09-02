@@ -1506,7 +1506,9 @@ from the assembly names and namespaces (`Loom.*`), and that is deliberate.
    `Program.cs` currently owns `CreateSlimBuilder`, the Kestrel loopback bind, the
    security bootstrap, and a `return 1` on misconfiguration. A library cannot terminate
    its host's process.
-4. Add a consumer-AOT CI gate (see § 11.3).
+4. ~~Add a consumer-AOT CI gate (see § 11.3).~~ **DONE 2026-09-02 — see § 11.3.** The
+   `consumer-aot-gate` job packs `Loom.Telemetry`, restores it into a throwaway consumer
+   from a folder feed, AOT-publishes, and runs the result.
 
 ### 11.2 A Single All-In-One Package Is Rejected 🟢 LOW (DECIDED)
 
@@ -1537,7 +1539,7 @@ to other Loom assemblies. It currently references only
 split viable and what quarantines both TraceEvent and Assist away from the package most
 consumers will install. Treat a new reference here as a breaking change.
 
-### 11.3 Consumer-AOT Gate Is Missing 🟡 MEDIUM (PLANNED)
+### 11.3 Consumer-AOT Gate 🟢 LOW (COMPLETED 2026-09-02)
 
 The 17 MB gate measures Loom's own standalone binary. Under a package-first distribution
 that binary is not what consumers download, so the gate protects an artefact of declining
@@ -1551,10 +1553,37 @@ zero `IL2026`/`IL3050`. Referencing the project instead of the package would not
 the `analyzers/dotnet/cs/` path from § 11.1 item 2 and could pass while the real package
 is broken.
 
-**The gate has been run manually and passes (2026-09-02) — but it is not yet in CI, so
-this item stays open.** See § 11.6 for what it caught. Automating it needs a job that packs
-`Loom.Telemetry`, points a throwaway consumer at a folder feed, and AOT-publishes it; the
-manual procedure is recorded in § 11.6 and translates directly.
+**Automated 2026-09-02.** `ci/consumer-aot-gate.ps1`, run by the `consumer-aot-gate` job
+in `.github/workflows/ci.yml`. The throwaway consumer lives at `ci/consumer-aot-gate/`
+and is deliberately **not** in `Loom.slnx` — it must only ever build against a packed
+`.nupkg`. The script packs `Loom.Telemetry`, restores it from `artifacts/loom-feed` via a
+`nuget.config` whose `<clear />` stops any parent or machine feed from satisfying the
+reference, AOT-publishes, and then asserts, in order:
+
+1. `analyzers/dotnet/cs/Loom.Telemetry.Generators.dll` and `lib/net10.0/Loom.Telemetry.dll`
+   are both inside the `.nupkg`. A package missing the analyzer path installs cleanly,
+   compiles, and emits no wrappers — silent no-op telemetry.
+2. Zero `IL2026`/`IL3050` in the publish log. Asserted by grep as well as by
+   `TreatWarningsAsErrors`, so the check does not depend on a csproj property staying set.
+3. No managed `.dll` beside the native binary — a publish can fall back to a managed build
+   and look completely clean.
+4. The binary runs and prints its expected line.
+
+Two things that were measured rather than assumed:
+
+- **Each run packs a unique `1.0.0-gate<timestamp>` version.** NuGet caches by id+version
+  in the global packages folder, so a rebuilt `1.0.0` with different content is *not*
+  re-extracted — the second run onward would silently test the first run's bits.
+- **Negative control passed.** Injecting `OutputItemType="Analyzer"` onto
+  `Loom.Telemetry`'s reference to its own generator fails this gate with `CS0436` on both
+  attributes, while `dotnet build Loom.slnx` stays green. That is the failure mode nothing
+  else in the repository can see, and it is now caught.
+
+One script for both places: CI runs it under `pwsh` on `ubuntu-latest`, and it runs
+unchanged on Windows PowerShell 5.1 locally (`./ci/consumer-aot-gate.ps1`). A separate
+bash copy for CI would be a second implementation of the same gate, free to drift from the
+one developers actually run. Verified passing on **win-x64** (2,106,880 B) and on
+**linux-x64** in WSL (2,218,808 B).
 
 ### 11.4 `Loom.Web.Api` Retired 🟢 LOW (COMPLETED)
 

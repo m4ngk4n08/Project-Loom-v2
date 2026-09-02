@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- BACKLOG.md 11.3. This project is deliberately NOT in Loom.slnx: it must restore
+       LoomDiagnostics.Telemetry from a packed .nupkg, never from a ProjectReference. A
+       ProjectReference wires the generator up through MSBuild and skips the package's
+       analyzers/dotnet/cs/ path entirely, so it would pass while the real package is
+       broken. It builds only via the consumer-aot-gate CI job (or ci/consumer-aot-gate.ps1
+       locally), against the folder feed named in nuget.config. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>link</TrimMode>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <!-- IL2026/IL3050 arriving from the package must fail the publish, not scroll past
+         in a log. The gate greps for them as well, because a warning-free publish that
+         silently fell back to a managed build looks identical to a pass. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Passed by the gate script from the packed file name. Pinning a literal here would
+       turn every version bump into a confusing NU1102 restore failure, and a floating `*`
+       would start resolving nuget.org the day LoomDiagnostics.Telemetry is published
+       publicly - testing a stranger's package instead of this commit's. -->
+  <PropertyGroup>
+    <LoomPackageVersion Condition="'$(LoomPackageVersion)' == ''">1.0.0</LoomPackageVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The whole point: ONE PackageReference, no hand-wired OutputItemType="Analyzer".
+         If the generator is not inside the package at analyzers/dotnet/cs/, [LoomProfile]
+         does not exist and this does not compile. -->
+    <PackageReference Include="LoomDiagnostics.Telemetry" Version="$(LoomPackageVersion)" />
+    <!-- Loom.Telemetry depends only on ...DependencyInjection.Abstractions, which is
+         correct for a library. BuildServiceProvider() lives in the implementation package,
+         so a consumer hand-rolling a container needs it; any real host
+         (Host.CreateApplicationBuilder, WebApplication.CreateBuilder) already has it. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+  </ItemGroup>
+
+</Project>

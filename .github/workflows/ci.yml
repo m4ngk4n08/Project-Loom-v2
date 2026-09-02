@@ -101,6 +101,33 @@ jobs:
             exit 1
           fi
 
+  consumer-aot-gate:
+    # BACKLOG.md 11.3. The AOT probe above references Loom.Telemetry as a PROJECT, which
+    # wires the generator through MSBuild and never exercises the package's
+    # analyzers/dotnet/cs/ path. This job restores the packed .nupkg instead, and is the
+    # only check anywhere that can fail on a broken package layout - every in-repo build
+    # passes either way. Verified by negative control: injecting OutputItemType="Analyzer"
+    # on Loom.Telemetry's generator reference fails this job with CS0436 while the full
+    # solution build stays green.
+    name: Packaged consumer AOT gate (linux-x64)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install native toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      # One implementation of the gate, shared with local runs on Windows PowerShell 5.1.
+      # pwsh is preinstalled on GitHub-hosted ubuntu runners.
+      - name: Pack, restore from a folder feed, AOT publish, run
+        shell: pwsh
+        run: ./ci/consumer-aot-gate.ps1 -Rid linux-x64
+
   frontend:
     name: Angular tests
     runs-on: ubuntu-latest

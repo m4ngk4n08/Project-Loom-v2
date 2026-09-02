@@ -45,6 +45,7 @@
 	  <ProjectReference Include="..\Loom.Telemetry.Exporters\Loom.Telemetry.Exporters.csproj" />
 	  <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
 	  <ProjectReference Include="..\Loom.Dashboard\Loom.Dashboard.csproj" />
+	  <ProjectReference Include="..\Loom.Dashboard.AspNetCore\Loom.Dashboard.AspNetCore.csproj" />
 	  <ProjectReference Include="..\Loom.DevTools\Loom.DevTools.csproj" />
 	</ItemGroup>
 

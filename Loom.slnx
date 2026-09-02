@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Loom.Dashboard/Loom.Dashboard.csproj" />
+  <Project Path="Loom.Dashboard.AspNetCore/Loom.Dashboard.AspNetCore.csproj" />
   <Project Path="Loom.DevTools/Loom.DevTools.csproj" />
   <Project Path="Loom.Security/Loom.Security.csproj" />
   <Project Path="Loom.Storage/Loom.Storage.csproj" />

@@ -1545,7 +1545,10 @@ from the assembly names and namespaces (`Loom.*`), and that is deliberate.
    prerequisite that made this work.
 3. Extract `Loom.Web.Api`'s wiring behind `AddLoomDashboard()` / `MapLoomDashboard()` and
    reduce `Program.cs` to a thin host over them. **This is a refactor, not a repack:**
-   `Program.cs` currently owns `CreateSlimBuilder`, the Kestrel loopback bind, the
+   `Program.cs` currently owns the builder (`WebApplication.CreateBuilder` — **not**
+   `CreateSlimBuilder`, verified at `Loom.Dashboard/Program.cs:91`; this project is never
+   AOT-published, so the size lever that forced `CreateSlimBuilder` on the retired
+   `Loom.Web.Api` never applied here), the Kestrel loopback bind, the
    security bootstrap, and a `return 1` on misconfiguration. A library cannot terminate
    its host's process.
 4. ~~Add a consumer-AOT CI gate (see § 11.3).~~ **DONE 2026-09-02 — see § 11.3.** The

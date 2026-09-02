@@ -4159,6 +4159,37 @@ public sealed class AlertRule(string name, string metricName, TimeSpan window)
 
 ## Step 11.3: The Fluent Config API (Matching the Original `When(lambda)` Design)
 
+> ### ⚠️ `LoomTelemetryOptionsAlertingExtensions` was replaced (2026-09-03, commit `034884e`)
+>
+> **The type this step creates no longer exists**, and neither does the
+> `public static readonly List<AlertRule> Rules` at its centre. It was process-global and
+> not thread-safe, which blocked the alert-management API the dashboard-as-a-library
+> direction needs. `BACKLOG.md` § 6.10 has the full closure.
+>
+> What replaced it:
+>
+> - **`AlertRuleRegistry`**, behind **`IAlertRuleRegistry`**, in
+>   `Loom.Telemetry.Alerting/AlertRuleRegistry.cs`. Registered as a DI singleton, so rules
+>   are per-container rather than per-process. `Snapshot()` returns a collection that never
+>   changes once handed out; `Add`/`Remove` rebuild and swap it under a lock.
+> - **`AddLoomAlerting(Action<IAlertRuleRegistry>? configure = null)`** is how a host
+>   declares rules now — `AddAlert` hangs off the registry, not off `LoomTelemetryOptions`.
+>   `LoomTelemetryOptions` has no alerting extension methods at all any more.
+> - **`AlertBuilder` is unchanged** and moved to `Loom.Telemetry.Alerting/AlertBuilder.cs`.
+>   The fluent body below — `.When(metric, agg => ...)`, `.InWindow(...)`,
+>   `.ExpireAfterNoData(...)`, `.Notify<T>()` — still reads exactly as written here.
+>
+> So the call shape changes from
+> `new LoomTelemetryOptions().AddAlert("Name", alert => ...)` to
+> `services.AddLoomAlerting(registry => registry.AddAlert("Name", alert => ...))`.
+> The `/api/alerts` handlers later in this phase take an `IAlertRuleRegistry` parameter and
+> call `registry.Snapshot()` in place of the static list; they also live in
+> `Loom.Dashboard.AspNetCore`, not `Loom.Web.Api`, which is retired — see the banner at the
+> top of this file.
+>
+> The step text is left intact as the historical record; this correction overrides it for
+> anything present-tense.
+
 **File:** `Loom.Telemetry.Alerting/LoomTelemetryOptionsAlertingExtensions.cs`
 
 ```csharp

@@ -1009,8 +1009,10 @@ is exactly the operational-trust problem § 6.5 exists to fix)
 
 > **CLOSED 2026-09-02. The code quoted below no longer exists.** `ExecuteAsync`
 > (`Loom.Telemetry.Alerting/AlertEvaluationHostedService.cs:57`) has no empty-registry
-> early return. It re-reads `LoomTelemetryOptionsAlertingExtensions.Rules` **every tick**
-> (`:71`, copied before iterating because the list is not thread-safe), recomputes the tick
+> early return. It re-reads the rule registry **every tick** (at the time of closure
+> `LoomTelemetryOptionsAlertingExtensions.Rules`, copied before iterating because the list
+> was not thread-safe; since `034884e` it is `registry.Snapshot()`, which needs no copy —
+> see § 6.10), recomputes the tick
 > interval each pass and retunes the timer when it changes (`:73-79`). `ComputeTickInterval`
 > (`:44`) returns a 250 ms `IdleTickInterval` for an empty registry, so the loop idles
 > instead of exiting and bounds how long a late-registered rule waits.
@@ -1158,7 +1160,51 @@ them. It still builds on the same evaluation loop.
 
 ---
 
-### 6.10 The Alert Registry Is a Public Mutable Static List 🟡 MEDIUM
+### 6.10 The Alert Registry Is a Public Mutable Static List 🟢 LOW (COMPLETED — closed 2026-09-03)
+
+> **CLOSED 2026-09-03 in `034884e`. The type quoted below no longer exists.**
+> `LoomTelemetryOptionsAlertingExtensions` is deleted. `AlertRuleRegistry`
+> (`Loom.Telemetry.Alerting/AlertRuleRegistry.cs`), behind `IAlertRuleRegistry`, takes its
+> place and is registered as a singleton by `AddLoomAlerting`, which gained an optional
+> `Action<IAlertRuleRegistry>` callback for declaring rules. `AlertBuilder` moved to its own
+> file unchanged, so the fluent `AddAlert(name, alert => alert.When(...))` syntax the
+> methodology documents still reads the same — it now hangs off the registry rather than off
+> `LoomTelemetryOptions`.
+>
+> Point by point against the four bullets below:
+>
+> - **Process-global** — gone. The registry is a DI singleton, so two hosts in one process
+>   get one rule set each. This is what let the tests stop sharing state.
+> - **Not thread-safe** — fixed by immutable swap rather than a concurrent collection.
+>   `Snapshot()` hands back the current collection reference with no lock and no copy;
+>   `Add`/`Remove` rebuild the whole collection under a lock and swap the reference. A
+>   snapshot already handed out never changes, so the evaluation loop's defensive `.ToList()`
+>   copy (and the race inside it) is gone with it.
+> - **Public and mutable** — mutation is now through `Add`/`AddAlert`/`Remove` on an
+>   interface, and `Add` replaces by name instead of appending a duplicate, so two rules can
+>   no longer share one name and corrupt each other's entries in the loop's `_activeAlerts`.
+> - **Not observable** — `Version` increments on every mutation. The loop still polls; it
+>   re-reads the snapshot each tick, which is cheap now that reading is a reference load.
+>
+> **The entry's own success measure is met:** `AlertTestCollection.cs` is deleted. It existed
+> only to serialise alert tests against each other over the shared list, and every
+> `Rules.Clear()` in setup and teardown is gone — each test constructs its own registry.
+> (Assembly-wide `DisableTestParallelization` in `AssemblyInfo.cs` stays; that is unrelated,
+> and guards the metric ring buffers.)
+>
+> Tests: `AlertRuleRegistryTests` (8, covering snapshot immutability under concurrent
+> writers, replace-by-name, remove, and `Version`) and `AlertEndpointTests` (9, HTTP-level
+> coverage of the four `/api/alerts` handlers, which had none before).
+>
+> **Carved out, still open — review findings on `034884e`, being fixed on
+> `sonnet/alert-registry-fixes`:** removing a rule orphans its `_activeAlerts` /
+> `_lastNotified` / `_lastData` entries in `AlertEvaluationHostedService`, so a name that is
+> removed and re-added resurrects as already-firing; `Snapshot()` returns a `List<AlertRule>`
+> typed as `IReadOnlyList<AlertRule>`, one cast away from the invariant it protects; `Version`
+> is read without a barrier; and the mutators do not null-check their arguments. None blocks
+> the CRUD API this entry gates — they are defects in the replacement, not the constraint.
+>
+> Original entry kept below as history.
 
 **Issue:** Carved out of § 6.7 when that entry was closed 2026-09-02. § 6.7's *symptom* —
 rules registered after startup never being evaluated — is fixed: the evaluation loop
@@ -1197,6 +1243,11 @@ then be removed, which is a good measure of whether the fix actually worked.
 
 **Effort:** 4-8 hours, plus the test-suite cleanup
 **Priority:** 🟡 MEDIUM (no current misbehaviour; blocks a planned direction)
+
+**Actual:** one Sonnet task on `sonnet/alert-registry`, plus review and the endpoint tests.
+The fix sketch above called for "a concurrent collection"; immutable swap was used instead,
+because the read is per-tick and per-request while writes are rare, and it gives snapshot
+enumeration for free — which a `ConcurrentDictionary` does not.
 
 ---
 

@@ -426,7 +426,10 @@ namespace Loom.Dashboard.Extensions
             SpanId = W3CTraceId.FormatSpanId(record.SpanId)
         };
 
-        private static RouteGroupBuilder MapAlertEndpoints(this RouteGroupBuilder api)
+        // internal rather than private so AlertEndpointTests can map just this group onto a
+        // bare WebApplication. Going through MapLoomDashboard instead would drag in the whole
+        // service graph and the security bootstrap, which needs key material CI does not have.
+        internal static RouteGroupBuilder MapAlertEndpoints(this RouteGroupBuilder api)
         {
             var alertGroup = api.MapGroup("/alerts")
                 .WithTags("Alerts");

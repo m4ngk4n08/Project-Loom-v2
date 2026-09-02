@@ -14,12 +14,15 @@ public sealed class AlertRuleRegistry : IAlertRuleRegistry
     private volatile AlertRule[] _rules = [];
     private int _version;
 
-    public int Version => _version;
+    public int Version => Volatile.Read(ref _version);
 
     public IReadOnlyList<AlertRule> Snapshot() => _rules;
 
     public IAlertRuleRegistry AddAlert(string name, Action<AlertBuilder> configure)
     {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(configure);
+
         var builder = new AlertBuilder(name);
         configure(builder);
         return Add(builder.Build());
@@ -27,26 +30,39 @@ public sealed class AlertRuleRegistry : IAlertRuleRegistry
 
     public IAlertRuleRegistry Add(AlertRule rule)
     {
+        ArgumentNullException.ThrowIfNull(rule);
+
         lock (_lock)
         {
             var current = _rules;
-            var kept = 0;
-            var next = new AlertRule[current.Length + 1];
-            foreach (var existing in current)
+            var existing = IndexOf(current, rule.Name);
+
+            AlertRule[] next;
+            if (existing >= 0)
             {
-                if (existing.Name != rule.Name) next[kept++] = existing;
+                // Replace at the same index. Order is what /api/alerts returns to the UI,
+                // so an edited rule must not jump to the bottom of the list.
+                next = new AlertRule[current.Length];
+                Array.Copy(current, next, current.Length);
+                next[existing] = rule;
             }
-            next[kept++] = rule;
-            if (kept != next.Length) Array.Resize(ref next, kept);
+            else
+            {
+                next = new AlertRule[current.Length + 1];
+                Array.Copy(current, next, current.Length);
+                next[current.Length] = rule;
+            }
 
             _rules = next;
-            _version++;
+            Interlocked.Increment(ref _version);
         }
         return this;
     }
 
     public bool Remove(string name)
     {
+        ArgumentNullException.ThrowIfNull(name);
+
         lock (_lock)
         {
             var current = _rules;
@@ -58,7 +74,7 @@ public sealed class AlertRuleRegistry : IAlertRuleRegistry
             Array.Copy(current, index + 1, next, index, current.Length - index - 1);
 
             _rules = next;
-            _version++;
+            Interlocked.Increment(ref _version);
             return true;
         }
     }

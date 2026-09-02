@@ -17,9 +17,4 @@ using Xunit;
 // Serialising the assembly makes the existing per-class resets sufficient. The suite is
 // small and I/O-light, so the wall-clock cost is negligible next to non-deterministic
 // results.
-//
-// Note: Alerting/AlertTestCollection.cs already declares
-// [CollectionDefinition("AlertTests", DisableParallelization = true)]. That remains valid
-// but is now redundant - it only ever serialised alert tests against each other, not
-// against the other classes mutating the same global buffers.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]

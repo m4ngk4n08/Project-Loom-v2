@@ -58,10 +58,10 @@ public class AlertRuleRegistryTests
 
         registry.Add(Rule("A", "replaced"));
 
+        // Order is what /api/alerts returns to the UI: an edited rule keeps its position
+        // rather than jumping to the bottom of the list.
         var names = registry.Snapshot().Select(r => r.Name).ToArray();
-        Assert.Equal(2, names.Length);
-        Assert.Contains("A", names);
-        Assert.Contains("B", names);
+        Assert.Equal(new[] { "A", "B" }, names);
         Assert.Equal("replaced", registry.Snapshot().Single(r => r.Name == "A").MetricName);
     }
 
@@ -110,6 +110,47 @@ public class AlertRuleRegistryTests
 
         Assert.False(registry.Remove("Absent"));
         Assert.Equal(before, registry.Version);
+    }
+
+    // Public-surface guards, not internal assertions: IAlertRuleRegistry is the API an
+    // alert-management endpoint calls, so a null argument must name itself rather than
+    // surfacing as a NullReferenceException from inside the lock.
+    [Fact]
+    public void AddAlert_NullName_ThrowsArgumentNullException()
+    {
+        var registry = new AlertRuleRegistry();
+
+        var ex = Assert.Throws<ArgumentNullException>(
+            () => registry.AddAlert(null!, alert => alert.When("metric", agg => agg.Count > 0)));
+        Assert.Equal("name", ex.ParamName);
+    }
+
+    [Fact]
+    public void AddAlert_NullConfigure_ThrowsArgumentNullException()
+    {
+        var registry = new AlertRuleRegistry();
+
+        var ex = Assert.Throws<ArgumentNullException>(
+            () => registry.AddAlert("Named", (Action<AlertBuilder>)null!));
+        Assert.Equal("configure", ex.ParamName);
+    }
+
+    [Fact]
+    public void Add_NullRule_ThrowsArgumentNullException()
+    {
+        var registry = new AlertRuleRegistry();
+
+        var ex = Assert.Throws<ArgumentNullException>(() => registry.Add(null!));
+        Assert.Equal("rule", ex.ParamName);
+    }
+
+    [Fact]
+    public void Remove_NullName_ThrowsArgumentNullException()
+    {
+        var registry = new AlertRuleRegistry();
+
+        var ex = Assert.Throws<ArgumentNullException>(() => registry.Remove(null!));
+        Assert.Equal("name", ex.ParamName);
     }
 
     [Fact]

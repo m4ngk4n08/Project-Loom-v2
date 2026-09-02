@@ -23,6 +23,7 @@ public sealed record AlertNotification(AlertRule Rule, MetricAggregate Observed,
 
 public sealed class AlertEvaluationHostedService(
     Channel<AlertNotification> notificationChannel,
+    IAlertRuleRegistry registry,
     ISilenceStore silenceStore,
     IMetricStore metricStore,
     ILogger<AlertEvaluationHostedService>? logger = null) : BackgroundService
@@ -59,16 +60,14 @@ public sealed class AlertEvaluationHostedService(
         // The registry is re-read every tick rather than snapshotted once: returning
         // early on an empty registry meant no rule registered later was ever
         // evaluated, for the life of the process (BACKLOG.md § 6.7).
-        var tickInterval = ComputeTickInterval(LoomTelemetryOptionsAlertingExtensions.Rules);
+        var tickInterval = ComputeTickInterval(registry.Snapshot());
         using var timer = new PeriodicTimer(tickInterval);
 
         logger?.LogInformation("Alert evaluation started with a {Tick} tick.", tickInterval);
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            // Copy before iterating: Rules is a plain List and enumerating it while
-            // something adds a rule throws.
-            var rules = LoomTelemetryOptionsAlertingExtensions.Rules.ToList();
+            var rules = registry.Snapshot();
 
             var desiredTick = ComputeTickInterval(rules);
             if (desiredTick != tickInterval)

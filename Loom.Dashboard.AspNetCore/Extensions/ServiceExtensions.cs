@@ -30,8 +30,22 @@ namespace Loom.Dashboard.Extensions
             // request logging is misleading.
             services.AddLoomLogStorage();
 
-            // Alerting services
-            services.AddLoomAlerting();
+            // Alerting services. The dashboard's default alerts. Both metrics come from the
+            // System.Runtime EventCounters that EventPipeBridge pulls from the target process,
+            // so they work against any .NET target without the target opting in. These are
+            // here because a diagnostics tool with no alerts configured is less useful out of
+            // the box.
+            services.AddLoomAlerting(registry => registry
+                .AddAlert("HighCpuUsage", alert => alert
+                    .When("cpu-usage", agg => agg.Average > 0.8)
+                    .InWindow(TimeSpan.FromMinutes(1))
+                    .Notify<ConsoleAlertTarget>()
+                    .Notify<WebhookAlertTarget>())
+                .AddAlert("HighMemoryUsage", alert => alert
+                    .When("working-set", agg => agg.Average > 500)
+                    .InWindow(TimeSpan.FromMinutes(5))
+                    .Notify<ConsoleAlertTarget>()
+                    .Notify<WebhookAlertTarget>()));
             services.AddAlertTarget<ConsoleAlertTarget>();
             services.AddHttpClient();
             services.Configure<WebhookAlertOptions>(options =>
@@ -47,26 +61,6 @@ namespace Loom.Dashboard.Extensions
                 services.AddSingleton(assistOptions);
                 services.AddHttpClient<IExplainClient, AnthropicExplainClient>();
             }
-
-            // The dashboard's default alerts. Both metrics come from the System.Runtime
-            // EventCounters that EventPipeBridge pulls from the target process, so they work
-            // against any .NET target without the target opting in.
-            //
-            // Registering before the app is built is no longer load-bearing: since bcbfcdd the
-            // evaluation service re-reads the registry every tick and rules added later are
-            // picked up. These are here because a diagnostics tool with no alerts configured is
-            // less useful out of the box, not to dodge a startup-ordering bug.
-            new LoomTelemetryOptions()
-                .AddAlert("HighCpuUsage", alert => alert
-                    .When("cpu-usage", agg => agg.Average > 0.8)
-                    .InWindow(TimeSpan.FromMinutes(1))
-                    .Notify<ConsoleAlertTarget>()
-                    .Notify<WebhookAlertTarget>())
-                .AddAlert("HighMemoryUsage", alert => alert
-                    .When("working-set", agg => agg.Average > 500)
-                    .InWindow(TimeSpan.FromMinutes(5))
-                    .Notify<ConsoleAlertTarget>()
-                    .Notify<WebhookAlertTarget>());
 
             // EventPipe bridge — pulls metrics from target process into the store
             services.AddSingleton(sp =>

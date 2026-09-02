@@ -1,20 +1,6 @@
-using Loom.Telemetry;
 using Loom.Telemetry.Alerting.Interfaces;
 
 namespace Loom.Telemetry.Alerting;
-
-public static class LoomTelemetryOptionsAlertingExtensions
-{
-    public static readonly List<AlertRule> Rules = [];
-
-    public static LoomTelemetryOptions AddAlert(this LoomTelemetryOptions options, string name, Action<AlertBuilder> configure)
-    {
-        var builder = new AlertBuilder(name);
-        configure(builder);
-        Rules.Add(builder.Build());
-        return options;
-    }
-}
 
 public class AlertBuilder(string name)
 {

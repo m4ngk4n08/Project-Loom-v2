@@ -431,9 +431,9 @@ namespace Loom.Dashboard.Extensions
             var alertGroup = api.MapGroup("/alerts")
                 .WithTags("Alerts");
 
-            alertGroup.MapGet("", () =>
+            alertGroup.MapGet("", (IAlertRuleRegistry registry) =>
             {
-                var rules = LoomTelemetryOptionsAlertingExtensions.Rules
+                var rules = registry.Snapshot()
                     .Select(r => new AlertConfigDto { Name = r.Name, MetricName = r.MetricName, Window = r.Window })
                     .ToList();
                 return Results.Json(rules, LoomJsonSerializerContext.Default.ListAlertConfigDto);
@@ -441,9 +441,9 @@ namespace Loom.Dashboard.Extensions
             .WithName("GetAlerts")
             .Produces<List<AlertConfigDto>>(200);
 
-            alertGroup.MapGet("/{name}", (string name) =>
+            alertGroup.MapGet("/{name}", (string name, IAlertRuleRegistry registry) =>
             {
-                var rule = LoomTelemetryOptionsAlertingExtensions.Rules.FirstOrDefault(r => r.Name == name);
+                var rule = registry.Snapshot().FirstOrDefault(r => r.Name == name);
                 if (rule is null) return Results.NotFound();
 
                 return Results.Json(
@@ -454,9 +454,9 @@ namespace Loom.Dashboard.Extensions
             .Produces<AlertConfigDto>(200)
             .Produces(404);
 
-            alertGroup.MapPost("/{name}/test", async (string name, Channel<AlertNotification> channel) =>
+            alertGroup.MapPost("/{name}/test", async (string name, IAlertRuleRegistry registry, Channel<AlertNotification> channel) =>
             {
-                var rule = LoomTelemetryOptionsAlertingExtensions.Rules.FirstOrDefault(r => r.Name == name);
+                var rule = registry.Snapshot().FirstOrDefault(r => r.Name == name);
                 if (rule is null) return Results.NotFound();
 
                 var testAggregate = new MetricAggregate(rule.MetricName, Count: 1, Average: 0, Max: 0, P99: 0);
@@ -467,9 +467,9 @@ namespace Loom.Dashboard.Extensions
             .Produces(202)
             .Produces(404);
 
-            alertGroup.MapPut("/{name}/silence", (string name, TimeSpan duration, ISilenceStore silenceStore) =>
+            alertGroup.MapPut("/{name}/silence", (string name, TimeSpan duration, IAlertRuleRegistry registry, ISilenceStore silenceStore) =>
             {
-                var rule = LoomTelemetryOptionsAlertingExtensions.Rules.FirstOrDefault(r => r.Name == name);
+                var rule = registry.Snapshot().FirstOrDefault(r => r.Name == name);
                 if (rule is null) return Results.NotFound();
 
                 silenceStore.Silence(name, DateTime.UtcNow + duration);

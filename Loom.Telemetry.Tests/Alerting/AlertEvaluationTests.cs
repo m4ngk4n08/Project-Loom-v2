@@ -11,19 +11,16 @@ using Xunit;
 
 namespace Loom.Telemetry.Tests.Alerting;
 
-[Collection("AlertTests")]
 public class AlertEvaluationTests
 {
     [Fact]
     public async Task AlertEvaluationHostedService_NoRules_FiresNothing()
     {
         // Arrange
+        var registry = new AlertRuleRegistry();
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
-
-        // Clear any existing rules
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Act
         var cts = new CancellationTokenSource();
@@ -40,11 +37,11 @@ public class AlertEvaluationTests
     public async Task AlertEvaluationHostedService_RuleBreached_FiresNotification()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Create metric data
         var metricName = "TestMetric_" + Guid.NewGuid().ToString("N");
@@ -57,7 +54,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Count > 2 // We recorded 3 values
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         // Act
         var cts = new CancellationTokenSource();
@@ -72,20 +69,17 @@ public class AlertEvaluationTests
         Assert.NotNull(notification);
         Assert.Equal("TestAlert", notification.Rule.Name);
         Assert.Equal(metricName, notification.Observed.MetricName);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_RuleNotBreached_DoesNotFire()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Create metric data
         var metricName = "TestMetric2_" + Guid.NewGuid().ToString("N");
@@ -96,7 +90,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Count > 100 // We only recorded 1 value
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         // Act
         var cts = new CancellationTokenSource();
@@ -107,20 +101,17 @@ public class AlertEvaluationTests
 
         // Assert
         Assert.False(channel.Reader.TryRead(out _));
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_SilencedAlert_DoesNotFire()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Create metric data
         var metricName = "SilencedMetric_" + Guid.NewGuid().ToString("N");
@@ -131,7 +122,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Count > 0 // Would normally fire
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
         silenceStore.Silence("SilencedAlert", DateTime.UtcNow.AddMinutes(10));
 
         // Act
@@ -143,9 +134,6 @@ public class AlertEvaluationTests
 
         // Assert
         Assert.False(channel.Reader.TryRead(out _));
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
@@ -242,11 +230,11 @@ public class AlertEvaluationTests
     public async Task AlertEvaluationHostedService_Cooldown_PreventsDuplicateFires()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "CooldownTest_" + Guid.NewGuid().ToString("N");
         LoomMetrics.RecordCounter(metricName, 100.0);
@@ -256,7 +244,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Count > 0
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         // Act
         var cts = new CancellationTokenSource();
@@ -273,9 +261,6 @@ public class AlertEvaluationTests
         }
 
         Assert.True(notifications <= 1, $"Expected at most 1 notification due to cooldown, got {notifications}");
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     /// <summary>Keeps a metric fed with a value on an interval until cancelled, so a window
@@ -301,11 +286,11 @@ public class AlertEvaluationTests
     public async Task AlertEvaluationHostedService_StaysActiveWhileConditionHolds_DoesNotReNotifyBeforeCooldown()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "StaysActive_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromSeconds(2);
@@ -313,7 +298,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Count > 0
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         using var recordCts = new CancellationTokenSource();
         var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
@@ -334,20 +319,17 @@ public class AlertEvaluationTests
 
         Assert.Single(notifications);
         Assert.Equal(AlertState.Firing, notifications[0].State);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_ConditionClears_EmitsExactlyOneResolved()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "ResolveTest_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromMilliseconds(600);
@@ -355,7 +337,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Max > 50
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         // Initial breach
         LoomMetrics.RecordCounter(metricName, 100.0);
@@ -387,20 +369,17 @@ public class AlertEvaluationTests
         Assert.Equal(firing[0].FiredAt, resolved[0].FiredAt);
         Assert.NotNull(resolved[0].ResolvedAt);
         Assert.True(resolved[0].ResolvedAt!.Value > resolved[0].FiredAt);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_AlreadyResolved_DoesNotEmitSecondResolved()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "NoDoubleResolve_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromMilliseconds(600);
@@ -408,7 +387,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Max > 50
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         LoomMetrics.RecordCounter(metricName, 100.0);
 
@@ -432,20 +411,17 @@ public class AlertEvaluationTests
 
         var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
         Assert.Single(resolved);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_FullCycle_FiresResolvesFiresAgain()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "FullCycle_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromMilliseconds(600);
@@ -453,7 +429,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Max > 50
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         LoomMetrics.RecordCounter(metricName, 100.0); // first breach
 
@@ -484,20 +460,17 @@ public class AlertEvaluationTests
         Assert.True(firing.Count >= 2, $"Expected at least 2 Firing notifications, got {firing.Count}");
         Assert.Single(resolved);
         Assert.True(firing[^1].FiredAt > resolved[0].FiredAt);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_Resolution_IgnoresCooldown()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "IgnoresCooldown_" + Guid.NewGuid().ToString("N");
         // The cooldown equals rule.Window, so the only way to prove resolve isn't waiting
@@ -510,7 +483,7 @@ public class AlertEvaluationTests
         {
             Condition = _ => breached
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         using var recordCts = new CancellationTokenSource();
         // Keeps the window non-empty (some data, any data) so the rule is evaluated each
@@ -537,20 +510,17 @@ public class AlertEvaluationTests
         Assert.Single(resolved);
         Assert.True(resolved[0].ResolvedAt!.Value - resolved[0].FiredAt < window,
             "Resolved should not wait for the cooldown/window to elapse.");
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_Silence_GatesFiringNotResolving()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "SilenceResolves_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromMilliseconds(600);
@@ -558,7 +528,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Max > 50
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         LoomMetrics.RecordCounter(metricName, 100.0);
 
@@ -587,27 +557,24 @@ public class AlertEvaluationTests
 
         Assert.Single(firing);
         Assert.Single(resolved);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_SilencedFromStart_NeverFires()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "SilencedFromStart_" + Guid.NewGuid().ToString("N");
         var rule = new AlertRule("SilencedFromStartAlert", metricName, TimeSpan.FromSeconds(1))
         {
             Condition = agg => agg.Count > 0
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
         silenceStore.Silence("SilencedFromStartAlert", DateTime.UtcNow.AddMinutes(10));
 
         LoomMetrics.RecordCounter(metricName, 100.0);
@@ -619,20 +586,17 @@ public class AlertEvaluationTests
         await service.StopAsync(CancellationToken.None);
 
         Assert.False(channel.Reader.TryRead(out _));
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_NoData_EmitsNeitherFiringNorResolved()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "NoDataGap_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromMilliseconds(400);
@@ -640,7 +604,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Max > 50
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         LoomMetrics.RecordCounter(metricName, 100.0); // initial fire
 
@@ -663,9 +627,6 @@ public class AlertEvaluationTests
 
         Assert.Single(notifications);
         Assert.Equal(AlertState.Firing, notifications[0].State);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
@@ -702,11 +663,11 @@ public class AlertEvaluationTests
     public async Task AlertEvaluationHostedService_RuleRegisteredAfterStart_IsEvaluated()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         // Act - start with an EMPTY registry, so the old code would have returned
         // immediately and never entered its loop.
@@ -720,7 +681,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Count > 0
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         await Task.Delay(700); // idle tick picks up the rule, retimed tick evaluates it
 
@@ -732,9 +693,6 @@ public class AlertEvaluationTests
         Assert.True(hasNotification);
         Assert.NotNull(notification);
         Assert.Equal("RegisteredAfterStartAlert", notification.Rule.Name);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
@@ -784,11 +742,11 @@ public class AlertEvaluationTests
     public async Task AlertEvaluationHostedService_MetricGoesSilentPastGrace_ResolvesAsNoData()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "GoesSilent_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromSeconds(1);
@@ -797,7 +755,7 @@ public class AlertEvaluationTests
             Condition = agg => agg.Count > 0,
             NoDataGrace = TimeSpan.FromMilliseconds(400)
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         using var recordCts = new CancellationTokenSource();
         var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
@@ -826,20 +784,17 @@ public class AlertEvaluationTests
         Assert.Single(resolved);
         Assert.Equal(AlertResolutionReason.NoData, resolved[0].ResolutionReason);
         Assert.Equal(firing[0].FiredAt, resolved[0].FiredAt);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_MetricSilentWithinGrace_DoesNotResolve()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "SilentWithinGrace_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromSeconds(1);
@@ -848,7 +803,7 @@ public class AlertEvaluationTests
             Condition = agg => agg.Count > 0,
             NoDataGrace = TimeSpan.FromSeconds(30)
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         using var recordCts = new CancellationTokenSource();
         var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
@@ -875,20 +830,17 @@ public class AlertEvaluationTests
 
         Assert.NotEmpty(notifications);
         Assert.All(notifications, n => Assert.Equal(AlertState.Firing, n.State));
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task AlertEvaluationHostedService_ConditionClears_ResolvesAsConditionCleared()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var registry = new AlertRuleRegistry();
 
         var channel = Channel.CreateUnbounded<AlertNotification>();
         var silenceStore = new InMemorySilenceStore();
-        var service = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
 
         var metricName = "ClearsAsCondition_" + Guid.NewGuid().ToString("N");
         var window = TimeSpan.FromMilliseconds(600);
@@ -896,7 +848,7 @@ public class AlertEvaluationTests
         {
             Condition = agg => agg.Max > 50
         };
-        LoomTelemetryOptionsAlertingExtensions.Rules.Add(rule);
+        registry.Add(rule);
 
         LoomMetrics.RecordCounter(metricName, 100.0);
 
@@ -922,8 +874,5 @@ public class AlertEvaluationTests
         var resolved = notifications.Where(n => n.State == AlertState.Resolved).ToList();
         Assert.Single(resolved);
         Assert.Equal(AlertResolutionReason.ConditionCleared, resolved[0].ResolutionReason);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 }

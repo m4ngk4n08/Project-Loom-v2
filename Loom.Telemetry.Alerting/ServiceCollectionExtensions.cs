@@ -7,7 +7,9 @@ namespace Loom.Telemetry.Alerting;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddLoomAlerting(this IServiceCollection services)
+    public static IServiceCollection AddLoomAlerting(
+        this IServiceCollection services,
+        Action<IAlertRuleRegistry>? configure = null)
     {
         // Bounded, drop-oldest: a burst of simultaneous alerts shouldn't grow memory
         // unboundedly if the dispatcher briefly falls behind (Risk Register: "Exporter
@@ -19,6 +21,11 @@ public static class ServiceCollectionExtensions
         });
         services.AddSingleton(channel);
         services.AddSingleton<ISilenceStore, InMemorySilenceStore>();
+
+        var registry = new AlertRuleRegistry();
+        configure?.Invoke(registry);
+        services.AddSingleton<IAlertRuleRegistry>(registry);
+
         services.AddHostedService<AlertEvaluationHostedService>();
         services.AddHostedService<AlertDispatchHostedService>();
         return services;

@@ -12,7 +12,6 @@ using Xunit;
 
 namespace Loom.Telemetry.Tests.Alerting;
 
-[Collection("AlertTests")]
 public class AlertIntegrationTests
 {
     [Fact]
@@ -28,10 +27,36 @@ public class AlertIntegrationTests
         // Assert
         var channel = provider.GetService<Channel<AlertNotification>>();
         var silenceStore = provider.GetService<ISilenceStore>();
+        var registry = provider.GetService<IAlertRuleRegistry>();
 
         Assert.NotNull(channel);
         Assert.NotNull(silenceStore);
         Assert.IsType<InMemorySilenceStore>(silenceStore);
+        Assert.NotNull(registry);
+        Assert.Empty(registry.Snapshot());
+    }
+
+    [Fact]
+    public void ServiceCollectionExtensions_AddLoomAlerting_ConfigureCallbackPopulatesTheRegistry()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act - the callback is the only supported way for a host to declare rules now
+        // that the process-global list is gone.
+        services.AddLoomAlerting(registry => registry
+            .AddAlert("ConfiguredAlert", alert => alert
+                .When("Metric", agg => agg.Count > 100)
+                .InWindow(TimeSpan.FromMinutes(5))
+                .Notify<ConsoleAlertTarget>()));
+        var provider = services.BuildServiceProvider();
+
+        // Assert
+        var registered = provider.GetRequiredService<IAlertRuleRegistry>().Snapshot();
+        var rule = Assert.Single(registered);
+        Assert.Equal("ConfiguredAlert", rule.Name);
+        Assert.Equal("Metric", rule.MetricName);
+        Assert.Equal(TimeSpan.FromMinutes(5), rule.Window);
     }
 
     [Fact]
@@ -106,76 +131,65 @@ public class AlertIntegrationTests
     }
 
     [Fact]
-    public void LoomTelemetryOptions_AddAlert_AddsRuleToGlobalList()
+    public void AlertRuleRegistry_AddAlert_AddsRuleToTheRegistry()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
-        var options = new LoomTelemetryOptions();
+        var registry = new AlertRuleRegistry();
 
         // Act
-        options.AddAlert("TestAlert", alert => alert
+        registry.AddAlert("TestAlert", alert => alert
             .When("Metric", agg => agg.Count > 100)
             .InWindow(TimeSpan.FromMinutes(5))
             .Notify<ConsoleAlertTarget>());
 
         // Assert
-        Assert.Single(LoomTelemetryOptionsAlertingExtensions.Rules);
-        var rule = LoomTelemetryOptionsAlertingExtensions.Rules[0];
+        var rule = Assert.Single(registry.Snapshot());
         Assert.Equal("TestAlert", rule.Name);
         Assert.Equal("Metric", rule.MetricName);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
-    public void LoomTelemetryOptions_AddMultipleAlerts_AddsAllRules()
+    public void AlertRuleRegistry_AddMultipleAlerts_AddsAllRules()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
-        var options = new LoomTelemetryOptions();
+        var registry = new AlertRuleRegistry();
 
         // Act
-        options.AddAlert("Alert1", alert => alert
+        registry.AddAlert("Alert1", alert => alert
             .When("Metric1", agg => agg.Count > 100)
             .Notify<ConsoleAlertTarget>());
 
-        options.AddAlert("Alert2", alert => alert
+        registry.AddAlert("Alert2", alert => alert
             .When("Metric2", agg => agg.Average > 50)
             .Notify<ConsoleAlertTarget>());
 
         // Assert
-        Assert.Equal(2, LoomTelemetryOptionsAlertingExtensions.Rules.Count);
-        Assert.Contains(LoomTelemetryOptionsAlertingExtensions.Rules, r => r.Name == "Alert1");
-        Assert.Contains(LoomTelemetryOptionsAlertingExtensions.Rules, r => r.Name == "Alert2");
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var rules = registry.Snapshot();
+        Assert.Equal(2, rules.Count);
+        Assert.Contains(rules, r => r.Name == "Alert1");
+        Assert.Contains(rules, r => r.Name == "Alert2");
     }
 
     [Fact]
     public async Task EndToEnd_MetricExceedsThreshold_AlertFires()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var metricName = "E2EMetric_" + Guid.NewGuid().ToString("N");
 
         var services = new ServiceCollection();
-        services.AddLoomAlerting();
+        // Configure alert first - use short window for fast testing
+        services.AddLoomAlerting(registry => registry
+            .AddAlert("E2EAlert", alert => alert
+                .When(metricName, agg => agg.Count > 5)
+                .InWindow(TimeSpan.FromSeconds(2))
+                .Notify<TrackingAlertTarget>()));
         services.AddAlertTarget<TrackingAlertTarget>();
 
         var provider = services.BuildServiceProvider();
         var channel = provider.GetRequiredService<Channel<AlertNotification>>();
         var targets = provider.GetServices<IAlertTarget>().ToList();
         var silenceStore = provider.GetRequiredService<ISilenceStore>();
-
-        var metricName = "E2EMetric_" + Guid.NewGuid().ToString("N");
-
-        // Configure alert first - use short window for fast testing
-        var options = new LoomTelemetryOptions();
-        options.AddAlert("E2EAlert", alert => alert
-            .When(metricName, agg => agg.Count > 5)
-            .InWindow(TimeSpan.FromSeconds(2))
-            .Notify<TrackingAlertTarget>());
+        var ruleRegistry = provider.GetRequiredService<IAlertRuleRegistry>();
 
         // Record metrics AFTER configuring alert
         for (int i = 0; i < 10; i++)
@@ -184,7 +198,7 @@ public class AlertIntegrationTests
         }
 
         // Act - start services
-        var evaluationService = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var evaluationService = new AlertEvaluationHostedService(channel, ruleRegistry, silenceStore, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new AlertDispatchHostedService(channel, targets);
 
         var cts = new CancellationTokenSource();
@@ -201,40 +215,35 @@ public class AlertIntegrationTests
         var trackingTarget = targets.OfType<TrackingAlertTarget>().First();
         Assert.Equal(1, trackingTarget.NotificationCount);
         Assert.Equal("E2EAlert", trackingTarget.LastNotification?.Rule.Name);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]
     public async Task EndToEnd_SilencedAlert_DoesNotFire()
     {
         // Arrange
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
+        var metricName = "SilencedE2E_" + Guid.NewGuid().ToString("N");
 
         var services = new ServiceCollection();
-        services.AddLoomAlerting();
+        // Configure and silence alert - use short window for fast testing
+        services.AddLoomAlerting(registry => registry
+            .AddAlert("SilencedE2EAlert", alert => alert
+                .When(metricName, agg => agg.Count > 0)
+                .InWindow(TimeSpan.FromSeconds(1))
+                .Notify<TrackingAlertTarget>()));
         services.AddAlertTarget<TrackingAlertTarget>();
 
         var provider = services.BuildServiceProvider();
         var channel = provider.GetRequiredService<Channel<AlertNotification>>();
         var targets = provider.GetServices<IAlertTarget>().ToList();
         var silenceStore = provider.GetRequiredService<ISilenceStore>();
+        var ruleRegistry = provider.GetRequiredService<IAlertRuleRegistry>();
 
-        var metricName = "SilencedE2E_" + Guid.NewGuid().ToString("N");
         LoomMetrics.RecordCounter(metricName, 100.0);
-
-        // Configure and silence alert - use short window for fast testing
-        var options = new LoomTelemetryOptions();
-        options.AddAlert("SilencedE2EAlert", alert => alert
-            .When(metricName, agg => agg.Count > 0)
-            .InWindow(TimeSpan.FromSeconds(1))
-            .Notify<TrackingAlertTarget>());
 
         silenceStore.Silence("SilencedE2EAlert", DateTime.UtcNow.AddMinutes(10));
 
         // Act
-        var evaluationService = new AlertEvaluationHostedService(channel, silenceStore, LoomMetricsStoreAdapter.Instance);
+        var evaluationService = new AlertEvaluationHostedService(channel, ruleRegistry, silenceStore, LoomMetricsStoreAdapter.Instance);
         var dispatchService = new AlertDispatchHostedService(channel, targets);
 
         var cts = new CancellationTokenSource();
@@ -250,9 +259,6 @@ public class AlertIntegrationTests
         // Assert
         var trackingTarget = targets.OfType<TrackingAlertTarget>().First();
         Assert.Equal(0, trackingTarget.NotificationCount);
-
-        // Cleanup
-        LoomTelemetryOptionsAlertingExtensions.Rules.Clear();
     }
 
     [Fact]

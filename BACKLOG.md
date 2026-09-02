@@ -1557,12 +1557,12 @@ Considered and rejected in favour of § 11.1's split. NuGet dependencies are tra
 and non-optional, so one package forces all of Loom into every consumer. Three concrete
 costs, each verified:
 
-- **ASP.NET Core enters non-web apps.** `Loom.Web.Contracts.csproj:16` declares
+- **ASP.NET Core enters non-web apps.** `Loom.Web.Contracts.csproj:21` declares
   `<FrameworkReference Include="Microsoft.AspNetCore.App" />`, and Storage, Query,
   Alerting, and Exporters all depend on Web.Contracts. A console worker referencing Loom
   to time one method would acquire a web framework it never calls.
 - **`IL2104` becomes the consumer's problem.** `Microsoft.Diagnostics.Tracing.TraceEvent`
-  (`Loom.Dashboard.csproj:21`, `Loom.DevTools.csproj:12`) emits `IL2104` when trimmed.
+  (`Loom.Dashboard.csproj:35`, `Loom.DevTools.csproj:26`) emits `IL2104` when trimmed.
   Confined to the tools today; a merged package puts it in every consumer's build log.
 - **`Loom.Telemetry.Assist` is an adoption blocker in a default install.**
   `AnthropicExplainClient.cs:31` sends `x-api-key` to an external LLM endpoint. It is
@@ -1649,7 +1649,7 @@ Both were ported before deletion:
   the Angular SPA blank. A policy written for the SPA replaced it; see § 11.5.
 - **CSP authored 2026-09-02** — see § 11.5. Closed.
 - **`MetricsService` moved to `Loom.Storage`**, not `Loom.Telemetry`: it needs
-  `Loom.Web.Contracts.Dtos`, and `Loom.Web.Contracts.csproj:16` carries a
+  `Loom.Web.Contracts.Dtos`, and `Loom.Web.Contracts.csproj:21` carries a
   `FrameworkReference` on `Microsoft.AspNetCore.App`, which would drag ASP.NET Core into
   the package § 11.1 requires to stay reference-free. `Loom.Storage` already depends on
   both and is `IsAotCompatible`, so the move costs zero new dependencies. Its 4 tests moved

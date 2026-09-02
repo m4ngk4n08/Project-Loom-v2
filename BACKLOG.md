@@ -1491,13 +1491,12 @@ is no "reference the library" story despite the library surface already existing
 
 1. Package metadata (`PackageId`, `Description`, `PackageLicenseExpression`,
    `RepositoryUrl`, README) across the libraries intended for publication.
-2. Ship `Loom.Telemetry.Generators` **inside** `Loom.Telemetry.nupkg` at
-   `analyzers/dotnet/cs/`. Today the generator is wired by a hand-written
-   `OutputItemType="Analyzer" ReferenceOutputAssembly="false"` `ProjectReference`
-   (`examples/SampleMonitoredApp/SampleMonitoredApp.csproj:12`). No consumer should type
-   that line; a single `PackageReference` must deliver both attribute and generator.
-   The generator's `netstandard2.0` target — currently visible only as the ignorable
-   `NETSDK1212` warning — is a prerequisite for this, not an accident.
+2. ~~Ship `Loom.Telemetry.Generators` **inside** `Loom.Telemetry.nupkg` at
+   `analyzers/dotnet/cs/`.~~ **DONE 2026-09-02 — see § 11.6.** A single
+   `PackageReference` now delivers both the attributes and the generator; no consumer
+   types the hand-written `OutputItemType="Analyzer"` line. The generator's
+   `netstandard2.0` target — visible only as the ignorable `NETSDK1212` warning — was the
+   prerequisite that made this work.
 3. Extract `Loom.Web.Api`'s wiring behind `AddLoomDashboard()` / `MapLoomDashboard()` and
    reduce `Program.cs` to a thin host over them. **This is a refactor, not a repack:**
    `Program.cs` currently owns `CreateSlimBuilder`, the Kestrel loopback bind, the
@@ -1547,6 +1546,11 @@ the **packed `.nupkg`** (not a `ProjectReference`) publishes with `PublishAot` a
 zero `IL2026`/`IL3050`. Referencing the project instead of the package would not exercise
 the `analyzers/dotnet/cs/` path from § 11.1 item 2 and could pass while the real package
 is broken.
+
+**The gate has been run manually and passes (2026-09-02) — but it is not yet in CI, so
+this item stays open.** See § 11.6 for what it caught. Automating it needs a job that packs
+`Loom.Telemetry`, points a throwaway consumer at a folder feed, and AOT-publishes it; the
+manual procedure is recorded in § 11.6 and translates directly.
 
 ### 11.4 `Loom.Web.Api` Retired 🟢 LOW (COMPLETED)
 
@@ -1636,6 +1640,75 @@ that `'self'` matches same-origin WebSocket schemes, but confirming it needs an
 authenticated session, which the verification pass did not open. If the live charts ever
 fail to stream while REST calls succeed, this is the first thing to check — the fix is to
 append `ws://localhost:* wss://localhost:*` to `connect-src`.
+
+### 11.6 `Loom.Telemetry` Packs the Generator 🟢 LOW (COMPLETED 2026-09-02)
+
+`Loom.Telemetry` is now packable and carries `Loom.Telemetry.Generators.dll` at
+`analyzers/dotnet/cs/`. A consumer writes one `PackageReference` and gets the attributes
+and the generator together — the hand-written
+`OutputItemType="Analyzer" ReferenceOutputAssembly="false"` line is no longer part of the
+consumer story. Package contents, verified by reading the `.nupkg`:
+
+```
+lib/net10.0/Loom.Telemetry.dll
+analyzers/dotnet/cs/Loom.Telemetry.Generators.dll
+README.md                       (packed from Loom.Telemetry/PACKAGE.md)
+```
+
+The only declared dependency is `Microsoft.Extensions.DependencyInjection.Abstractions`.
+`Loom.Telemetry.Generators` does **not** appear as one: it is an analyzer, and a consumer
+must never resolve it as a runtime dependency.
+
+**The generator is attached to `Loom.Telemetry` for build ordering only — deliberately
+without `OutputItemType="Analyzer"`.** The first packed build did set it, and the resulting
+package was broken in a way that only a real consumer reveals: running the generator over
+`Loom.Telemetry`'s own compilation baked `LoomProfileAttribute` and `LoomTrackAttribute`
+into `Loom.Telemetry.dll`, the generator then re-emitted them in the consumer, and the
+consumer failed with **`CS0436`** — the emitted type conflicting with the imported one. The
+attributes must exist *only* as generator post-initialization output. Evidence the fix
+holds: `Loom.Telemetry.dll` shrank 44,032 → 43,520 bytes when the analyzer wiring was
+removed.
+
+**§ 11.3's gate was run manually and passes.** A throwaway console app in a scratch
+directory, one `PackageReference` to the packed `Loom.Telemetry` 1.0.0 resolved from a
+**local folder feed** (a directory of `.nupkg` files named in a `nuget.config` — no feed
+server, no credentials), `PublishAot` + `PublishTrimmed` + `TrimMode=link` +
+`TreatWarningsAsErrors`:
+
+- publishes clean, **zero `IL2026`/`IL3050`**, native `PackageConsumer.exe` with no managed
+  assembly beside it, and running it prints its expected line;
+- building with `/p:EmitCompilerGeneratedFiles=true --no-incremental` emits
+  `LoomAttributes.g.cs`, `OrderService_LoomProfile_g_cs.cs`, and
+  `OrderService_LoomTrack_g_cs.cs` — **proof by artefact that the packaged generator ran**,
+  not an inference from a clean build.
+
+Note that compiling at all is itself strong evidence: `[LoomProfile]` exists *only* as
+generator output, so a package that failed to deliver the generator could not produce a
+consumer that compiles.
+
+**Two consumer-facing facts the gate surfaced, both now correct in `PACKAGE.md`:**
+
+- **An instrumented class must be `partial`.** The generator emits its helpers into a
+  second declaration of the class, so a plain `sealed class` fails with `CS0260`. The
+  README's first draft showed exactly that and would have shipped a non-compiling example.
+- **`AddLoomTelemetry` requires a `configure` callback** and there is no parameterless
+  overload, while `LoomTelemetryOptions` currently has no settings — so the only correct
+  call is `AddLoomTelemetry(options => { })`. This is poor ergonomics for the package's
+  headline API and § 11.1's own target state writes it as `AddLoomTelemetry()`. **Adding
+  the overload is a public API change and is left open** rather than made in passing;
+  `configure` is also dereferenced without a null check.
+
+**Package ID is still provisional.** It defaults to the assembly name, `Loom.Telemetry`,
+which is free on nuget.org — but claiming it forfeits any `Loom.` prefix reservation,
+because other publishers are already active under that prefix. That only binds on a public
+push, and a local folder feed does not care about global uniqueness, so the naming decision
+stays parked. **Do not push this to nuget.org before settling it: IDs are permanent and
+versions cannot be deleted or re-pushed.**
+
+`examples/SampleMonitoredApp`, `Loom.AotProbe`, and `Loom.Telemetry.Tests` keep their
+hand-wired analyzer `ProjectReference`. That is correct and not an oversight — they consume
+Loom by project reference, and the `analyzers/dotnet/cs/` path exists only for package
+consumers.
 
 ---
 

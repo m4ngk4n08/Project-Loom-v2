@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
       <PropertyGroup>
               <TargetFramework>net10.0</TargetFramework>
               <Nullable>enable</Nullable>
@@ -8,7 +8,70 @@
               <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
               <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
       </PropertyGroup>
+
+      <!-- Package identity. The ID is deliberately still the assembly name: `Loom.Telemetry`
+           is free on nuget.org, but claiming it forfeits any `Loom.` prefix reservation
+           because other publishers are already active under that prefix (BACKLOG.md, parked
+           naming decision). That only matters for a public push - a local folder feed does
+           not care about global uniqueness - so the ID stays provisional until the naming
+           pass. Package IDs are permanent once pushed; do not publish this to nuget.org
+           without settling it first. -->
+      <PropertyGroup>
+              <IsPackable>true</IsPackable>
+              <Description>Zero-allocation, Native AOT-safe telemetry for .NET. Annotate a method with [LoomProfile] and a source generator emits the timing wrapper at compile time - no reflection, no runtime code generation, no startup cost.</Description>
+              <PackageTags>telemetry;metrics;profiling;diagnostics;aot;source-generator</PackageTags>
+              <PackageLicenseExpression>MIT</PackageLicenseExpression>
+              <RepositoryUrl>https://github.com/m4ngk4n08/Project-Loom-v2</RepositoryUrl>
+              <RepositoryType>git</RepositoryType>
+              <PackageReadmeFile>README.md</PackageReadmeFile>
+              <!-- The package carries a generator, and a consumer building against a
+                   different SDK is the normal case. Suppress nothing, but do not let a
+                   stale symbol package ship silently. -->
+              <IncludeSymbols>true</IncludeSymbols>
+              <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+      </PropertyGroup>
+
       <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
       </ItemGroup>
+
+      <ItemGroup>
+        <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+      </ItemGroup>
+
+      <!-- Build ordering only. This deliberately does NOT set OutputItemType="Analyzer":
+           attaching the generator to this project would run it over Loom.Telemetry's own
+           compilation, baking LoomProfileAttribute and LoomTrackAttribute into
+           Loom.Telemetry.dll. The generator then re-emits them in every consumer, and the
+           consumer fails with CS0436 (the emitted type conflicts with the imported one).
+           Measured, not theorised - it is what the first packed build did. The attributes
+           must exist ONLY as generator post-initialization output.
+           PrivateAssets="all" + ReferenceOutputAssembly="false" keep the generator project
+           out of the package's dependency list: it is an analyzer, not a runtime
+           dependency, and a consumer must never resolve it as one. -->
+      <ItemGroup>
+        <ProjectReference Include="..\Loom.Telemetry.Generators\Loom.Telemetry.Generators.csproj"
+                          ReferenceOutputAssembly="false"
+                          PrivateAssets="all" />
+      </ItemGroup>
+
+      <!-- Place the generator at analyzers/dotnet/cs/, the path NuGet loads Roslyn
+           components from. The assembly is resolved by asking the generator project for its
+           own TargetPath rather than by hardcoding a bin/ path, so this does not silently
+           pack a stale DLL or break when the output layout changes. Without this target the
+           package installs the attribute but emits no wrappers - a failure that compiles
+           clean and produces no telemetry, so it is asserted in the pack verification. -->
+      <Target Name="LoomPackGenerator" BeforeTargets="_GetPackageFiles">
+        <MSBuild Projects="..\Loom.Telemetry.Generators\Loom.Telemetry.Generators.csproj"
+                 Targets="GetTargetPath"
+                 Properties="Configuration=$(Configuration);TargetFramework=netstandard2.0">
+          <Output TaskParameter="TargetOutputs" ItemName="LoomGeneratorAssembly" />
+        </MSBuild>
+        <ItemGroup>
+          <None Include="@(LoomGeneratorAssembly)"
+                Pack="true"
+                PackagePath="analyzers/dotnet/cs"
+                Visible="false" />
+        </ItemGroup>
+      </Target>
 </Project>

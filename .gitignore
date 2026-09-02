@@ -48,6 +48,9 @@ out-tsc/
 !wiggly-noodling-hoare.md
 !BACKLOG.md
 !TESTING.md
+# Packed into Loom.Telemetry.nupkg as its README (PackageReadmeFile). Without this
+# un-ignore, a fresh clone has no PACKAGE.md and `dotnet pack` fails on the missing file.
+!Loom.Telemetry/PACKAGE.md
 
 # ============================================================
 # Environment / secrets

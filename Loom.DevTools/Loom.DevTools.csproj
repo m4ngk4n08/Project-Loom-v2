@@ -14,6 +14,9 @@
   <!-- Package metadata. PackageId, ToolCommandName and PackAsTool stay in the group
        above; this group is the nuget.org-facing description only. -->
   <PropertyGroup>
+    <!-- Without this, MSBuild falls back to the assembly name and nuget.org shows
+         "Loom.DevTools" as the author. -->
+    <Authors>Angelo Davales</Authors>
     <Description>Command-line companion to Loom. Attaches to a running .NET process over EventPipe to stream logs and metrics, runs Loom queries against a live process, and mints scope-restricted tokens for the Loom dashboard.</Description>
     <PackageTags>telemetry;metrics;logging;diagnostics;cli;dotnet-tool;eventpipe</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

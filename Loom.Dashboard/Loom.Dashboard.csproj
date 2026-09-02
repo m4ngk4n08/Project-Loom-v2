@@ -23,6 +23,9 @@
   <!-- Package metadata. PackageId, ToolCommandName and PackAsTool stay in the group
        above; this group is the nuget.org-facing description only. -->
   <PropertyGroup>
+    <!-- Without this, MSBuild falls back to the assembly name and nuget.org shows
+         "Loom.Dashboard" as the author. -->
+    <Authors>Angelo Davales</Authors>
     <Description>Local telemetry dashboard for .NET processes. A dotnet tool that attaches to a running process by PID and serves live metrics, logs, queries and alerts over a loopback-only HTTP endpoint. Binds 127.0.0.1 in code; remote access is an SSH tunnel.</Description>
     <PackageTags>telemetry;metrics;logging;diagnostics;dashboard;dotnet-tool;profiling</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

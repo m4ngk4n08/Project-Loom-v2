@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 // Consume exactly what a stranger would: one PackageReference, the attribute, and the
 // DI registration the package README advertises.
 var services = new ServiceCollection();
-services.AddLoomTelemetry(options => { });
+services.AddLoomTelemetry();
 using var provider = services.BuildServiceProvider();
 
 var svc = new OrderService();

@@ -1532,10 +1532,11 @@ from the assembly names and namespaces (`Loom.*`), and that is deliberate.
    consumer-AOT gate still passing, which is the only check that proves
    `Loom.Telemetry.Generators` is still packed *inside* the Telemetry package.
 
-   **Known gap, not fixed:** all three packages carry `<authors>` defaulted to the
-   assembly name (`Loom.DevTools`, `Loom.Dashboard`, `Loom.Telemetry`) because none sets
-   `<Authors>`. nuget.org renders that as the package author. Fix before the first public
-   push.
+   ~~**Known gap, not fixed:** all three packages carry `<authors>` defaulted to the
+   assembly name.~~ **FIXED 2026-09-02.** All three now set
+   `<Authors>Angelo Davales</Authors>`, confirmed in the packed nuspecs. Without the
+   property MSBuild falls back to `$(AssemblyName)`, so nuget.org would have shown
+   "Loom.Telemetry" as the package author.
 2. ~~Ship `Loom.Telemetry.Generators` **inside** `Loom.Telemetry.nupkg` at
    `analyzers/dotnet/cs/`.~~ **DONE 2026-09-02 — see § 11.6.** A single
    `PackageReference` now delivers both the attributes and the generator; no consumer

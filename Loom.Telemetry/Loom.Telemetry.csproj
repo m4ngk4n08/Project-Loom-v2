@@ -19,6 +19,9 @@
       <PropertyGroup>
               <IsPackable>true</IsPackable>
               <PackageId>LoomDiagnostics.Telemetry</PackageId>
+              <!-- Without this, MSBuild falls back to the assembly name and nuget.org
+                   shows "Loom.Telemetry" as the author. -->
+              <Authors>Angelo Davales</Authors>
               <Description>Zero-allocation, Native AOT-safe telemetry for .NET. Annotate a method with [LoomProfile] and a source generator emits the timing wrapper at compile time - no reflection, no runtime code generation, no startup cost.</Description>
               <PackageTags>telemetry;metrics;profiling;diagnostics;aot;source-generator</PackageTags>
               <PackageLicenseExpression>MIT</PackageLicenseExpression>

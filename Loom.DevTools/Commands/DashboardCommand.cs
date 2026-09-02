@@ -99,7 +99,7 @@ public static class DashboardCommand
         catch (Win32Exception)
         {
             Console.WriteLine("Dashboard package not found.");
-            Console.WriteLine("Install with: dotnet tool install -g Loom.Dashboard");
+            Console.WriteLine("Install with: dotnet tool install -g LoomDiagnostics.Dashboard");
             return;
         }
         catch (Exception ex)

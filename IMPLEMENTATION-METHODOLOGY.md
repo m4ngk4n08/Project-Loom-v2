@@ -4933,7 +4933,7 @@ dotnet new console -f net10.0
 ```
 
 **Explanation (ELI5):**
-> `Microsoft.Diagnostics.NETCore.Client` is Microsoft's own NuGet package for talking the diagnostics IPC protocol — it's what `dotnet-counters`/`dotnet-trace` themselves are built on, so this phase isn't reimplementing the wire protocol by hand, just using the same client library those tools use. `PackAsTool = true` + `ToolCommandName = "loom"` is the standard .NET global-tool pattern (unrelated to Native AOT) that makes `dotnet tool install -g Loom.DevTools` register a `loom` command globally, so `dotnet loom dev` (or just `loom dev`) works afterward. `Loom.DevTools` is intentionally **not** referenced by any other project — per `wiggly-noodling-hoare.md`'s Dependency Flow, it's a standalone CLI that can run independently of `Loom.Host`, matching README's description of it as separate, not embedded in the main server.
+> `Microsoft.Diagnostics.NETCore.Client` is Microsoft's own NuGet package for talking the diagnostics IPC protocol — it's what `dotnet-counters`/`dotnet-trace` themselves are built on, so this phase isn't reimplementing the wire protocol by hand, just using the same client library those tools use. `PackAsTool = true` + `ToolCommandName = "loom"` is the standard .NET global-tool pattern (unrelated to Native AOT) that makes `dotnet tool install -g LoomDiagnostics.Cli` register a `loom` command globally, so `dotnet loom dev` (or just `loom dev`) works afterward. `Loom.DevTools` is intentionally **not** referenced by any other project — per `wiggly-noodling-hoare.md`'s Dependency Flow, it's a standalone CLI that can run independently of `Loom.Host`, matching README's description of it as separate, not embedded in the main server.
 
 ## Step 13.3: Bridging `LoomRuntime` onto `System.Diagnostics.Metrics`
 
@@ -5152,7 +5152,7 @@ These back a `--json` output mode for `loom dev` (emit `DiscoveredAppDto[]` inst
 
 ```bash
 dotnet pack Loom.DevTools -c Release
-dotnet tool install -g Loom.DevTools --add-source ./Loom.DevTools/bin/Release
+dotnet tool install -g LoomDiagnostics.Cli --add-source ./Loom.DevTools/bin/Release
 
 # In one terminal, run an app with Loom.Telemetry wired up:
 dotnet run --project Loom.Web.Api
@@ -5763,7 +5763,7 @@ parent's environment, so a correctly configured shell works unchanged. A missing
 not.
 
 The trap: `DashboardCommand.cs:68-93` wraps the `--version` probe in a bare `catch` that
-prints **"Dashboard package not found. Install with: dotnet tool install -g Loom.Dashboard"**
+prints **"Dashboard package not found. Install with: dotnet tool install -g LoomDiagnostics.Dashboard"**
 for *every* failure. After this phase the most likely failure is a missing signing key,
 which would be reported as a missing package — sending the operator to reinstall a tool
 that is already installed. Two required changes:

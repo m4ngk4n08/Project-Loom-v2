@@ -9,15 +9,16 @@
               <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
       </PropertyGroup>
 
-      <!-- Package identity. The ID is deliberately still the assembly name: `Loom.Telemetry`
-           is free on nuget.org, but claiming it forfeits any `Loom.` prefix reservation
-           because other publishers are already active under that prefix (BACKLOG.md, parked
-           naming decision). That only matters for a public push - a local folder feed does
-           not care about global uniqueness - so the ID stays provisional until the naming
-           pass. Package IDs are permanent once pushed; do not publish this to nuget.org
-           without settling it first. -->
+      <!-- Package identity. PackageId deliberately differs from the assembly name and
+           namespace, which stay `Loom.Telemetry`. `Loom.Telemetry` was free on nuget.org,
+           but taking it would have forfeited any prefix reservation - other publishers are
+           long established under `Loom.` (gyuwon's Loom.Messaging / Loom.EventSourcing
+           family alone is ~350k downloads), so NuGet will not reserve it. `LoomDiagnostics.`
+           is clean and reservable. See BACKLOG.md 11.7. Nothing in source changes: consumers
+           still write `using Loom.Telemetry;` and `[LoomProfile]`. -->
       <PropertyGroup>
               <IsPackable>true</IsPackable>
+              <PackageId>LoomDiagnostics.Telemetry</PackageId>
               <Description>Zero-allocation, Native AOT-safe telemetry for .NET. Annotate a method with [LoomProfile] and a source generator emits the timing wrapper at compile time - no reflection, no runtime code generation, no startup cost.</Description>
               <PackageTags>telemetry;metrics;profiling;diagnostics;aot;source-generator</PackageTags>
               <PackageLicenseExpression>MIT</PackageLicenseExpression>

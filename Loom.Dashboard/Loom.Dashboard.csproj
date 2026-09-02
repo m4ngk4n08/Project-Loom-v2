@@ -6,6 +6,9 @@
     <OutputType>Exe</OutputType>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
+    <!-- PackageId differs from the assembly name on purpose; see Loom.Telemetry.csproj and
+         BACKLOG.md 11.7. ToolCommandName is what users actually type and is unchanged. -->
+    <PackageId>LoomDiagnostics.Dashboard</PackageId>
     <ToolCommandName>loom-dashboard</ToolCommandName>
     <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
     <!-- Emits compile-time interceptors for the Map* calls in EndpointExtensions, replacing

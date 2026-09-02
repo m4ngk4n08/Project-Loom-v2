@@ -4,6 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>Exe</OutputType>
+    <!-- PackageId differs from the assembly name on purpose; see Loom.Telemetry.csproj and
+         BACKLOG.md 11.7. ToolCommandName is what users actually type and is unchanged. -->
+    <PackageId>LoomDiagnostics.Cli</PackageId>
     <ToolCommandName>loom</ToolCommandName>
     <PackAsTool>true</PackAsTool>
   </PropertyGroup>

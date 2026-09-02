@@ -551,7 +551,7 @@ no change, since `loom-dashboard --version` already short-circuits at
 **Location:** `Loom.DevTools/Commands/DashboardCommand.cs:68-93`
 
 The `loom-dashboard --version` probe is wrapped in a bare `catch` that prints
-`Dashboard package not found. / Install with: dotnet tool install -g Loom.Dashboard`
+`Dashboard package not found. / Install with: dotnet tool install -g LoomDiagnostics.Dashboard`
 for *any* failure — a non-zero exit, a crash on startup, a missing config file. Only one
 of those is actually a missing package.
 
@@ -1480,12 +1480,16 @@ is no "reference the library" story despite the library surface already existing
 
 **Target state.** Three tiers, plus a metapackage:
 
-| Package | Contains | Consumer writes |
+Package IDs settled 2026-09-02 — see § 11.7. They are `LoomDiagnostics.*`, which differs
+from the assembly names and namespaces (`Loom.*`), and that is deliberate.
+
+| Package ID | Contains | Consumer writes |
 |---|---|---|
-| `Loom.Telemetry` | attribute + generator + recording | `[LoomProfile]`, `AddLoomTelemetry()` |
-| `Loom.Dashboard.AspNetCore` | mountable dashboard | `AddLoomDashboard()` / `MapLoomDashboard()` |
-| `Loom` (metapackage) | no code; depends on the others | one-line "everything" install |
-| `loom` / `loom-dashboard` | CLI tools | unchanged, already ship this way |
+| `LoomDiagnostics.Telemetry` | attribute + generator + recording | `[LoomProfile]`, `AddLoomTelemetry()` |
+| `LoomDiagnostics.Dashboard.AspNetCore` | mountable dashboard | `AddLoomDashboard()` / `MapLoomDashboard()` |
+| `LoomDiagnostics` (metapackage) | no code; depends on the others | one-line "everything" install |
+| `LoomDiagnostics.Dashboard` | CLI tool | command stays `loom-dashboard` |
+| `LoomDiagnostics.Cli` | CLI tool | command stays `loom` |
 
 **Work items:**
 
@@ -1698,17 +1702,64 @@ consumer that compiles.
   the overload is a public API change and is left open** rather than made in passing;
   `configure` is also dereferenced without a null check.
 
-**Package ID is still provisional.** It defaults to the assembly name, `Loom.Telemetry`,
-which is free on nuget.org — but claiming it forfeits any `Loom.` prefix reservation,
-because other publishers are already active under that prefix. That only binds on a public
-push, and a local folder feed does not care about global uniqueness, so the naming decision
-stays parked. **Do not push this to nuget.org before settling it: IDs are permanent and
-versions cannot be deleted or re-pushed.**
+**Package ID settled 2026-09-02: `LoomDiagnostics.Telemetry`** — see § 11.7.
 
 `examples/SampleMonitoredApp`, `Loom.AotProbe`, and `Loom.Telemetry.Tests` keep their
 hand-wired analyzer `ProjectReference`. That is correct and not an oversight — they consume
 Loom by project reference, and the `analyzers/dotnet/cs/` path exists only for package
 consumers.
+
+### 11.7 Public Package IDs Are `LoomDiagnostics.*` 🟢 LOW (DECIDED 2026-09-02)
+
+**Decision:** publish under the `LoomDiagnostics.` prefix. Assembly names, namespaces, the
+`[LoomProfile]` attribute, and the product name all stay `Loom.*` — **package ID and
+namespace do not have to match, and here they deliberately do not.**
+
+| Package ID | Project | Command |
+|---|---|---|
+| `LoomDiagnostics.Telemetry` | `Loom.Telemetry` | — |
+| `LoomDiagnostics.Dashboard` | `Loom.Dashboard` | `loom-dashboard` |
+| `LoomDiagnostics.Cli` | `Loom.DevTools` | `loom` |
+| `LoomDiagnostics` | metapackage, not yet built | — |
+| `LoomDiagnostics.Dashboard.AspNetCore` | mountable library, § 11.1 item 3 | — |
+
+**Why not `Loom.*`.** Verified on nuget.org 2026-09-02 by registration-index probe and
+search API:
+
+- **`Loom` is taken** — owner `qlaq2435`, v0.0.2, 1,427 downloads, an unrelated binary
+  serialization library. The metapackage could never have been called `Loom`.
+- **`Loom.Telemetry` itself was free**, so this was a choice, not a forced move.
+- **The `Loom.` prefix is not reservable.** Four owners are active under it, and `gyuwon`
+  alone publishes 12+ actively-versioned packages there — `Loom.Messaging.*`,
+  `Loom.EventSourcing.*`, `Loom.Json*`, `Loom.DataAnnotations` — totalling roughly 350k
+  downloads. NuGet will not reserve a prefix an established publisher already occupies. No
+  reservation means no verified checkmark, permanently.
+- The concrete harm is misattribution in both directions: a reader who finds
+  `Loom.Telemetry` beside `Loom.Messaging` and `Loom.EventSourcing` reasonably concludes
+  they are one project. **Package IDs cannot be renamed after publication and versions
+  cannot be deleted or re-pushed**, so that association would have been permanent.
+
+**Rejected alternatives**, all checked the same day: `Weft.` (occupied by
+`StrangeDaysTech`), `Shuttle.` (occupied by `EbenRoux`, 40+ packages, several with 250k+
+downloads), `Warp.` (prefix clean but collides with a well-known terminal product and
+abandons the Loom identity), `Loomweave.`/`Loomlet.` (clean but weak — one is redundant,
+the other reads as a toy). `LoomDiagnostics` and its whole prefix are clean and reservable.
+
+**Cost of the rename, measured rather than estimated.** The change was applied, packed,
+consumed, AOT-published, run, and reverted before being adopted. It is **one
+`<PackageId>` line per packable project** — no project set one previously, all three
+defaulted to their assembly name. The packed `.nupkg` changes its file name only: the
+assembly inside stays `lib/net10.0/Loom.Telemetry.dll` and the analyzer stays
+`analyzers/dotnet/cs/Loom.Telemetry.Generators.dll`. A consumer changes its
+`PackageReference` line and nothing else — `using Loom.Telemetry;` and `[LoomProfile]` are
+untouched, and the AOT publish stayed clean with zero `IL2026`/`IL3050`.
+
+**`ToolCommandName` is independent of `PackageId`.** Users still type `loom` and
+`loom-dashboard`; only the install command changes.
+
+**Prefix reservation is not automatic** — it must be requested from NuGet after first
+publish. Until it is granted there is no checkmark; the point of this decision is that the
+request can succeed at all.
 
 ---
 

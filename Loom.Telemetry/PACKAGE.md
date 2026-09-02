@@ -10,8 +10,12 @@ C# by the time the compiler sees it.
 ## Install
 
 ```
-dotnet add package Loom.Telemetry
+dotnet add package LoomDiagnostics.Telemetry
 ```
+
+The package ID is `LoomDiagnostics.Telemetry`; the namespace you write against is
+`Loom.Telemetry`. They differ because the `Loom.` prefix on nuget.org belongs to unrelated,
+long-established packages.
 
 That is the whole wiring. The generator ships inside this package at
 `analyzers/dotnet/cs/`, so a single `PackageReference` delivers both the attributes and the

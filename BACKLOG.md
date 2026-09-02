@@ -950,7 +950,31 @@ by this work.
 
 ---
 
-### 6.6 Alerting Has No No-Data Grace Period 🟡 MEDIUM
+### 6.6 Alerting Has No No-Data Grace Period 🟢 LOW (COMPLETED — closed 2026-09-02)
+
+> **CLOSED 2026-09-02. The entry below describes behaviour that no longer exists** and was
+> left open after the fix shipped. Verified against the source and the test suite, not
+> inferred:
+>
+> - `AlertEvaluationHostedService.ResolveNoDataGrace(rule)` (`:51`) returns
+>   `rule.NoDataGrace ?? rule.Window * 3` — a per-rule override with a default that scales
+>   with the window, which is the "design decision on which, and whether it's per-rule or
+>   global" the fix sketch asked for.
+> - `HasExpired(now, lastDataSeen, grace)` (`:54`) is the expiry the entry says is missing,
+>   and `_lastData` (`:37`) is the per-rule last-seen tracking.
+> - An active alert whose metric goes silent past its grace is **resolved as
+>   `AlertResolutionReason.NoData`** (`:87-90`), a distinct reason so it is not confused
+>   with condition-cleared — exactly the first option in the fix sketch.
+>
+> Tests: `ResolveNoDataGrace_NoDataGraceUnset_ReturnsWindowTimesThree`,
+> `ResolveNoDataGrace_NoDataGraceSet_ReturnsThatValueIgnoringWindow`,
+> `HasExpired_ElapsedLessThanGrace_ReturnsFalse`, `HasExpired_ElapsedEqualsGrace_ReturnsTrue`,
+> and `AlertEvaluationHostedService_MetricGoesSilentPastGrace_ResolvesAsNoData`
+> (`Loom.Telemetry.Tests/Alerting/AlertEvaluationTests.cs:741-827`).
+>
+> Original entry kept below as history.
+
+
 
 **Issue:** `AlertEvaluationHostedService.ComputeWindowAggregate` now returns `null`
 when a metric's window holds no samples, and the evaluation loop treats `null` as
@@ -981,7 +1005,34 @@ is exactly the operational-trust problem § 6.5 exists to fix)
 
 ---
 
-### 6.7 Alert Rules Registered After Startup Are Never Evaluated 🟡 MEDIUM
+### 6.7 Alert Rules Registered After Startup Are Never Evaluated 🟢 LOW (COMPLETED — closed 2026-09-02)
+
+> **CLOSED 2026-09-02. The code quoted below no longer exists.** `ExecuteAsync`
+> (`Loom.Telemetry.Alerting/AlertEvaluationHostedService.cs:57`) has no empty-registry
+> early return. It re-reads `LoomTelemetryOptionsAlertingExtensions.Rules` **every tick**
+> (`:71`, copied before iterating because the list is not thread-safe), recomputes the tick
+> interval each pass and retunes the timer when it changes (`:73-79`). `ComputeTickInterval`
+> (`:44`) returns a 250 ms `IdleTickInterval` for an empty registry, so the loop idles
+> instead of exiting and bounds how long a late-registered rule waits.
+>
+> That is the fix sketch, implemented. `Loom.Dashboard/Extensions/ServiceExtensions.cs:54-57`
+> already said so in a code comment, attributing it to `bcbfcdd`; this entry was simply
+> never updated to match.
+>
+> Tests: `ComputeTickInterval_EmptyList_ReturnsIdleTickInterval`,
+> `ComputeTickInterval_OneRule_ReturnsWindowDividedByTen`,
+> `ComputeTickInterval_ThreeRules_ReturnsSmallestWindowDividedByTen`, and the end-to-end
+> `AlertEvaluationHostedService_RuleRegisteredAfterStart_IsEvaluated`
+> (`AlertEvaluationTests.cs:672-738`), which starts the service against an **empty**
+> registry, adds a rule afterwards, and asserts a notification arrives.
+>
+> **Still genuinely open, and not what this entry described:** the registry remains a
+> `public static readonly List<AlertRule>` — process-global and not thread-safe. Making it
+> observable and thread-safe is a prerequisite for any alert CRUD API. Filed as § 6.10.
+>
+> Original entry kept below as history.
+
+
 
 **Issue:** Carved out of § 6.5, which fixed resolution notifications but deliberately
 left this untouched.
@@ -1020,7 +1071,7 @@ observable
 
 ---
 
-### 6.8 § 6.6 and § 6.7 Are Now Live Concerns, Not Latent Ones 🟡 MEDIUM
+### 6.8 § 6.6 and § 6.7 Are Now Live Concerns, Not Latent Ones 🟢 LOW (COMPLETED — closed 2026-09-02)
 
 **Issue:** Both § 6.6 (no-data grace period) and § 6.7 (rules registered after startup
 never evaluated) were previously unreachable in practice — `AddAlert` was implemented
@@ -1040,12 +1091,21 @@ metrics (`cpu-usage`, `working-set` in the Dashboard), a source that goes quiet 
 crashed `EventPipeBridge` connection, a target process that exits — will leave any active
 alert stuck exactly as § 6.6 describes, for real, in production, not just in a test.
 
-**No fix attempted here** — this entry only updates the status framing. Both § 6.6 and
-§ 6.7 remain open with their existing fix sketches.
+~~**No fix attempted here** — this entry only updates the status framing. Both § 6.6 and
+§ 6.7 remain open with their existing fix sketches.~~
+
+**CLOSED 2026-09-02, along with both entries it tracks.** § 6.6 and § 6.7 are implemented
+and tested — see the notes at the head of each. This entry correctly predicted that the
+webhook-alerting work made both reachable; the response to that is what shipped, and only
+the paperwork lagged.
+
+One line above is now also stale: `Loom.Web.Api` was retired (§ 11.4), so the
+`HighIngestErrorRate`/`HighIngestLatency` rules it registered are gone with it. The
+Dashboard's `HighCpuUsage`/`HighMemoryUsage` remain, registered in
+`Loom.Dashboard.AspNetCore/Extensions/ServiceExtensions.cs`.
 
 **Effort:** N/A (tracking entry only)
-**Priority:** 🟡 MEDIUM (unchanged from § 6.6/§ 6.7 — the risk was already rated, only its
-reachability changed)
+**Priority:** 🟢 LOW (closed)
 
 ---
 
@@ -1092,9 +1152,51 @@ alongside, a fixed threshold.
 computation over the metric buffers and should be measured, not assumed cheap.
 
 **Effort:** 6-10 hours (including the design decisions above)
-**Priority:** 🟢 LOW — a differentiator, not a defect. Nothing is broken without it, and
-the two open MEDIUM alerting gaps (§ 6.6, § 6.7) should land first since this builds on
-the same evaluation loop they affect.
+**Priority:** 🟢 LOW — a differentiator, not a defect. ~~the two open MEDIUM alerting gaps
+(§ 6.6, § 6.7) should land first~~ — both closed 2026-09-02, so this is no longer gated on
+them. It still builds on the same evaluation loop.
+
+---
+
+### 6.10 The Alert Registry Is a Public Mutable Static List 🟡 MEDIUM
+
+**Issue:** Carved out of § 6.7 when that entry was closed 2026-09-02. § 6.7's *symptom* —
+rules registered after startup never being evaluated — is fixed: the evaluation loop
+re-reads the registry every tick. Its *root cause* is not.
+
+`LoomTelemetryOptionsAlertingExtensions.Rules`
+(`Loom.Telemetry.Alerting/LoomTelemetryOptionsAlertingExtensions.cs:8`) is a
+`public static readonly List<AlertRule>`. That means:
+
+- **Process-global.** Two hosts in one process share one rule set. The test suite already
+  works around this — `AlertTestCollection.cs` disables parallelization *specifically*
+  because these tests share it, and individual tests call `Rules.Clear()` in both setup
+  and teardown.
+- **Not thread-safe.** `AlertEvaluationHostedService:71` copies the list before iterating
+  precisely because enumerating while another thread adds throws. That copy is a
+  workaround, not a fix: a concurrent `Add` during the copy is still a race.
+- **Public and mutable.** Any consumer can clear or rewrite another component's alert
+  rules, and nothing in the type system objects.
+- **Not observable.** Nothing can be notified that it changed, which is why the loop has
+  to poll it.
+
+**Impact:** No live defect today — registration happens once at startup, from one thread,
+in both the Dashboard and the tests. This is a design constraint that blocks work rather
+than a bug that misbehaves.
+
+**Why it matters:** it is a hard prerequisite for any alert-management API — the CRUD
+surface implied by § 11.1's dashboard-as-a-library direction. Adding rules over HTTP means
+concurrent mutation from request threads while the evaluation loop reads, which is exactly
+what this structure cannot support.
+
+**Fix sketch (not implemented):** replace the static list with a registered, injectable
+registry service backed by a concurrent collection, exposing add/remove/snapshot and a
+change signal. Keep the `AddAlert` fluent syntax as a facade so existing call sites and the
+methodology's documented API do not change. The test suite's parallelization workaround can
+then be removed, which is a good measure of whether the fix actually worked.
+
+**Effort:** 4-8 hours, plus the test-suite cleanup
+**Priority:** 🟡 MEDIUM (no current misbehaviour; blocks a planned direction)
 
 ---
 

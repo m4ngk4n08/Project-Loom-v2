@@ -364,6 +364,20 @@ instruct it to STOP and report on any line-reference mismatch rather than guessi
 wrong before treating it as a blocker. A find-string prompt cannot catch a second call
 site it does not mention, which is why a runtime probe follows every mechanical edit.
 
+**Hand every Sonnet task a branch, never `main`.** Before writing the prompt, create and
+check out `sonnet/<short-task-name>`; name that branch in the prompt's first line. This is
+mechanical, not advisory: on 2026-09-02 two consecutive tasks committed and pushed after
+being told in the prompt not to, once landing a startup regression on `main` directly. A
+"do not push" instruction is worth writing, but it is not a control — being on a branch is,
+because a push then goes somewhere harmless. Review the branch, then merge it yourself.
+
+**Probe the failure path, not just the happy one.** The same 2026-09-02 regression turned a
+missing signing key from an actionable message + exit 1 into an unhandled exception + exit
+255. A strict build, 600 passing tests, and a live runtime probe of the *working* path were
+all green throughout. Only running with a deliberately invalid `LOOM_JWT_KEY_FILE` found
+it. Loom's security design is built on failing closed, so a check that never exercises a
+refusal is not checking the part that matters.
+
 ## Docs
 
 `IMPLEMENTATION-METHODOLOGY.md` (build guide, Phases 0–3) · `wiggly-noodling-hoare.md`

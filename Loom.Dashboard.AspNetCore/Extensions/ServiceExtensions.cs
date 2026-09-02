@@ -1,3 +1,4 @@
+using Loom.Security;
 using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
@@ -92,6 +93,22 @@ namespace Loom.Dashboard.Extensions
             // TryAdd: AddLoomExporting already registers this when the pipeline is on.
             services.TryAddSingleton<ExportStatusTracker>();
 
+            return services;
+        }
+
+        // Consumer-facing entry point: sequences AddDashboardServices with the
+        // MetricsResponseBuilder registration a host has no reason to know about, plus the
+        // security services that protect the endpoints AddLoomDashboard maps. Registering
+        // the dashboard without AddLoomSecurity is not a combination any caller wants -
+        // MapLoomDashboard refuses to run without it, but that check only fires at map
+        // time; wiring it here is what makes the two-call story actually secure by default.
+        // AddLoomSecurity throws InvalidOperationException when the key or users file is
+        // missing - deliberately left uncaught here, a library must not swallow it.
+        public static IServiceCollection AddLoomDashboard(this IServiceCollection services, int targetPid)
+        {
+            services.AddDashboardServices(targetPid);
+            services.AddSingleton<MetricsResponseBuilder>();
+            services.AddLoomSecurity();
             return services;
         }
     }

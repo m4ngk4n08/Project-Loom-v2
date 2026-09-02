@@ -15,6 +15,8 @@ using Loom.Telemetry.Query;
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using Loom.Web.RealTime;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 
 namespace Loom.Dashboard.Extensions
@@ -44,6 +46,47 @@ namespace Loom.Dashboard.Extensions
             app.MapLogsWebSocketEndpoint();
             app.MapSpaFallback(embeddedProvider);
 
+            return app;
+        }
+
+        private const string AuthenticationRegisteredKey = "Loom.Dashboard.AuthenticationRegistered";
+
+        // Installs the auth middleware and records that it happened, so MapLoomDashboard can
+        // refuse to map an unprotected dashboard. Does NOT call UseRouting() - the host owns
+        // pipeline order and must call it first; see UseLoomAuthentication's doc comment.
+        public static WebApplication UseLoomDashboard(this WebApplication app)
+        {
+            app.UseLoomAuthentication();
+            ((IApplicationBuilder)app).Properties[AuthenticationRegisteredKey] = true;
+            return app;
+        }
+
+        // Consumer-facing entry point: resolves MetricsResponseBuilder from DI and refuses to
+        // map anything until UseLoomDashboard has installed the auth middleware - without it,
+        // the LoomAllowAnonymous markers below are inert and every endpoint would be served to
+        // anonymous callers.
+        public static WebApplication MapLoomDashboard(
+            this WebApplication app,
+            int targetPid,
+            IFileProvider? embeddedProvider = null,
+            DateTime? sessionStartedAtUtc = null,
+            bool mapTokenEndpoints = true)
+        {
+            if (!((IApplicationBuilder)app).Properties.ContainsKey(AuthenticationRegisteredKey))
+            {
+                throw new InvalidOperationException(
+                    "Call app.UseLoomDashboard() before app.MapLoomDashboard(). Without it no Loom " +
+                    "endpoint is authenticated: the LoomAllowAnonymous markers are only read by the " +
+                    "UseLoomAuthentication middleware, so every metric, log, query and alert endpoint " +
+                    "would be served to anonymous callers.");
+            }
+
+            var metricsBuilder = app.Services.GetRequiredService<MetricsResponseBuilder>();
+            if (mapTokenEndpoints)
+            {
+                app.MapLoomTokenEndpoints();
+            }
+            app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc ?? DateTime.UtcNow, embeddedProvider, metricsBuilder);
             return app;
         }
 

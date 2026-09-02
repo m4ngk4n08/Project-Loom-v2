@@ -95,8 +95,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, LoomJsonSerializerContext.Default);
 });
 
-builder.Services.AddDashboardServices(targetPid);
-builder.Services.AddSingleton<MetricsResponseBuilder>();
+builder.Services.AddLoomDashboard(targetPid);
 
 try
 {
@@ -189,11 +188,9 @@ catch (InvalidOperationException)
 // files are registered ABOVE this point and short-circuit before it, which is what keeps
 // the Angular bundle loadable before a token exists.
 app.UseRouting();
-app.UseLoomAuthentication();
+app.UseLoomDashboard();
 
-var metricsBuilder = app.Services.GetRequiredService<MetricsResponseBuilder>();
-app.MapLoomTokenEndpoints();
-app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc, embeddedProvider, metricsBuilder);
+app.MapLoomDashboard(targetPid, embeddedProvider, sessionStartedAtUtc);
 
 var dashboardUrl = $"http://localhost:{port}";
 Console.WriteLine($"\n  Loom Dashboard running at {dashboardUrl}");

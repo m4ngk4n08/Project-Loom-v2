@@ -20,9 +20,9 @@
 > 2. **`Loom.Core` and `Loom.Host` were never built.** Phase 0 creates both directories
 >    (L163, L165) and later phases forward-reference them (L256, L1444, L1477, L1599,
 >    L4828, L4872), but neither project exists. There is no separate bootstrap host:
->    `Loom.Web.Api` is the Native AOT publish target, and `Loom.Dashboard`
->    (`loom-dashboard`) and `Loom.DevTools` (`loom`) are the packaged dotnet tools.
->    The Phase 7 "integrate with `Loom.Core` SIMD engine" work never happened.
+>    `Loom.Dashboard` (`loom-dashboard`) and `Loom.DevTools` (`loom`) are the packaged
+>    dotnet tools and the only entry points. The Phase 7 "integrate with `Loom.Core`
+>    SIMD engine" work never happened.
 > 3. **`Loom.Storage` is in-memory only** — no memory-mapped binary cache, no RAG
 >    ingestor, despite those appearing in the planned structure.
 > 4. **The Grafana Cloud and Elasticsearch exporters were deleted** (commit `6d8cc2b`).
@@ -33,6 +33,39 @@
 >    `ApiKey` never read for Elasticsearch), never registered in any host, and removed.
 >    `ToGrafana()` / `ToElasticsearch()` no longer exist. **Console and the Prometheus
 >    formatter are the whole exporter surface.** See `BACKLOG.md` § 9.
+>
+> ### ⚠️ `Loom.Web.Api` was retired (2026-09-02, commit `0b583a7`)
+>
+> Every phase below builds, edits, runs, or publishes `Loom.Web.Api` — Phase 2 creates it,
+> Phases 4 through 15 keep adding to its `Program.cs`, and Phase 15 publishes it. **That
+> project no longer exists.** It was a strict feature subset of `Loom.Dashboard`: every
+> endpoint family it served, the Dashboard also serves. The phase text is left intact as
+> the historical record; these corrections override it for anything present-tense. See
+> `BACKLOG.md` § 11.4.
+>
+> - **The Native AOT publish target is now `Loom.AotProbe`**, a minimal console app
+>   referencing only `Loom.Telemetry` and its source generator. It makes a narrower claim
+>   than Phase 15 did — that referencing Loom does not break a *consumer's* AOT publish —
+>   and its binary size is deliberately **not** gated. Every `< 17 MB` limit below sized
+>   `Loom.Web.Api` as a shipping host and retires with it. The CI snippet at the end of
+>   Phase 15 is superseded by the real `.github/workflows/ci.yml`.
+> - **`MetricsService` / `IMetricsService` now live in `Loom.Storage`**, not
+>   `Loom.Web.Api.Services` / `.Interfaces`. They could not go into `Loom.Telemetry`: they
+>   need `Loom.Web.Contracts.Dtos`, which carries a `FrameworkReference` on
+>   `Microsoft.AspNetCore.App`, and that would drag ASP.NET Core into the package that must
+>   stay reference-free (`BACKLOG.md` § 11.1). They are registered by **`AddLoomSelfMetrics()`**,
+>   deliberately *not* by `AddLoomStorage()` — `MetricsService` measures the calling
+>   process, while `Loom.Dashboard` observes a different one.
+> - **`LOOM_CORS_ORIGINS` is dead.** Only `Loom.Web.Api` ever read it, so the opt-in CORS
+>   policy described in Phase 14 (and its pipeline-order correction, where auth sits after
+>   `UseCors` so a preflight `OPTIONS` is not rejected) **is not part of the shipping
+>   system.** `Loom.Dashboard` serves its UI from its own origin, which makes same-origin
+>   correct and a CORS policy pure added surface. Setting the variable now does nothing.
+> - **The security headers moved to `Loom.Dashboard`**, at the front of its pipeline.
+>   Web.Api's CSP did **not** move: `default-src 'none'` suits a JSON-only host and would
+>   render the Angular SPA blank. A policy written against what the bundle actually emits
+>   replaced it — see `BACKLOG.md` § 11.5, which also records why
+>   `optimization.styles.inlineCritical: false` in `angular.json` is load-bearing.
 >
 > For the current project graph, see `CLAUDE.md` → **Project Structure (Actual)**,
 > which is authoritative on structure and build commands.
@@ -5223,6 +5256,13 @@ operational cost — see 14.7.3, which carries the one item still needing your s
 
 Shipped in `7f147e1` and `289422b`, verified in source at `289422b`:
 
+> **Superseded 2026-09-02.** All four items below describe `Loom.Web.Api`, which no longer
+> exists. HSTS and HTTPS redirection were later removed from both hosts outright (in-process
+> TLS rejected, `BACKLOG.md` § 3.3). **CORS and `LOOM_CORS_ORIGINS` were not ported to
+> `Loom.Dashboard` and the variable is now read nowhere** — the Dashboard serves its UI from
+> its own origin, so same-origin is correct and a policy would only widen the surface. The
+> three safe headers did move; the CSP was rewritten for the SPA (`BACKLOG.md` § 11.5).
+
 - HSTS + HTTPS redirection under `!IsDevelopment()` (`Loom.Web.Api/Program.cs`)
 - Opt-in strict CORS via `LOOM_CORS_ORIGINS`; no policy registered when unset, so the
   browser's same-origin default applies. No wildcard branch exists.
@@ -5530,6 +5570,15 @@ Auth sits **after** `UseCors`. A CORS preflight `OPTIONS` carries no `Authorizat
 header; rejecting it produces a browser error that looks like a CORS misconfiguration and
 costs an afternoon to diagnose.
 
+> **Superseded 2026-09-02.** This is `Loom.Web.Api`'s pipeline and the project is gone. In
+> the shipping `Loom.Dashboard` pipeline there is **no `UseCors`** (the variable that gated
+> it, `LOOM_CORS_ORIGINS`, is read nowhere) and **no `UseHsts`/`UseHttpsRedirection`**
+> (in-process TLS was rejected — `BACKLOG.md` § 3.3). What survives is the ordering
+> principle: the header middleware runs at the very front, ahead of authentication and
+> `UseStaticFiles`, so a short-circuited response still carries headers. The
+> preflight-ordering rule above is correct and worth keeping for the day a CORS policy is
+> reintroduced — but nothing depends on it today.
+
 **`Loom.Dashboard`** gets the same call in the same position. Its exemption list is
 `POST /api/token`, the SPA fallback, and the embedded static assets — nothing else.
 `/api/logs/*`, `/api/logs/explain`, `/prometheus`, `/ws/logs`, and `/ws/metrics` are all
@@ -5584,6 +5633,14 @@ The original text here specified `app.Configuration.GetSection("Loom:Cors:Allowe
 The shipped implementation uses the `LOOM_CORS_ORIGINS` environment variable instead:
 `IConfiguration.Get<T>()` binds by reflection, which `CreateSlimBuilder` does not root and
 the trimmer may remove. The shipped form is correct; this text is corrected to match.
+
+> **Superseded 2026-09-02 — CORS left the product entirely.** `Loom.Web.Api` was the only
+> reader of `LOOM_CORS_ORIGINS`, and it has been retired (`BACKLOG.md` § 11.4). CORS was
+> **not** ported: `Loom.Dashboard` serves its Angular bundle from its own origin, so the
+> browser's same-origin default is already the correct policy and any allow-list would only
+> widen the surface. Setting `LOOM_CORS_ORIGINS` today has no effect anywhere in the
+> solution, and no host registers a CORS policy. The reflection point above still stands as
+> a general rule for `CreateSlimBuilder` hosts.
 
 ---
 

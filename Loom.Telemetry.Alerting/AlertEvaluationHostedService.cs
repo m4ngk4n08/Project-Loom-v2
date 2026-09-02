@@ -77,6 +77,21 @@ public sealed class AlertEvaluationHostedService(
                 logger?.LogInformation("Alert evaluation tick adjusted to {Tick}.", desiredTick);
             }
 
+            // A rule removed from the registry is never visited by the loop below again, so
+            // its per-rule state has to be dropped here or it leaks — and a rule later
+            // re-added under the same name would resurrect as already-firing with a stale
+            // FiredAt. No Resolved notification: an operator who deletes a rule is not asking
+            // to be told it recovered, and AlertNotification needs the AlertRule that is gone.
+            if (_activeAlerts.Count > 0 || _lastData.Count > 0)
+            {
+                var live = new HashSet<string>(rules.Count);
+                foreach (var rule in rules) live.Add(rule.Name);
+
+                PruneStale(_activeAlerts, live);
+                PruneStale(_lastNotified, live);
+                PruneStale(_lastData, live);
+            }
+
             var now = DateTime.UtcNow;
             foreach (var rule in rules)
             {
@@ -166,6 +181,23 @@ public sealed class AlertEvaluationHostedService(
                 // !conditionMet && !isActive -> nothing.
             }
         }
+    }
+
+    // Two passes because a Dictionary cannot be mutated while its Keys are enumerated. The
+    // stale list is allocated only when something actually needs removing, which is never
+    // on the normal path.
+    private static void PruneStale<TValue>(Dictionary<string, TValue> state, HashSet<string> live)
+    {
+        if (state.Count == 0) return;
+
+        List<string>? stale = null;
+        foreach (var key in state.Keys)
+        {
+            if (!live.Contains(key)) (stale ??= []).Add(key);
+        }
+        if (stale is null) return;
+
+        foreach (var key in stale) state.Remove(key);
     }
 
     private MetricAggregate? ComputeWindowAggregate(AlertRule rule, DateTime now)

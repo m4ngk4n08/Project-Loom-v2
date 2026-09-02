@@ -1,14 +1,17 @@
 namespace Loom.Telemetry.Alerting;
 
-/// <summary>Immutable-swap registry: readers take the current list reference with no lock
+/// <summary>Immutable-swap registry: readers take the current array reference with no lock
 /// and no copy, so Snapshot() can never observe a torn write or throw from concurrent
-/// mutation. Writers rebuild the whole list under a lock and swap the reference - correct
+/// mutation. Writers rebuild the whole array under a lock and swap the reference - correct
 /// under contention because rules are added rarely (startup, occasional HTTP calls)
 /// compared to how often the evaluation loop reads.</summary>
 public sealed class AlertRuleRegistry : IAlertRuleRegistry
 {
     private readonly Lock _lock = new();
-    private volatile IReadOnlyList<AlertRule> _rules = [];
+    // An array, not a List: Snapshot() hands this reference straight out, and
+    // IReadOnlyList<AlertRule> over a List<T> can be cast back to a List<T> that resizes
+    // the very collection the evaluation loop is enumerating. An array cannot.
+    private volatile AlertRule[] _rules = [];
     private int _version;
 
     public int Version => _version;
@@ -26,15 +29,16 @@ public sealed class AlertRuleRegistry : IAlertRuleRegistry
     {
         lock (_lock)
         {
-            var next = new List<AlertRule>(_rules.Count + 1);
-            foreach (var existing in _rules)
+            var current = _rules;
+            var kept = 0;
+            var next = new AlertRule[current.Length + 1];
+            foreach (var existing in current)
             {
-                if (existing.Name != rule.Name)
-                {
-                    next.Add(existing);
-                }
+                if (existing.Name != rule.Name) next[kept++] = existing;
             }
-            next.Add(rule);
+            next[kept++] = rule;
+            if (kept != next.Length) Array.Resize(ref next, kept);
+
             _rules = next;
             _version++;
         }
@@ -45,25 +49,26 @@ public sealed class AlertRuleRegistry : IAlertRuleRegistry
     {
         lock (_lock)
         {
-            var index = -1;
-            for (var i = 0; i < _rules.Count; i++)
-            {
-                if (_rules[i].Name == name)
-                {
-                    index = i;
-                    break;
-                }
-            }
+            var current = _rules;
+            var index = IndexOf(current, name);
             if (index < 0) return false;
 
-            var next = new List<AlertRule>(_rules.Count - 1);
-            for (var i = 0; i < _rules.Count; i++)
-            {
-                if (i != index) next.Add(_rules[i]);
-            }
+            var next = new AlertRule[current.Length - 1];
+            Array.Copy(current, 0, next, 0, index);
+            Array.Copy(current, index + 1, next, index, current.Length - index - 1);
+
             _rules = next;
             _version++;
             return true;
         }
+    }
+
+    private static int IndexOf(AlertRule[] rules, string name)
+    {
+        for (var i = 0; i < rules.Length; i++)
+        {
+            if (rules[i].Name == name) return i;
+        }
+        return -1;
     }
 }

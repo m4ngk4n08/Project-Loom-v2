@@ -2,7 +2,9 @@ namespace Loom.Telemetry.Alerting;
 
 public interface IAlertRuleRegistry
 {
-    /// <summary>Point-in-time copy. Safe to enumerate while other threads mutate.</summary>
+    /// <summary>The rules as of this call. The returned collection never changes once
+    /// handed out - a mutation swaps in a new one - so it is safe to enumerate without a
+    /// lock while other threads mutate the registry.</summary>
     IReadOnlyList<AlertRule> Snapshot();
 
     /// <summary>Replaces any existing rule with the same Name.</summary>

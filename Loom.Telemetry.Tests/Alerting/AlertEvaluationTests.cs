@@ -875,4 +875,98 @@ public class AlertEvaluationTests
         Assert.Single(resolved);
         Assert.Equal(AlertResolutionReason.ConditionCleared, resolved[0].ResolutionReason);
     }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_RuleRemovedWhileFiring_DoesNotResolveOrThrow()
+    {
+        // Arrange
+        var registry = new AlertRuleRegistry();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "RemovedWhileFiring_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(600);
+        var rule = new AlertRule("RemovedWhileFiringAlert", metricName, window)
+        {
+            Condition = agg => agg.Count > 0
+        };
+        registry.Add(rule);
+
+        using var recordCts = new CancellationTokenSource();
+        var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
+
+        // Act
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(250); // window/10 = 60ms tick - let it fire
+
+        // Deleting a rule is not a request to be told the alert recovered: pruning its
+        // state must stay silent rather than synthesising a Resolved notification.
+        Assert.True(registry.Remove("RemovedWhileFiringAlert"));
+        await Task.Delay(600); // several more ticks with the rule gone
+
+        recordCts.Cancel();
+        await recordTask;
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        Assert.NotEmpty(notifications);
+        Assert.DoesNotContain(notifications, n => n.State == AlertState.Resolved);
+        // Still running: the loop survived the rule vanishing mid-flight.
+        Assert.Null(service.ExecuteTask?.Exception);
+    }
+
+    [Fact]
+    public async Task AlertEvaluationHostedService_RuleReAddedAfterRemoval_FiresAgainAsANewAlert()
+    {
+        // Arrange
+        var registry = new AlertRuleRegistry();
+
+        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var silenceStore = new InMemorySilenceStore();
+        var service = new AlertEvaluationHostedService(channel, registry, silenceStore, LoomMetricsStoreAdapter.Instance);
+
+        var metricName = "ReAddedAfterRemoval_" + Guid.NewGuid().ToString("N");
+        var window = TimeSpan.FromMilliseconds(600);
+        const string ruleName = "ReAddedAfterRemovalAlert";
+        registry.Add(new AlertRule(ruleName, metricName, window) { Condition = agg => agg.Count > 0 });
+
+        using var recordCts = new CancellationTokenSource();
+        var recordTask = RecordPeriodicallyAsync(metricName, 100.0, TimeSpan.FromMilliseconds(50), recordCts.Token);
+
+        // Act
+        var cts = new CancellationTokenSource();
+        await service.StartAsync(cts.Token);
+        await Task.Delay(250); // let it fire the first time
+
+        Assert.True(registry.Remove(ruleName));
+        await Task.Delay(200); // a few ticks with the rule absent, so its state is pruned
+
+        // Re-added under the SAME name while the condition still holds. Without the prune,
+        // _activeAlerts still carries the old entry, the rule is treated as already firing,
+        // and the only notification that can follow is a cooldown re-notify carrying the
+        // ORIGINAL FiredAt - never a fresh Firing transition.
+        registry.Add(new AlertRule(ruleName, metricName, window) { Condition = agg => agg.Count > 0 });
+        await Task.Delay(400);
+
+        recordCts.Cancel();
+        await recordTask;
+        cts.Cancel();
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        var notifications = new List<AlertNotification>();
+        while (channel.Reader.TryRead(out var n)) notifications.Add(n);
+
+        var firing = notifications.Where(n => n.State == AlertState.Firing).ToList();
+        Assert.True(firing.Count >= 2, $"Expected at least 2 Firing notifications, got {firing.Count}");
+        Assert.True(firing[^1].FiredAt > firing[0].FiredAt,
+            $"Re-added rule reported a stale FiredAt: first={firing[0].FiredAt:O} last={firing[^1].FiredAt:O}");
+    }
 }

@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Loom.Telemetry;
-using Loom.Web.Api.Services;
+using Loom.Storage;
 using Xunit;
 
 namespace Loom.Telemetry.Tests.Web;

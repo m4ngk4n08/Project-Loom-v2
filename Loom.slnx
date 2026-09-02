@@ -10,7 +10,7 @@
   <Project Path="Loom.Telemetry.Query/Loom.Telemetry.Query.csproj" />
   <Project Path="Loom.Telemetry.Tests/Loom.Telemetry.Tests.csproj" Id="d1b0b251-ca81-4209-9640-b30b6ab3de32" />
   <Project Path="Loom.Telemetry/Loom.Telemetry.csproj" Id="f9269d65-7509-4a3b-b7a4-a4323d4f4765" />
-  <Project Path="Loom.Web.Api/Loom.Web.Api.csproj" />
+  <Project Path="Loom.AotProbe/Loom.AotProbe.csproj" />
   <Project Path="Loom.Web.Contracts/Loom.Web.Contracts.csproj" />
   <Project Path="Loom.Web.RealTime/Loom.Web.RealTime.csproj" />
 </Solution>

@@ -1,10 +1,10 @@
-// Contract tests: hit the real Loom.Web.Api and assert responses match our TS DTOs
+// Contract tests: hit the real Loom.Dashboard and assert responses match our TS DTOs
 // (QueryResponse, AlertRule, ExporterStatus, MetricSummary, Cpu/Memory/ThreadMetricResponse).
 // Catches silent drift when a C# property is renamed/removed but the mirrored TS
 // interface isn't updated.
 //
 // Requires a running backend. Start it first:
-//   dotnet run --project Loom.Web.Api
+//   dotnet run --project Loom.Dashboard -- <pid>
 // Override the target with LOOM_API_BASE_URL if it's not on the default port.
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -34,8 +34,8 @@ beforeAll(async () => {
     if (!res.ok) throw new Error(`status ${res.status}`);
   } catch (err) {
     throw new Error(
-      `Loom.Web.Api is not reachable at ${BASE_URL} (${(err as Error).message}). ` +
-        `Start it with "dotnet run --project Loom.Web.Api" before running contract tests.`
+      `Loom.Dashboard is not reachable at ${BASE_URL} (${(err as Error).message}). ` +
+        `Start it with "dotnet run --project Loom.Dashboard -- <pid>" before running contract tests.`
     );
   }
 

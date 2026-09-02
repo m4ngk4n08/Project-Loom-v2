@@ -14,7 +14,7 @@ Two smoke test suites are defined:
 
 | Suite | Scope | Vehicle |
 |-------|-------|---------|
-| **HTTP/WS Surface** (Phases 1-13) | API endpoints, ingest, query, alerts, exporters, WebSocket contract | `Loom.Dashboard` / `Loom.Web.Api` |
+| **HTTP/WS Surface** (Phases 1-13) | API endpoints, ingest, query, alerts, exporters, WebSocket contract | `Loom.Dashboard` (the only web host — `Loom.Web.Api` was retired, see `BACKLOG.md` § 11.4) |
 | **Library/CLI Surface** (Phases 5-13) | Source generator, metrics API, collectors, sampling, query, alerting, exporters, DevTools CLI | `SampleMonitoredApp` + `Loom.DevTools` |
 
 ---
@@ -33,7 +33,6 @@ dotnet build Loom.slnx -c Debug
 dotnet build examples\SampleMonitoredApp\SampleMonitoredApp.csproj -c Debug
 dotnet build Loom.DevTools\Loom.DevTools.csproj -c Debug
 dotnet build Loom.Dashboard\Loom.Dashboard.csproj -c Debug
-dotnet build Loom.Web.Api\Loom.Web.Api.csproj -c Debug
 ```
 
 All should succeed with **0 errors**.
@@ -42,16 +41,15 @@ All should succeed with **0 errors**.
 
 | Port | Service |
 |------|---------|
-| 5209 | `Loom.Dashboard` (embedded Angular, API + WS) |
-| 5080 / 5000 | `Loom.Web.Api` (full backend, when used) |
+| 5209 | `Loom.Dashboard` (embedded Angular, API + WS) — the only web host; `Loom.Web.Api` was retired, see `BACKLOG.md` § 11.4 |
 
 `Loom.Dashboard` binds 5209 by default, but that's a *preferred* port, not a fixed one: if it's already taken (e.g. a second `loom-dashboard <pid>` watching another process), it falls back to an OS-assigned free port so multiple dashboard instances can run side by side. The actual bound URL is always printed to the console on startup (and the browser auto-opens to it) — don't assume 5209 when more than one instance is running; read the console output instead.
 
-**Explicit port override.** `loom-dashboard <pid> --port <n>` or the `LOOM_DASHBOARD_PORT` env var pin the listen port, with `--port` taking precedence over the env var. Either one disables the automatic fallback above: if that specific port is already taken, the dashboard fails loudly (`Error: Could not bind to port <n> — it's already in use.`, non-zero exit) instead of silently wandering off to another port. Note `Loom.Web.Api` (`Loom.Web.Api/Properties/launchSettings.json`) also defaults to 5209 — it's a common source of the "already in use" case alongside a second dashboard instance.
+**Explicit port override.** `loom-dashboard <pid> --port <n>` or the `LOOM_DASHBOARD_PORT` env var pin the listen port, with `--port` taking precedence over the env var. Either one disables the automatic fallback above: if that specific port is already taken, the dashboard fails loudly (`Error: Could not bind to port <n> — it's already in use.`, non-zero exit) instead of silently wandering off to another port.
 
 `LOOM_DASHBOARD_PORT` is shared by three things, so setting it once wires up all of them:
 - `Loom.Dashboard` — the port it binds to (see above).
-- `examples/SampleMonitoredApp` (`MetricPushWorker`) — the port it POSTs metrics to. Without this set to match, a dashboard that fell back off 5209 leaves the sample app silently pushing metrics into whatever else is listening on 5209 (a second dashboard, or `Loom.Web.Api`) — no exception, no log line, metrics just vanish into the wrong store.
+- `examples/SampleMonitoredApp` (`MetricPushWorker`) — the port it POSTs metrics to. Without this set to match, a dashboard that fell back off 5209 leaves the sample app silently pushing metrics into whatever else is listening on 5209 (e.g. a second dashboard) — no exception, no log line, metrics just vanish into the wrong store.
 - `Loom.Web.Frontend` dev proxy (`proxy.conf.js`) — the `/api` and `/prometheus` targets for `ng serve`.
 
 **Known limitation — WebSocket dev proxy is dead.** `environment.ts`'s `wsUrl` is consumed directly by `core/services/websocket.service.ts`, which connects straight to `ws://localhost:5209` and bypasses `proxy.conf.js` entirely — `LOOM_DASHBOARD_PORT` does *not* reach it. Under `ng serve`, if the dashboard isn't on port 5209 (fallback or explicit override), live metrics break until `environment.ts` is hand-edited to match. This is a known gap, not a bug to chase during smoke testing — a full fix needs a relative-URL rework of the WebSocket client, which is out of scope here.
@@ -101,8 +99,7 @@ Get-Process | Where-Object { $_.ProcessName -like "Loom.Dashboard*" } | Select-O
 ```powershell
 Get-Process | Where-Object {
     $_.ProcessName -like "SampleMonitoredApp*" -or
-    $_.ProcessName -like "Loom.Dashboard*" -or
-    $_.ProcessName -like "Loom.Web.Api*"
+    $_.ProcessName -like "Loom.Dashboard*"
 } | Stop-Process -Force
 ```
 

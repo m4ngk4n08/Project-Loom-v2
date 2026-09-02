@@ -126,6 +126,48 @@ builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 var app = builder.Build();
 
+// Static, allocation-free response headers, ported from Loom.Web.Api/Program.cs:83-85.
+// Placed at the front of the pipeline - before authentication and before UseStaticFiles
+// below - so a short-circuited response still carries them (BACKLOG.md 4.7).
+//
+// The CSP is NOT Web.Api's. That host served JSON only, so "default-src 'none'" was
+// correct there and would render this one blank. This policy is written against what the
+// production Angular bundle actually emits, verified by reading dist/.../index.html:
+//   script-src 'self'  - the bundle is one external <script type="module"> plus
+//                        modulepreload links. No inline script and no inline event
+//                        handler, which holds only because critical-CSS inlining is
+//                        turned off in angular.json (it emitted a <style> block and an
+//                        onload= attribute). Re-enabling it breaks this line.
+//   style-src adds 'unsafe-inline' - Angular injects component styles as <style>
+//                        elements at runtime. Removing it needs a per-request nonce
+//                        (ngCspNonce), which means generating index.html per request
+//                        instead of serving it statically. Not worth it on a loopback
+//                        host; revisit if this is ever fronted by a proxy.
+//   connect-src 'self'  - covers the REST API and, per CSP3, same-origin ws:// too.
+//   img-src adds data:  - chart canvases export to data URIs.
+// Everything else is denied: no plugins, no framing, no form posts, no <base> rewrite.
+const string contentSecurityPolicy =
+    "default-src 'self'; " +
+    "script-src 'self'; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data:; " +
+    "font-src 'self'; " +
+    "connect-src 'self'; " +
+    "object-src 'none'; " +
+    "base-uri 'self'; " +
+    "form-action 'none'; " +
+    "frame-ancestors 'none'";
+
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers["Content-Security-Policy"] = contentSecurityPolicy;
+    await next();
+});
+
 // WebSocket support
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 

@@ -10,6 +10,12 @@
 
 This document provides comprehensive testing procedures for Project Loom v2, covering unit tests, AOT compliance, binary size, allocation testing, and functional endpoint verification.
 
+> **2026-09-01:** `Loom.Web.Api` was retired. `Loom.Dashboard` is now the only web host
+> (run it with `dotnet run --project Loom.Dashboard -- <pid>`, default port `5209`), and
+> the Native AOT proof moved to `Loom.AotProbe`, whose binary size is not a gate. See
+> `BACKLOG.md` § 11.4. Commands below that still name `Loom.Web.Api` predate the
+> retirement and need the substitution above before they will run.
+
 ---
 
 ## Test Status Summary
@@ -78,7 +84,7 @@ Verify zero reflection usage and trim safety for Native AOT compilation.
 
 ```powershell
 # Windows
-dotnet build Loom.Web.Api\Loom.Web.Api.csproj `
+dotnet build Loom.AotProbe\Loom.AotProbe.csproj `
   --configuration Release `
   /p:EnableTrimAnalyzer=true `
   /p:TreatWarningsAsErrors=true
@@ -86,7 +92,7 @@ dotnet build Loom.Web.Api\Loom.Web.Api.csproj `
 
 ```bash
 # Linux/macOS
-dotnet build Loom.Web.Api/Loom.Web.Api.csproj \
+dotnet build Loom.AotProbe/Loom.AotProbe.csproj \
   --configuration Release \
   /p:EnableTrimAnalyzer=true \
   /p:TreatWarningsAsErrors=true
@@ -116,65 +122,41 @@ Build succeeded in X.Xs
 ## 3. Binary Size Verification
 
 ### Purpose
-Ensure compiled binary stays under size target (currently 17 MB for full feature set).
+Historical — this check gated `Loom.Web.Api`, the shipping Native AOT web host, at
+17 MB. That project is retired; `Loom.Dashboard` is now the only web host and is not
+AOT-published, so there is no shipping binary to gate. `Loom.AotProbe` still proves
+Native AOT compatibility, but its size is deliberately not a product metric — see
+`BACKLOG.md` § 11.4. The commands below still work against `Loom.AotProbe` if you want
+a size data point, but nothing should fail CI or a commit on the result.
 
 ### Command
 
 ```powershell
 # Windows - Build Native AOT
-dotnet publish Loom.Web.Api\Loom.Web.Api.csproj `
+dotnet publish Loom.AotProbe\Loom.AotProbe.csproj `
   --configuration Release `
-  --runtime win-x64 `
-  /p:PublishAot=true `
-  /p:StripSymbols=true
+  --runtime win-x64
 
 # Check size
-Get-ChildItem "Loom.Web.Api\bin\Release\net10.0\win-x64\publish\Loom.Web.Api.exe" | 
+Get-ChildItem "Loom.AotProbe\bin\Release\net10.0\win-x64\publish\Loom.AotProbe.exe" | 
   Select-Object Name, @{Name="SizeMB";Expression={[math]::Round($_.Length/1MB, 2)}}
 ```
 
 ```bash
 # Linux - Build Native AOT
-dotnet publish Loom.Web.Api/Loom.Web.Api.csproj \
+dotnet publish Loom.AotProbe/Loom.AotProbe.csproj \
   --configuration Release \
-  --runtime linux-x64 \
-  /p:PublishAot=true \
-  /p:StripSymbols=true
+  --runtime linux-x64
 
 # Check size
-ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
+ls -lh Loom.AotProbe/bin/Release/net10.0/linux-x64/publish/Loom.AotProbe
 ```
 
 ### Expected Results
 
-```
-Name             SizeMB
-----             ------
-Loom.Web.Api.exe 14-17 MB
-```
-
-✅ **PASS:** < 17 MB  
-⚠️ **WARNING:** 17-20 MB (acceptable, but investigate)  
-❌ **FAIL:** > 20 MB (too large, remove dependencies)
-
-### Size Optimization
-
-If size exceeds target, rebuild with optimizations:
-
-```powershell
-dotnet publish Loom.Web.Api\Loom.Web.Api.csproj `
-  --configuration Release `
-  --runtime win-x64 `
-  /p:PublishAot=true `
-  /p:StripSymbols=true `
-  /p:InvariantGlobalization=true `
-  /p:OptimizationPreference=Size `
-  /p:IlcOptimizationPreference=Size
-```
-
-**Expected savings:**
-- `InvariantGlobalization=true` → ~2 MB (removes culture-specific data)
-- `OptimizationPreference=Size` → ~500 KB - 1 MB
+No pass/fail size threshold — this is informational only (see Purpose above). What does
+matter: no `Loom.AotProbe.dll` should sit beside the native binary in the publish
+directory. If it does, `PublishAot` silently fell back to a managed build.
 
 ---
 
@@ -196,19 +178,19 @@ dotnet tool install -g dotnet-counters
 
 ```powershell
 cd "C:\Users\angel\source\repos\Project Loom v2"
-dotnet run --project Loom.Web.Api --configuration Release
+dotnet run --project Loom.Dashboard --configuration Release -- <pid>
 ```
 
-Note the port (usually 5000 or 5209).
+Note the port (default 5209, `LOOM_DASHBOARD_PORT` to override).
 
 **Window 2: Get Process ID**
 
 ```powershell
 # Windows
-Get-Process | Where-Object {$_.ProcessName -eq "Loom.Web.Api"} | Select-Object Id, ProcessName
+Get-Process | Where-Object {$_.ProcessName -eq "Loom.Dashboard"} | Select-Object Id, ProcessName
 
 # Linux/macOS
-ps aux | grep Loom.Web.Api
+ps aux | grep Loom.Dashboard
 ```
 
 **Window 3: Monitor Allocations**
@@ -521,9 +503,11 @@ public MyTests()
 
 ### Binary Size Too Large
 
+Not currently a gated check — see § 3. If investigating anyway:
+
 **Check dependencies:**
 ```powershell
-dotnet list Loom.Web.Api package
+dotnet list Loom.AotProbe package
 ```
 
 **Remove unnecessary packages** and rebuild with size optimizations (see § 3).
@@ -585,14 +569,14 @@ jobs:
         run: dotnet test --configuration Debug --no-restore
       
       - name: AOT Compliance Check
-        run: dotnet build Loom.Web.Api --configuration Release /p:EnableTrimAnalyzer=true /p:TreatWarningsAsErrors=true
+        run: dotnet build Loom.AotProbe --configuration Release /p:EnableTrimAnalyzer=true /p:TreatWarningsAsErrors=true
       
-      - name: Binary Size Check
+      - name: Native AOT publish (no size gate - see BACKLOG.md § 11.4)
         run: |
-          dotnet publish Loom.Web.Api --configuration Release --runtime linux-x64 /p:PublishAot=true /p:StripSymbols=true
-          SIZE=$(stat -c%s "Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api")
-          echo "Binary size: $((SIZE / 1024 / 1024)) MB"
-          if [ $SIZE -gt 20971520 ]; then exit 1; fi  # 20 MB limit
+          dotnet publish Loom.AotProbe --configuration Release --runtime linux-x64
+          if [ -f "Loom.AotProbe/bin/Release/net10.0/linux-x64/publish/Loom.AotProbe.dll" ]; then
+            echo "Managed assembly present - not an AOT publish"; exit 1
+          fi
 ```
 
 ---
@@ -602,8 +586,8 @@ jobs:
 Before committing Phase N:
 
 - [ ] Unit tests pass (>95%)
-- [ ] AOT compliance check (0 warnings)
-- [ ] Binary size verified (< 17 MB)
+- [ ] AOT compliance check (0 warnings, via `Loom.AotProbe`)
+- [ ] `Loom.AotProbe` publish contains no managed assembly (size itself is not gated — see `BACKLOG.md` § 11.4)
 - [ ] Allocation testing complete (hot paths < 50 KB/sec)
 - [ ] All endpoints respond correctly
 - [ ] WebSocket streaming works

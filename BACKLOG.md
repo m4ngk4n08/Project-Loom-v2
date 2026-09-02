@@ -1548,6 +1548,95 @@ zero `IL2026`/`IL3050`. Referencing the project instead of the package would not
 the `analyzers/dotnet/cs/` path from § 11.1 item 2 and could pass while the real package
 is broken.
 
+### 11.4 `Loom.Web.Api` Retired 🟢 LOW (COMPLETED)
+
+`Loom.Web.Api` is deleted. It was a strict feature subset of `Loom.Dashboard` — every
+endpoint family it served, the Dashboard also serves — and its only unique roles were
+carrying the repo's sole `PublishAot` project and its sole security-header middleware.
+Both were ported before deletion:
+
+- **AOT proof** moved to `Loom.AotProbe`, a minimal console app referencing only
+  `Loom.Telemetry` and its source generator. It proves referencing `Loom.Telemetry`
+  does not break a consumer's Native AOT publish. Its binary size is **not** a product
+  metric and is not gated — the 17 MB figures in § 2.1 measured `Loom.Web.Api` as a
+  shipping host, which no longer exists. CI's `aot-publish-linux` job now publishes and
+  asserts nativeness against `Loom.AotProbe`; the binary-size step was removed rather
+  than repointed. § 11.3's consumer-AOT gate (against a packed `.nupkg`) remains open —
+  `Loom.AotProbe` uses a `ProjectReference`, not the packaged form, so it does not
+  supersede that item.
+- **Security headers** (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`)
+  moved to the front of `Loom.Dashboard`'s pipeline, before authentication and
+  `UseStaticFiles`, matching the placement fix in § 4.7. `Loom.Web.Api`'s CSP was **not**
+  carried over — `default-src 'none'` suits a JSON-only endpoint and would have rendered
+  the Angular SPA blank. A policy written for the SPA replaced it; see § 11.5.
+- **CSP authored 2026-09-02** — see § 11.5. Closed.
+- **`MetricsService` moved to `Loom.Storage`**, not `Loom.Telemetry`: it needs
+  `Loom.Web.Contracts.Dtos`, and `Loom.Web.Contracts.csproj:16` carries a
+  `FrameworkReference` on `Microsoft.AspNetCore.App`, which would drag ASP.NET Core into
+  the package § 11.1 requires to stay reference-free. `Loom.Storage` already depends on
+  both and is `IsAotCompatible`, so the move costs zero new dependencies. Its 4 tests moved
+  with it; the suite is still 592.
+
+  **It is registered by a separate `AddLoomSelfMetrics()`, not by `AddLoomStorage()`**
+  (fixed 2026-09-02; the first pass had bundled it). `MetricsService` measures *the calling
+  process*, and `Loom.Dashboard` calls `AddLoomStorage()` while observing a **different**
+  process — the target PID. Bundling them meant any future Dashboard endpoint injecting
+  `IMetricsService` would silently report the dashboard's own CPU and memory as the
+  monitored process's: wrong data that reads as plausible data, which is worse than an
+  error. Nothing injects it today, so this closed a latent trap rather than a live bug. The
+  interface carries the same warning in its XML doc. **Nothing in the repo currently calls
+  `AddLoomSelfMetrics()`** — with `Loom.Web.Api` gone the type has no production consumer,
+  only tests. It is kept because it is the natural surface for a future in-process
+  self-monitoring package; delete it if that never materializes.
+- **CORS** was not ported. `Loom.Web.Api` read `LOOM_CORS_ORIGINS` and conditionally
+  enabled it; `Loom.Dashboard` serves its UI from its own origin, so same-origin is
+  correct and a CORS policy would only widen the surface. `LOOM_CORS_ORIGINS` is no
+  longer read anywhere; it is still mentioned in `IMPLEMENTATION-METHODOLOGY.md` and in
+  `Loom.Web.Api`'s own (deleted) `Program.cs` history.
+
+---
+
+### 11.5 `Loom.Dashboard` Content-Security-Policy 🟢 LOW (COMPLETED 2026-09-02)
+
+Shipped in `Loom.Dashboard/Program.cs`, in the same front-of-pipeline middleware as the
+other three headers:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none';
+base-uri 'self'; form-action 'none'; frame-ancestors 'none'
+```
+
+Written against what the production bundle actually emits, not against a template. Two
+findings drove it:
+
+- **`script-src 'self'` required a build change.** Angular's default production build runs
+  Beasties critical-CSS inlining, which emits both an inline `<style>` block *and* an
+  `onload="this.media='all'"` attribute on the stylesheet link. That attribute is an inline
+  event handler, so the policy would have needed `script-src 'unsafe-inline'` — which
+  defeats the point of having a CSP. `angular.json`'s production configuration now sets
+  `optimization.styles.inlineCritical: false`. Verified in
+  `dist/Loom.Web.Frontend/browser/index.html`: no inline script, style, or handler remains.
+  **Re-enabling `inlineCritical` silently breaks this policy.**
+- **`style-src` keeps `'unsafe-inline'`.** Angular injects component styles as `<style>`
+  elements at runtime. Removing it requires a per-request nonce (`ngCspNonce`), which means
+  generating `index.html` per request instead of serving it as a static embedded resource.
+  Not worth it on a loopback host; revisit if a reverse proxy is ever added.
+
+No external origins appear anywhere: `src/**/*.scss` contains no `url()`, no `@import`, and
+no web-font reference, so every fetch is same-origin.
+
+**Verified 2026-09-02** against a Release `Loom.Dashboard` on port 5231: all four headers
+present on `/api/health` (200, anonymous), and the SPA loads and renders fully styled at
+`/` — Angular boots and routes to `/login` — with **zero CSP violations** in the browser
+console.
+
+**Not verified:** `connect-src 'self'` covering `ws://127.0.0.1:5231/ws`. CSP3 specifies
+that `'self'` matches same-origin WebSocket schemes, but confirming it needs an
+authenticated session, which the verification pass did not open. If the live charts ever
+fail to stream while REST calls succeed, this is the first thing to check — the fix is to
+append `ws://localhost:* wss://localhost:*` to `connect-src`.
+
 ---
 
 ### 2026-09-01: Loom Distributes as NuGet Packages; Split Over Monolith; Private Before Public

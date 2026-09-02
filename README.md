@@ -30,7 +30,7 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 
 | Constraint | Why |
 |-----------|-----|
-| Binary size **< 17 MB** | Single-binary deployment (see `BACKLOG.md` § 2.1) |
+| Native AOT compatibility, proven by `Loom.AotProbe` | No shipping AOT binary today (`Loom.Web.Api` retired); binary size is not a gate — see `BACKLOG.md` § 2.1, § 11.4 |
 | Memory footprint **< 20 MB** background | Minimal overhead on host app |
 | **No reflection** | AOT can't do runtime codegen |
 | **Zero-allocation hot paths** | `Span<T>`, `ValueTask`, `ArrayPool<T>` |
@@ -62,7 +62,8 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 
 ```
 Loom.slnx                          (14 projects)
-├── Loom.Web.Api/                  → ASP.NET Core Minimal APIs (Native AOT production host)
+├── Loom.AotProbe/                 → Minimal console app; the Native AOT proof (binary
+│                                     size is not a product metric — see BACKLOG.md § 11.4)
 ├── Loom.Web.Contracts/            → Shared DTOs + source-generated JSON (MANDATORY for AOT)
 ├── Loom.Web.RealTime/             → Zero-allocation WebSocket handlers
 ├── Loom.Security/                 → Manual JWT: issuer, validator, PBKDF2 hashing, user
@@ -80,15 +81,14 @@ Loom.slnx                          (14 projects)
 ```
 
 > `Loom.Host/`, `Loom.Core/`, `Loom.Benchmarks/` from earlier design docs were never
-> implemented (empty scaffolding, since deleted). `Loom.Web.Api` is the real AOT host;
-> `Loom.Storage`'s ring buffers superseded the planned SIMD engine. `Loom.Telemetry.Collectors`
-> was folded directly into `Loom.Telemetry`.
+> implemented (empty scaffolding, since deleted). `Loom.Web.Api`, the earlier AOT host,
+> was retired — `Loom.Dashboard` is now the only web host, and the Native AOT proof
+> moved to `Loom.AotProbe` (see `BACKLOG.md` § 11.4). `Loom.Storage`'s ring buffers
+> superseded the planned SIMD engine. `Loom.Telemetry.Collectors` was folded directly
+> into `Loom.Telemetry`.
 
 **Dependency flow (verified `ProjectReference` edges):**
 ```
-Loom.Web.Api           → Loom.Security, Loom.Storage, Loom.Telemetry.Exporters,
-                          Loom.Telemetry.Query, Loom.Telemetry.Alerting,
-                          Loom.Web.Contracts, Loom.Web.RealTime
 Loom.Web.RealTime       → Loom.Web.Contracts
 Loom.Security           → Loom.Web.Contracts
 Loom.Storage            → Loom.Telemetry, Loom.Web.Contracts
@@ -96,6 +96,7 @@ Loom.Telemetry           (no project refs; DI abstractions package only)
 Loom.Telemetry.Query    → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
 Loom.Telemetry.Alerting → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
 Loom.Telemetry.Exporters→ Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
+Loom.AotProbe           → Loom.Telemetry, Loom.Telemetry.Generators
 Loom.DevTools           → Loom.Security, Loom.Storage, Loom.Telemetry,
                           Loom.Telemetry.Query, Loom.Web.Contracts
 Loom.Dashboard          → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
@@ -105,10 +106,10 @@ Loom.Dashboard          → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Te
 Loom.Telemetry.Generators (analyzer, referenced by consuming projects, no runtime dep)
 ```
 
-`Loom.Web.Api` is the AOT production host; `Loom.Dashboard` is a separate dev-time CLI
-(`PackAsTool`, exempt from AOT constraints) that embeds the Angular frontend and attaches
-to a target PID via `EventPipeBridge.cs`. The two intentionally duplicate some endpoints —
-they are not rivals.
+`Loom.Dashboard` is the only web host: a dev-time CLI (`PackAsTool`, exempt from AOT
+constraints) that embeds the Angular frontend and attaches to a target PID via
+`EventPipeBridge.cs`. `Loom.AotProbe` proves referencing `Loom.Telemetry` stays
+Native-AOT-clean; it is not a web host and has no endpoints of its own.
 
 ---
 
@@ -150,21 +151,21 @@ issue or a commit message.
 
 ```bash
 dotnet test Loom.slnx --configuration Debug
-dotnet watch run --project Loom.Web.Api --no-hot-reload
+dotnet watch run --project Loom.Dashboard --no-hot-reload -- <pid>
 ```
 
-The API listens on `http://localhost:5080`, **loopback only**. Loom does not terminate
-TLS — it binds `127.0.0.1` in code, so no environment variable can publish it to an
-external interface. A remote operator reaches it through an SSH tunnel. See
-[Security](#security).
+The Dashboard listens on `http://localhost:5209` by default (`LOOM_DASHBOARD_PORT` to
+override), **loopback only**. Loom does not terminate TLS — it binds `127.0.0.1` in code,
+so no environment variable can publish it to an external interface. A remote operator
+reaches it through an SSH tunnel. See [Security](#security).
 
 ```bash
 # Log in, then call a protected route
-TOKEN=$(curl -s -X POST http://localhost:5080/api/token \
+TOKEN=$(curl -s -X POST http://localhost:5209/api/token \
   -H 'Content-Type: application/json' \
   -d '{"username":"operator","password":"..."}' | jq -r .token)
 
-curl -H "Authorization: Bearer $TOKEN" http://localhost:5080/api/metrics/cpu
+curl -H "Authorization: Bearer $TOKEN" http://localhost:5209/api/metrics/cpu
 ```
 
 ### Local Dev Mode
@@ -195,9 +196,9 @@ returns **403**.
 | `POST /api/token` | anonymous | Log in with `{"username","password"}`, returns `{"token","expiresIn"}` |
 | `POST /api/token/refresh` | anonymous | Exchange a valid token for a fresh one. Bounded by the original session start, so a session cannot be renewed indefinitely |
 
-Anonymous by design: `/api/token`, `/api/token/refresh`, `/api/health` (both hosts), and
-the Dashboard's SPA fallback. `/metrics` and `/prometheus` accept a metrics-scoped token.
-Everything else needs a full-authority token.
+Anonymous by design: `/api/token`, `/api/token/refresh`, `/api/health`, and the
+Dashboard's SPA fallback. `/prometheus` accepts a metrics-scoped token. Everything else
+needs a full-authority token.
 
 Service tokens for unattended scrapers are minted offline — no login round-trip:
 
@@ -213,8 +214,8 @@ which on a 90-day unattended credential would hand a scraper the run of the API.
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/health` | Health check (status, uptime, memory). **Anonymous on both hosts** so liveness probes work — a probe cannot hold a 60-minute JWT |
-| `GET /api/session` | Session/attach metadata — **`Loom.Dashboard` only**, not served by `Loom.Web.Api` (see `Loom.Dashboard/Extensions/EndpointExtensions.cs:66`) |
+| `GET /api/health` | Health check (status, uptime, memory). **Anonymous** so liveness probes work — a probe cannot hold a 60-minute JWT |
+| `GET /api/session` | Session/attach metadata (see `Loom.Dashboard/Extensions/EndpointExtensions.cs:66`) |
 | `GET /api/metrics/cpu` | CPU hotpath metrics |
 | `GET /api/metrics/memory` | Memory allocation & GC stats |
 | `GET /api/metrics/thread` | Thread activity & blockage analysis |
@@ -228,18 +229,13 @@ which on a 90-day unattended credential would hand a scraper the run of the API.
 | `GET /api/exporters/metrics/names` | List registered metric names |
 | `GET /api/exporters/metrics/summary` | Summary stats for registered metrics |
 
-### Prometheus scrape endpoint — route differs by host
+### Prometheus scrape endpoint
 
-The scrape route is intentionally **not** the same on both hosts:
-
-| Host | Route | Why |
-|------|-------|-----|
-| `Loom.Web.Api` (production API, no SPA) | `GET /metrics` | No conflicting route to avoid |
-| `Loom.Dashboard` (dev CLI, embeds the Angular SPA) | `GET /prometheus` | The Angular app owns a client-side `/metrics` page (`metrics-explorer`); its `MapFallback` serves `index.html` for unmatched routes, so mapping the scrape endpoint to `/metrics` here would shadow that route and break deep-link/refresh on the Angular page. See `Loom.Dashboard/Extensions/EndpointExtensions.cs:473`. |
-
-Both routes accept a **metrics-scoped** token.
-
-Do not "fix" this into a single shared route — the divergence is required by the SPA routing, not an oversight.
+`GET /prometheus`, not `/metrics`: the Angular app owns a client-side `/metrics` page
+(`metrics-explorer`), and its `MapFallback` serves `index.html` for unmatched routes, so
+mapping the scrape endpoint to `/metrics` would shadow that route and break deep-link/
+refresh on the Angular page. See `Loom.Dashboard/Extensions/EndpointExtensions.cs:473`.
+Accepts a **metrics-scoped** token.
 
 ### Query
 
@@ -265,7 +261,7 @@ Do not "fix" this into a single shared route — the divergence is required by t
 | `GET /api/exporters/metrics/names` | List registered metric names |
 | `GET /api/exporters/metrics/summary` | Summary stats for registered metrics |
 
-Prometheus scrape route: see "Prometheus scrape endpoint — route differs by host" above.
+Prometheus scrape route: see "Prometheus scrape endpoint" above.
 
 ### Sampling
 
@@ -273,28 +269,26 @@ Collectors and sampling are **library-level APIs** (via `LoomMetrics`, `LoomSamp
 
 ---
 
-## Native AOT Production Build
+## Native AOT Proof
 
-Must be run **on Linux** — Native AOT cannot cross-compile. `PublishAot`,
+There is no longer a shipping Native AOT binary — `Loom.Web.Api` was retired and
+`Loom.Dashboard` (the only remaining web host) is not AOT-published. `Loom.AotProbe` is
+a minimal console app that proves referencing `Loom.Telemetry` stays Native-AOT-clean;
+its binary size is deliberately not a product metric (see `BACKLOG.md` § 11.4). Must be
+run **on Linux** for the Linux RID — Native AOT cannot cross-compile. `PublishAot`,
 `PublishTrimmed`, `TrimMode=link` and `InvariantGlobalization` already live in
-`Loom.Web.Api.csproj`; don't re-pass them, or the csproj stops being the single source of
-truth for how the shipped binary is built.
+`Loom.AotProbe.csproj`; don't re-pass them, or the csproj stops being the single source
+of truth for how the probe is built.
 
 ```bash
-dotnet publish Loom.Web.Api/Loom.Web.Api.csproj --configuration Release -r linux-x64
+dotnet publish Loom.AotProbe/Loom.AotProbe.csproj --configuration Release -r linux-x64
 
-# Verify the binary stays under the 17 MB hard limit (see BACKLOG.md § 2.1)
-ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
+ls -lh Loom.AotProbe/bin/Release/net10.0/linux-x64/publish/Loom.AotProbe
 ```
 
-The output is already stripped, with debug symbols split into a separate
-`Loom.Web.Api.dbg`, so `strip --strip-debug` buys nothing. A correct AOT publish contains
-**no managed assemblies** — if a `Loom.Web.Api.dll` appears beside the native binary, the
-publish silently fell back to a managed build and any size check is measuring the wrong
-file.
-
-**Measured:** 14.706 MB `linux-x64`, 15.108 MB `win-x64`. Linux runs ~400 KB smaller;
-the two RIDs are not directly comparable, so measure whichever you publish.
+A correct AOT publish contains **no managed assemblies** — if a `Loom.AotProbe.dll`
+appears beside the native binary, the publish silently fell back to a managed build and
+the probe is proving nothing.
 
 ---
 
@@ -309,13 +303,11 @@ the two RIDs are not directly comparable, so measure whichever you publish.
 dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
 
 # 2. Native AOT compiles (on Linux; AOT properties live in the csproj)
-dotnet publish Loom.Web.Api/Loom.Web.Api.csproj -c Release -r linux-x64
+dotnet publish Loom.AotProbe/Loom.AotProbe.csproj -c Release -r linux-x64
 
-# 3. Binary size - hard limit 17 MB. The original <15 MB target covered only the
-#    Phases 0-4 diagnostic core, before the query parser, alerting engine, exporters and
-#    collector plugin system existed; that budget was retired (see BACKLOG.md §2.1).
-#    Currently 14.706 MB linux-x64 / 15.108 MB win-x64.
-ls -lh Loom.Web.Api/bin/Release/net10.0/linux-x64/publish/Loom.Web.Api
+# 3. No managed assembly beside the native output (Loom.AotProbe's size itself is not
+#    a product metric - see BACKLOG.md § 11.4)
+ls -lh Loom.AotProbe/bin/Release/net10.0/linux-x64/publish/Loom.AotProbe
 
 # 4. IL + AOT tests pass - baseline 592 passing, 0 skipped
 dotnet test Loom.slnx --configuration Debug
@@ -324,7 +316,7 @@ dotnet test Loom.slnx --configuration Debug
 cd Loom.Web.Frontend && npx ng test
 
 # 6. Zero allocations in hot paths
-dotnet-counters monitor --process-id $(pidof Loom.Web.Api) System.Runtime
+dotnet-counters monitor --process-id $(pidof Loom.Dashboard) System.Runtime
 ```
 
 All of the above run in CI on every push to `main` and every PR — see
@@ -428,10 +420,10 @@ All DTO types used by the 9 telemetry systems must be registered at compile time
 
 - **Loom does not terminate TLS, deliberately.** It binds `127.0.0.1` in code via
   `ListenLocalhost`, so no environment variable can publish it to an external interface —
-  verified on both Windows and Linux, where `ASPNETCORE_URLS=http://0.0.0.0:5080` is
+  verified on both Windows and Linux, where `ASPNETCORE_URLS=http://0.0.0.0:5209` is
   overridden and Kestrel logs that it discarded the value. A remote operator reaches it
   through an SSH tunnel, which already encrypts the only hop that leaves the machine.
-  In-process TLS was built, measured at **+0.946 MB** against a 17 MB ceiling, and
+  In-process TLS was measured (on the now-retired `Loom.Web.Api`) at **+0.946 MB**, and
   rejected: it would defend a hop that never crosses a network, and would add certificate
   provisioning, file permissions and renewal. `UseHsts()` and `UseHttpsRedirection()` are
   deleted rather than left in place, because leaving them would imply a protection the
@@ -448,9 +440,13 @@ All DTO types used by the 9 telemetry systems must be registered at compile time
 - Key material **fails closed**: a missing signing key, a missing users file, or a users
   file defining zero users aborts startup with an actionable message. No
   generated-on-the-fly fallback exists in any environment
-- Strict CORS whitelist (no wildcards)
-- Security headers (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy),
-  applied at the front of the pipeline so short-circuiting middleware cannot skip them
+- CORS: `Loom.Web.Api` read `LOOM_CORS_ORIGINS` and conditionally applied a whitelist;
+  that project is retired and `Loom.Dashboard` has no equivalent — it serves its UI from
+  its own origin, so same-origin is correct and no CORS policy is needed
+- Security headers (X-Frame-Options, X-Content-Type-Options, Referrer-Policy), applied
+  at the front of the pipeline in `Loom.Dashboard` so short-circuiting middleware cannot
+  skip them. **No CSP is set yet** — `Loom.Web.Api`'s policy does not fit a host that
+  serves the Angular SPA; see `BACKLOG.md` § 11.4
 - systemd sandboxing (`ProtectSystem=strict`, `MemoryDenyWriteExecute`, etc.)
 - Runs as unprivileged user `loomd` with least privilege
 - JWT secret in `/var/secrets/loom/jwt.key` (mode 400)
@@ -465,7 +461,7 @@ All DTO types used by the 9 telemetry systems must be registered at compile time
 |-----|--------------|
 | Build & test (ubuntu + windows) | Restore, strict Release build with trim/AOT analyzers as errors, full test suite, source-generator tests |
 | Angular tests | `npm ci`, `ng test`, and a production bundle build |
-| Native AOT publish (linux-x64) | Installs `clang` + `zlib1g-dev`, publishes, enforces the 17 MB size gate, asserts the output is genuinely native, uploads the binary as an artifact |
+| Native AOT probe (linux-x64) | Installs `clang` + `zlib1g-dev`, publishes `Loom.AotProbe`, asserts the output is genuinely native (no size gate — see `BACKLOG.md` § 11.4) |
 
 The AOT job exists because Native AOT cannot cross-compile — it is the only way the Linux
 artifact gets built in CI.

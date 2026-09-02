@@ -1493,8 +1493,49 @@ from the assembly names and namespaces (`Loom.*`), and that is deliberate.
 
 **Work items:**
 
-1. Package metadata (`PackageId`, `Description`, `PackageLicenseExpression`,
-   `RepositoryUrl`, README) across the libraries intended for publication.
+1. ~~Package metadata (`PackageId`, `Description`, `PackageLicenseExpression`,
+   `RepositoryUrl`, README) across the libraries intended for publication.~~
+   **DONE 2026-09-02.** `LoomDiagnostics.Dashboard` and `LoomDiagnostics.Cli` gained
+   `Description`, `PackageTags`, `PackageLicenseExpression`, `RepositoryUrl` and
+   `RepositoryType`; `LoomDiagnostics.Telemetry` already had them. Neither tool gets a
+   `PackageReadmeFile`: `Loom.Telemetry` can only have one because `.gitignore` carries a
+   specific `!Loom.Telemetry/PACKAGE.md` un-ignore against the blanket `*.md` rule, and
+   `.gitignore` is never staged in this repository.
+
+   **The defect this closed.** `dotnet pack Loom.slnx -c Release` emitted **twelve**
+   packages, nine of them strays — `Loom.Security`, `Loom.Storage`,
+   `Loom.Telemetry.Alerting`, `Loom.Telemetry.Assist`, `Loom.Telemetry.Exporters`,
+   `Loom.Telemetry.Generators`, `Loom.Telemetry.Query`, `Loom.Web.Contracts`,
+   `Loom.Web.RealTime`. None set `IsPackable`, so MSBuild defaulted them to packable and
+   named each after its assembly, **under the `Loom.` prefix § 11.7 rejected as
+   unreservable**. `Loom.Telemetry.Generators` was the worst case: § 11.6 ships it inside
+   `LoomDiagnostics.Telemetry`, so a standalone package is a second, divergent copy. The
+   risk was never the names — it was a folder feed produced by a solution-wide pack
+   carrying nine packages nobody intended to publish. All ten (plus
+   `examples/SampleMonitoredApp`) now set `IsPackable=false`; the pack emits exactly three
+   packages and one symbol package.
+
+   **Deliberately not done: the eight supporting libraries were not given IDs.** Their
+   public names are decided with item 3 below, because
+   `LoomDiagnostics.Dashboard.AspNetCore` is what determines which of them are real
+   published dependencies rather than internal detail — `Loom.Web.Contracts` in
+   particular, whose `<FrameworkReference Microsoft.AspNetCore.App>` (`:16`) makes naming
+   it a public-surface decision, not a rename. Nothing is claimed until `dotnet nuget
+   push`, so this stays free.
+
+   **Verified**, and the assertion that carried the weight: `PackAsTool` packs project
+   references as assemblies under `tools/net10.0/any/` with **zero** package dependencies,
+   and making those projects unpackable had to not change that — a package depending on
+   something that will never be published would be a silent break. Baseline captured
+   before the change and re-checked after: `LoomDiagnostics.Cli` 6 assemblies,
+   `LoomDiagnostics.Dashboard` 10, both with no dependencies, identical. Plus the § 11.3
+   consumer-AOT gate still passing, which is the only check that proves
+   `Loom.Telemetry.Generators` is still packed *inside* the Telemetry package.
+
+   **Known gap, not fixed:** all three packages carry `<authors>` defaulted to the
+   assembly name (`Loom.DevTools`, `Loom.Dashboard`, `Loom.Telemetry`) because none sets
+   `<Authors>`. nuget.org renders that as the package author. Fix before the first public
+   push.
 2. ~~Ship `Loom.Telemetry.Generators` **inside** `Loom.Telemetry.nupkg` at
    `analyzers/dotnet/cs/`.~~ **DONE 2026-09-02 — see § 11.6.** A single
    `PackageReference` now delivers both the attributes and the generator; no consumer

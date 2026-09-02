@@ -3,6 +3,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Demo app, never shipped. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />

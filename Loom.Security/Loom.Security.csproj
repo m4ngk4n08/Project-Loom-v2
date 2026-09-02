@@ -11,6 +11,11 @@
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
 		<EnableAotAnalyzer>true</EnableAotAnalyzer>
 		<EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+
+		<!-- Not published. Public IDs for the supporting libraries are decided with
+		     BACKLOG.md 11.1 item 3; until then a solution-wide pack must not emit them
+		     under the unreserved Loom. prefix (11.7). -->
+		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 
 	<ItemGroup>

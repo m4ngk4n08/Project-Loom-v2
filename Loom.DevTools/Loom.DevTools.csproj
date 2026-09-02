@@ -10,6 +10,17 @@
     <ToolCommandName>loom</ToolCommandName>
     <PackAsTool>true</PackAsTool>
   </PropertyGroup>
+
+  <!-- Package metadata. PackageId, ToolCommandName and PackAsTool stay in the group
+       above; this group is the nuget.org-facing description only. -->
+  <PropertyGroup>
+    <Description>Command-line companion to Loom. Attaches to a running .NET process over EventPipe to stream logs and metrics, runs Loom queries against a live process, and mints scope-restricted tokens for the Loom dashboard.</Description>
+    <PackageTags>telemetry;metrics;logging;diagnostics;cli;dotnet-tool;eventpipe</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/m4ngk4n08/Project-Loom-v2</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.607501" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.18" />

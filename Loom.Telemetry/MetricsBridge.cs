@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 
@@ -27,11 +29,49 @@ internal static class MetricsBridge
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Counter<long>> Counters = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Histogram<double>> Histograms = new();
 
-    public static void PublishCounter(string name, long increment) =>
-        Counters.GetOrAdd(name, n => Meter.CreateCounter<long>(n)).Add(increment);
+    // Gauges are a point-in-time level, not a distribution — they cannot be pushed
+    // through Counter<T>/Histogram<T>. Meter.CreateObservableGauge<T> only offers a pull
+    // callback, so PublishGauge writes a last-value cache (and the tags that came with
+    // it) and the ObservableGauge, created lazily per metric name, reads that cache when
+    // polled.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, GaugeState> Gauges = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ObservableGauge<double>> GaugeInstruments = new();
 
-    public static void PublishHistogram(string name, double value) =>
-        Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value);
+    private sealed class GaugeState
+    {
+        public double Value;
+        public KeyValuePair<string, object?>[] Tags = Array.Empty<KeyValuePair<string, object?>>();
+    }
+
+    public static void PublishCounter(string name, long increment, ReadOnlySpan<MetricTag> tags = default) =>
+        Counters.GetOrAdd(name, n => Meter.CreateCounter<long>(n)).Add(increment, ConvertTags(tags));
+
+    public static void PublishHistogram(string name, double value, ReadOnlySpan<MetricTag> tags = default) =>
+        Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value, ConvertTags(tags));
+
+    public static void PublishGauge(string name, double value, ReadOnlySpan<MetricTag> tags = default)
+    {
+        var state = Gauges.GetOrAdd(name, static _ => new GaugeState());
+        state.Value = value;
+        state.Tags = ConvertTags(tags);
+
+        GaugeInstruments.GetOrAdd(name, n => Meter.CreateObservableGauge(n, () =>
+        {
+            var s = Gauges[n];
+            return new Measurement<double>(s.Value, s.Tags);
+        }));
+    }
+
+    private static KeyValuePair<string, object?>[] ConvertTags(ReadOnlySpan<MetricTag> tags)
+    {
+        if (tags.Length == 0)
+            return Array.Empty<KeyValuePair<string, object?>>();
+
+        var converted = new KeyValuePair<string, object?>[tags.Length];
+        for (var i = 0; i < tags.Length; i++)
+            converted[i] = new KeyValuePair<string, object?>(tags[i].Key, tags[i].Value);
+        return converted;
+    }
 
     // Placed here, next to the static fields it forces into existence, rather than on
     // AddLoomTelemetry: the DI extension is never called by consumers that use only the

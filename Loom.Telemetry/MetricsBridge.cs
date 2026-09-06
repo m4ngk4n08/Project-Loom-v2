@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 
 namespace Loom.Telemetry;
 
@@ -31,4 +32,25 @@ internal static class MetricsBridge
 
     public static void PublishHistogram(string name, double value) =>
         Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value);
+
+    // Placed here, next to the static fields it forces into existence, rather than on
+    // AddLoomTelemetry: the DI extension is never called by consumers that use only the
+    // static LoomMetrics API (confirmed against HIM, the app that surfaced this bug),
+    // so hanging the fix there would fix nothing for them. A module initializer runs on
+    // assembly load, which the CLR triggers the first time any type from this assembly
+    // is needed — that is earlier than "first Record* call" but it is NOT guaranteed to
+    // be process start. An app that references Loom.Telemetry only through a type used
+    // late (or conditionally) will not have its meter beacon up until that point. This
+    // closes the common case, not every case.
+    // CA2255 warns that ModuleInitializer is unusual for library code; here it is the
+    // point — see the comment above.
+#pragma warning disable CA2255
+    [ModuleInitializer]
+    internal static void Initialize()
+    {
+        // Touching any static member of this class forces its static constructor —
+        // and therefore the Up gauge's field initializer — to run now.
+        _ = Meter;
+    }
+#pragma warning restore CA2255
 }

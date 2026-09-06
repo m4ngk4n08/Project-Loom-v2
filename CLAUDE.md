@@ -35,7 +35,7 @@ Solution file is **`Loom.slnx`** (XML format), NOT `Loom.sln` — `dotnet build/
 Loom.sln` fails with `MSBUILD : error MSB1009`.
 
 ```
-Loom.slnx                      (14 projects)
+Loom.slnx                      (15 projects)
 ├── Loom.Telemetry/            → Core: MetricRecord, LogRecord, ring buffers,
 │                                collectors, sampling. NO project references.
 ├── Loom.Web.Contracts/        → Shared DTOs + LoomJsonSerializerContext.
@@ -58,7 +58,15 @@ Loom.slnx                      (14 projects)
 │                                Proves referencing Loom.Telemetry doesn't break a
 │                                consumer's AOT publish. Its binary size is NOT a
 │                                product metric. Refs: Loom.Telemetry + its generator.
-├── Loom.Dashboard/            → dotnet tool `loom-dashboard`. The only web host.
+├── Loom.Dashboard.AspNetCore/ → The actual web host: endpoints, EventPipeBridge,
+│                                Minimal API wiring. Library, not packable yet (needs
+│                                public IDs for everything it references first — see
+│                                BACKLOG.md § 11.1). EventPipeBridge.cs lives here but
+│                                still declares `namespace Loom.Dashboard;` — a leftover
+│                                from before the split, not a build error, but grep for
+│                                the namespace and you'll miss this file.
+├── Loom.Dashboard/            → dotnet tool `loom-dashboard`. Thin wrapper that packs
+│                                and runs Loom.Dashboard.AspNetCore.
 ├── Loom.DevTools/             → dotnet tool `loom`. Exe, PackAsTool.
 └── Loom.Telemetry.Tests/      → xUnit. The ONLY test project.
 
@@ -87,11 +95,14 @@ Loom.Telemetry.Alerting  → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
 Loom.Telemetry.Exporters → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
 Loom.AotProbe            → Loom.Telemetry, Loom.Telemetry.Generators
 
-Loom.Dashboard  → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
-                  Loom.Telemetry.Alerting, Loom.Telemetry.Assist,
-                  Loom.Telemetry.Exporters, Loom.Web.Contracts, Loom.Web.RealTime
-Loom.DevTools   → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
-                  Loom.Web.Contracts
+Loom.Dashboard.AspNetCore → Loom.Security, Loom.Storage, Loom.Telemetry,
+                            Loom.Telemetry.Query, Loom.Telemetry.Alerting,
+                            Loom.Telemetry.Assist, Loom.Telemetry.Exporters,
+                            Loom.Web.Contracts, Loom.Web.RealTime
+Loom.Dashboard   → Loom.Dashboard.AspNetCore, Loom.Security, Loom.Storage,
+                   Loom.Web.Contracts
+Loom.DevTools    → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
+                   Loom.Web.Contracts
 ```
 
 **Stack:** .NET 10 SDK (10.0.100+) · ASP.NET Core Minimal APIs · Kestrel · native
@@ -294,7 +305,9 @@ dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAna
 dotnet publish Loom.AotProbe/Loom.AotProbe.csproj -c Release -r win-x64
 Get-ChildItem Loom.AotProbe/bin/Release/net10.0/win-x64/publish/ | Select-Object Name, Length
 
-# 4. Baselines: 592 passing / 0 skipped backend; 3 files / 94 passing frontend.
+# 4. Baselines: 625 passing / 0 skipped backend (measured 2026-09-06; re-verify before
+#    trusting this number again — it has drifted before). Frontend count last verified
+#    separately: 3 files / 94 passing.
 dotnet test Loom.slnx -c Debug
 cd Loom.Web.Frontend; npx ng test; cd ..
 ```

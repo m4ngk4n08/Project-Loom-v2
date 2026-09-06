@@ -28,6 +28,14 @@ public sealed class MetricBuffer
     public int Capacity => _buffer.Length;
 
     /// <summary>
+    /// Number of records overwritten because the buffer wrapped. _writeIndex counts every
+    /// write ever made (uncapped); only the array-slot computation (index &amp; mask) wraps.
+    /// So anything beyond Capacity total writes has overwritten an older record.
+    /// Computed on read, not tracked per-write, so Write() stays allocation-free.
+    /// </summary>
+    public long DroppedCount => Math.Max(0, Interlocked.Read(ref _writeIndex) - Capacity);
+
+    /// <summary>
     /// Write a metric record to the buffer (lock-free, wait-free).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

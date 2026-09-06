@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
@@ -12,8 +13,38 @@ namespace Loom.Telemetry;
 /// </summary>
 public static class LoomMetrics
 {
+    private const int DefaultBufferCapacity = 8192;
+
+    // Floor: below this a "ring buffer" stops meaningfully ringing — a handful of slots
+    // wrap on nearly every burst and ReadRecent/ReadSince become useless for anything but
+    // the last instant. Ceiling: 1,048,576 records/buffer, applied per distinct metric
+    // name, so this bounds a single series' memory, not the process total. At ~48 bytes/
+    // record (MetricRecord: string ref + enum + double + long + array ref + string ref,
+    // padded), that is ~48 MB for one maxed-out series — large but a deliberate, bounded
+    // ceiling rather than an unbounded env var letting one bad value exhaust memory.
+    private const int MinBufferCapacity = 64;
+    private const int MaxBufferCapacity = 1_048_576;
+
+    // Read once and cached: capacity is process-wide and fixed for the process lifetime,
+    // same as the hardcoded default it replaces. Re-reading per buffer creation would
+    // let different metric names end up with different capacities if the env var changed
+    // mid-run (it can't via ResetForTesting either — see LoomMetrics tests).
+    private static readonly int ConfiguredCapacity = ReadCapacityFromEnvironment();
+
     // Per-metric ring buffers (one buffer per metric name)
     private static readonly ConcurrentDictionary<string, MetricBuffer> Buffers = new();
+
+    private static int ReadCapacityFromEnvironment()
+    {
+        var raw = Environment.GetEnvironmentVariable("LOOM_METRIC_BUFFER_CAPACITY");
+        if (string.IsNullOrWhiteSpace(raw))
+            return DefaultBufferCapacity;
+
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            return DefaultBufferCapacity;
+
+        return Math.Clamp(parsed, MinBufferCapacity, MaxBufferCapacity);
+    }
 
     /// <summary>
     /// Record a counter metric (monotonically increasing value).
@@ -130,7 +161,15 @@ public static class LoomMetrics
     /// <summary>
     /// Internal: Get buffer capacity for diagnostics.
     /// </summary>
-    public static int GetBufferCapacity() => Buffers.Values.FirstOrDefault()?.Capacity ?? 8192;
+    public static int GetBufferCapacity() => Buffers.Values.FirstOrDefault()?.Capacity ?? DefaultBufferCapacity;
+
+    /// <summary>
+    /// Number of records lost to buffer wraparound for the given metric name.
+    /// 0 if the name has no buffer yet (nothing has been dropped because nothing has
+    /// been recorded).
+    /// </summary>
+    public static long GetDroppedCount(string name) =>
+        Buffers.TryGetValue(name, out var buffer) ? buffer.DroppedCount : 0;
 
     /// <summary>
     /// Internal: Get or create a buffer for the given metric name.
@@ -138,7 +177,26 @@ public static class LoomMetrics
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static MetricBuffer GetOrCreateBuffer(string name)
     {
-        return Buffers.GetOrAdd(name, static _ => new MetricBuffer());
+        // Fast path: buffer already exists (true for nearly every call once a metric
+        // name has been seen once) — no allocation, no registration attempt.
+        if (Buffers.TryGetValue(name, out var existing))
+            return existing;
+
+        // Slow path, first time this name is seen. Register against the buffer GetOrAdd
+        // actually resolved, not one built inside the factory: GetOrAdd's factory can run
+        // more than once under a race (two threads hitting the same brand-new name at
+        // once), constructing two buffers when only one is ever stored. Registering
+        // inside the factory risks wiring the dropped-count provider to whichever
+        // buffer's registration call happened to win the RegisterBufferDroppedProvider
+        // race, which is not guaranteed to be the same buffer GetOrAdd kept — silently
+        // orphaning the gauge on an abandoned buffer that never gets written to again.
+        // Every caller here holds the same resolved instance, so whichever one wins
+        // RegisterBufferDroppedProvider's TryAdd closes over the correct buffer. The
+        // closure allocation below only happens on this first-time path, not on every
+        // call, keeping the steady-state Record* path allocation-free.
+        var buffer = Buffers.GetOrAdd(name, static _ => new MetricBuffer(ConfiguredCapacity));
+        MetricsBridge.RegisterBufferDroppedProvider(name, () => buffer.DroppedCount);
+        return buffer;
     }
 
     /// <summary>

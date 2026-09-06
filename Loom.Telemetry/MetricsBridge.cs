@@ -29,6 +29,32 @@ internal static class MetricsBridge
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Counter<long>> Counters = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Histogram<double>> Histograms = new();
 
+    // Dropped-record counts per metric-name buffer. Unlike PublishGauge, there is nothing
+    // to "push" here: MetricBuffer.DroppedCount is already a live computed value, so this
+    // just holds a pull-callback per name and reports it straight from the buffer with no
+    // caching layer. One instrument total (BufferDropped below), not one per name, mirrors
+    // PublishGauge's "one instrument, many measurements" shape but keyed only by metric
+    // name (no tag-combination dimension — a buffer's drop count isn't tag-dimensional).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<long>> BufferDroppedProviders = new();
+
+    private static readonly ObservableGauge<long> BufferDropped =
+        Meter.CreateObservableGauge<long>("loom.telemetry.buffer.dropped", () =>
+        {
+            var measurements = new Measurement<long>[BufferDroppedProviders.Count];
+            var i = 0;
+            foreach (var kvp in BufferDroppedProviders)
+                measurements[i++] = new Measurement<long>(kvp.Value(), new KeyValuePair<string, object?>("metric.name", kvp.Key));
+            return measurements;
+        });
+
+    /// <summary>
+    /// Registers the dropped-count callback for a metric name's buffer, once, the first
+    /// time that buffer is created. Never overwrites an existing registration for the
+    /// same name (there is exactly one buffer per name for the life of the process).
+    /// </summary>
+    public static void RegisterBufferDroppedProvider(string name, Func<long> droppedCountProvider) =>
+        BufferDroppedProviders.TryAdd(name, droppedCountProvider);
+
     // Gauges are a point-in-time level, not a distribution — they cannot be pushed
     // through Counter<T>/Histogram<T>. Meter.CreateObservableGauge<T> only offers a pull
     // callback, so PublishGauge writes a last-value cache (and the tags that came with

@@ -34,14 +34,29 @@ internal static class MetricsBridge
     // callback, so PublishGauge writes a last-value cache (and the tags that came with
     // it) and the ObservableGauge, created lazily per metric name, reads that cache when
     // polled.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, GaugeState> Gauges = new();
+    //
+    // Keyed name -> tag-combination -> last state, not just name: a gauge is a
+    // dimensional metric like a counter or histogram (per-queue depth, per-route
+    // active-requests, ...), so the same name is routinely recorded with several
+    // different tag sets. Counter<T>/Histogram<T> handle this for free because
+    // .Add/.Record push straight into the Meter's own per-tag-combination tracking; the
+    // gauge path is pull-based, so this cache has to key on the same thing (name + tag
+    // combination) or two different series with the same name collapse into one, with
+    // whichever call happened most recently winning and the other series vanishing.
+    // There is still exactly one ObservableGauge per NAME (one per tag combination would
+    // spam the Meter with an instrument per series), whose callback enumerates every
+    // cached combination for that name and reports one Measurement per combination.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentDictionary<string, GaugeState>> Gauges = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, ObservableGauge<double>> GaugeInstruments = new();
 
-    private sealed class GaugeState
-    {
-        public double Value;
-        public KeyValuePair<string, object?>[] Tags = Array.Empty<KeyValuePair<string, object?>>();
-    }
+    // Immutable so a concurrent recorder for the SAME tag combination replaces the whole
+    // state in one reference swap — a reader observing mid-update sees either the old
+    // (value, tags) pair or the new one, never a value from one call paired with tags
+    // from another. Once tag combination is part of the dictionary key, the Tags for a
+    // given key are fixed at that key's creation and only Value would ever change if this
+    // were mutable, but making the type immutable removes the possibility outright rather
+    // than relying on that observation staying true.
+    private sealed record GaugeState(double Value, KeyValuePair<string, object?>[] Tags);
 
     public static void PublishCounter(string name, long increment, ReadOnlySpan<MetricTag> tags = default) =>
         Counters.GetOrAdd(name, n => Meter.CreateCounter<long>(n)).Add(increment, ConvertTags(tags));
@@ -51,15 +66,42 @@ internal static class MetricsBridge
 
     public static void PublishGauge(string name, double value, ReadOnlySpan<MetricTag> tags = default)
     {
-        var state = Gauges.GetOrAdd(name, static _ => new GaugeState());
-        state.Value = value;
-        state.Tags = ConvertTags(tags);
+        var convertedTags = ConvertTags(tags);
+        var tagKey = BuildTagKey(convertedTags);
 
-        GaugeInstruments.GetOrAdd(name, n => Meter.CreateObservableGauge(n, () =>
+        var byTagKey = Gauges.GetOrAdd(name, static _ => new System.Collections.Concurrent.ConcurrentDictionary<string, GaugeState>());
+        byTagKey[tagKey] = new GaugeState(value, convertedTags);
+
+        GaugeInstruments.GetOrAdd(name, n => Meter.CreateObservableGauge<double>(n, () =>
         {
-            var s = Gauges[n];
-            return new Measurement<double>(s.Value, s.Tags);
+            var combinations = Gauges[n];
+            var measurements = new Measurement<double>[combinations.Count];
+            var i = 0;
+            foreach (var state in combinations.Values)
+                measurements[i++] = new Measurement<double>(state.Value, state.Tags);
+            return measurements;
         }));
+    }
+
+    // Sorted key=value pairs joined into one string: two calls with the same tags in a
+    // different order must resolve to the same series, so this can't rely on insertion
+    // order the way the raw MetricTag span is given to us.
+    private static string BuildTagKey(KeyValuePair<string, object?>[] tags)
+    {
+        if (tags.Length == 0)
+            return string.Empty;
+
+        var sorted = (KeyValuePair<string, object?>[])tags.Clone();
+        Array.Sort(sorted, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
+
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < sorted.Length; i++)
+        {
+            if (i > 0)
+                sb.Append(';');
+            sb.Append(sorted[i].Key).Append('=').Append(sorted[i].Value);
+        }
+        return sb.ToString();
     }
 
     private static KeyValuePair<string, object?>[] ConvertTags(ReadOnlySpan<MetricTag> tags)

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
+using System.Linq;
 using Xunit;
 
 namespace Loom.Telemetry.Tests;
@@ -160,5 +161,36 @@ public sealed class MetricsBridgeGaugeAndTagsTests
 
         Assert.True(found, $"Expected a measurement on gauge instrument '{name}'.");
         Assert.Contains(observedTags!, t => t.Key == "queue" && (string?)t.Value == "inbound");
+    }
+
+    [Fact]
+    public void RecordGauge_WithMultipleTagCombinations_ReportsAllOfThemNotJustTheLastOne()
+    {
+        var name = $"test.gauge.multitag.{System.Guid.NewGuid():N}";
+
+        LoomMetrics.RecordGauge(name, 5, new MetricTag("queue", "inbound"));
+        LoomMetrics.RecordGauge(name, 12, new MetricTag("queue", "outbound"));
+
+        var observed = new List<(double Value, string? Queue)>();
+
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == "Loom.Telemetry" && instrument.Name == name)
+                l.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, state) =>
+        {
+            var queueTag = tags.ToArray().FirstOrDefault(t => t.Key == "queue");
+            observed.Add((measurement, (string?)queueTag.Value));
+        });
+
+        listener.Start();
+        listener.RecordObservableInstruments();
+        listener.Dispose();
+
+        Assert.Equal(2, observed.Count);
+        Assert.Contains(observed, o => o.Queue == "inbound" && o.Value == 5);
+        Assert.Contains(observed, o => o.Queue == "outbound" && o.Value == 12);
     }
 }

@@ -28,12 +28,31 @@ public static class DashboardCommand
         })).ToArray();
 
         var results = await Task.WhenAll(tasks);
+
+        // Retry a few times: discovery only sees a process once its Loom.Telemetry
+        // meter has reported at least once, which is a race against process startup
+        // even on a correctly instrumented, running app. A single pass makes this
+        // dashboard command look flakier than `loom dev`, which re-probes every 2s.
         var instrumented = results.Where(r => r.hasLoom).ToList();
+        for (int attempt = 0; instrumented.Count == 0 && attempt < 4; attempt++)
+        {
+            await Task.Delay(2000, ct);
+            var retryTasks = processes.Select(pid => Task.Run(async () =>
+            {
+                var name = GetProcessName(pid);
+                var hasLoom = await ProbeForLoom(new DiagnosticsClient(pid), ct);
+                return (pid, name, hasLoom);
+            })).ToArray();
+            results = await Task.WhenAll(retryTasks);
+            instrumented = results.Where(r => r.hasLoom).ToList();
+        }
 
         if (instrumented.Count == 0)
         {
-            Console.WriteLine("No Loom-instrumented processes found.");
-            Console.WriteLine("Ensure your app references Loom.Telemetry and is running.");
+            Console.WriteLine("No process reported Loom.Telemetry metrics.");
+            Console.WriteLine("A process only becomes discoverable once Loom is loaded and reporting -");
+            Console.WriteLine("this can lag a few seconds behind process start.");
+            Console.WriteLine("Run 'loom dev --all' to list every .NET process and confirm yours is running.");
             return;
         }
 

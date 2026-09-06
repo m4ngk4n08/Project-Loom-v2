@@ -59,5 +59,25 @@ namespace Loom.Telemetry.GeneratedInterceptors
             }
         }
 
+        [global::System.Runtime.CompilerServices.InterceptsLocationAttribute(1, "MQzfdzvaJaD8c0qiI1SN2O0EAABMb29tUHJvZmlsZUludGVyZmFjZURpc3BhdGNoVGVzdHMuY3M=")]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int LoomProfile_Intercept_2(this Loom.Telemetry.Tests.IInterfaceDispatchProbe instance, int x)
+        {
+            var __startTicks = Stopwatch.GetTimestamp();
+            try
+            {
+                var __result = instance.Do(x);
+                var __elapsed = Stopwatch.GetElapsedTime(__startTicks);
+                LoomRuntime.RecordMethodExecution("InterfaceDispatchProbe.Do", __elapsed, null);
+                return __result;
+            }
+            catch (Exception __ex)
+            {
+                var __elapsed = Stopwatch.GetElapsedTime(__startTicks);
+                LoomRuntime.RecordMethodExecution("InterfaceDispatchProbe.Do", __elapsed, __ex);
+                throw;
+            }
+        }
+
     }
 }

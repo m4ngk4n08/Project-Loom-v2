@@ -41,6 +41,12 @@
 
       <ItemGroup>
         <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+        <!-- buildTransitive so a project that only references a project that references
+             this package still picks up InterceptorsNamespaces - see
+             build/LoomDiagnostics.Telemetry.props for why this exists and why the
+             filename must match the PackageId exactly. -->
+        <None Include="build\LoomDiagnostics.Telemetry.props" Pack="true" PackagePath="buildTransitive\LoomDiagnostics.Telemetry.props" />
+        <None Include="build\LoomDiagnostics.Telemetry.props" Pack="true" PackagePath="build\LoomDiagnostics.Telemetry.props" />
       </ItemGroup>
 
       <!-- Build ordering only. This deliberately does NOT set OutputItemType="Analyzer":

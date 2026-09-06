@@ -5,6 +5,13 @@
 		<LangVersion>latest</LangVersion>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<IsRoslynComponent>true</IsRoslynComponent>
+		<!-- SemanticModel.GetInterceptableLocation / InterceptableLocation.GetInterceptsLocationAttributeSyntax
+		     are the ONLY interceptor mechanism this pinned Roslyn version (4.11.0) accepts
+		     without emitting the obsolete-shape warning CS9270 in consumers - confirmed by
+		     compiling both shapes against the real compiler. The API is marked
+		     [Experimental("RSEXPERIMENTAL002")] in this version; suppressed here (in the
+		     generator's own compilation) only, not in consumer projects. -->
+		<NoWarn>$(NoWarn);RSEXPERIMENTAL002</NoWarn>
 
 		<!-- Never a package of its own: BACKLOG.md 11.6 ships this generator INSIDE
 		     LoomDiagnostics.Telemetry at analyzers/dotnet/cs/, via the LoomPackGenerator

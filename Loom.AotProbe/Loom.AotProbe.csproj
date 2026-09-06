@@ -15,6 +15,14 @@
 		<EnableTrimAnalyzer>true</EnableTrimAnalyzer>
 		<EnableAotAnalyzer>true</EnableAotAnalyzer>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+		<!-- This project references the generator directly via ProjectReference, not
+		     through the packed LoomDiagnostics.Telemetry nupkg, so it never sees
+		     Loom.Telemetry/build/LoomDiagnostics.Telemetry.props' auto-import - that only
+		     fires for a real NuGet consumer. Set the same property by hand so
+		     [LoomProfile] interceptors (Program.cs's Probe.DoWork) activate here too.
+		     Must match LoomProfileGenerator.InterceptorsNamespace exactly. -->
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Loom.Telemetry.GeneratedInterceptors</InterceptorsNamespaces>
 	</PropertyGroup>
 
 	<ItemGroup>

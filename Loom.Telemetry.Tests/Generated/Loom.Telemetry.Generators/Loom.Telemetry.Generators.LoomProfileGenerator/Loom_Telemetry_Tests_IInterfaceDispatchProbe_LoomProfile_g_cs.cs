@@ -8,23 +8,24 @@ using Loom.Telemetry;
 
 namespace Loom.Telemetry.Tests
 {
-    file static class SampleInstrumentedClass_Interceptors
+    public static class IInterfaceDispatchProbe_LoomProfileExtensions
     {
-        [InterceptsLocation(@"C:\\Users\\angel\\source\\repos\\Project Loom v2\\Loom.Telemetry.Tests\\GeneratorTests.cs", 22, 22)]
-        public static int MethodWithReturnValue__Interceptor_0(this Loom.Telemetry.Tests.SampleInstrumentedClass __instance, int x, int y)
+        /// <summary>Profiled wrapper for Do</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int Do_Profiled(this Loom.Telemetry.Tests.IInterfaceDispatchProbe instance, int x)
         {
             var __startTicks = Stopwatch.GetTimestamp();
             try
             {
-                var __result = __instance.MethodWithReturnValue(x, y);
+                var __result = instance.Do(x);
                 var __elapsed = Stopwatch.GetElapsedTime(__startTicks);
-                LoomRuntime.RecordMethodExecution("CustomMetricName", __elapsed, null);
+                LoomRuntime.RecordMethodExecution("InterfaceDispatchProbe.Do", __elapsed, null);
                 return __result;
             }
             catch (Exception __ex)
             {
                 var __elapsed = Stopwatch.GetElapsedTime(__startTicks);
-                LoomRuntime.RecordMethodExecution("CustomMetricName", __elapsed, __ex);
+                LoomRuntime.RecordMethodExecution("InterfaceDispatchProbe.Do", __elapsed, __ex);
                 throw;
             }
         }

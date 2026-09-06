@@ -1,0 +1,17 @@
+<Project>
+	<!--
+		Adds this package's generated interceptor namespace to InterceptorsNamespaces so
+		[LoomProfile] call sites are actually redirected to the recording code, with no
+		edits to the consumer's own .csproj. Staged into buildTransitive/ (see the
+		LoomPackGenerator target in ../Loom.Telemetry.csproj) so a project that only
+		depends on a project that references this package still gets it - NuGet auto-
+		imports buildTransitive/<PackageId>.props/.targets by filename convention, which
+		is why this file must stay named exactly LoomDiagnostics.Telemetry.props.
+
+		Without this, [LoomProfile] compiles and looks instrumented but silently records
+		nothing for ordinary calls - the exact bug this mechanism exists to fix.
+	-->
+	<PropertyGroup>
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Loom.Telemetry.GeneratedInterceptors</InterceptorsNamespaces>
+	</PropertyGroup>
+</Project>

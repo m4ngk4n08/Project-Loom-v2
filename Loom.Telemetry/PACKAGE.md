@@ -52,6 +52,32 @@ yet, so an empty lambda is the correct call today.
 
 `[LoomTrack]` does the same for a property, recording a metric whenever its value changes.
 
+### Interfaces and dependency injection
+
+`[LoomProfile]` intercepts a call at the exact spot it resolves to at compile time. A
+direct call like `orderService.Submit(order)`, where `orderService` is statically typed
+as the concrete class, resolves straight to the tagged method and is intercepted.
+
+A call made through an interface — `IOrderService orderService = ...;
+orderService.Submit(order);`, the shape most dependency-injected code actually takes —
+resolves to the *interface's* method instead. Tagging only the concrete class's
+`Submit` does not reach that call. **Put `[LoomProfile]` on the interface method
+instead**, and every call made through that interface is intercepted, regardless of
+which concrete implementation is behind it at runtime:
+
+```csharp
+public interface IOrderService
+{
+    [LoomProfile(Name = "Order.Submit")]
+    void Submit(Order order);
+}
+```
+
+Tag whichever one matches how your code actually calls it — the interface method for
+DI-resolved calls, the concrete method for direct calls on the concrete type. Tagging
+both is safe if your code genuinely calls it both ways; each tagged declaration only
+affects calls that resolve to it.
+
 ## What is in this package
 
 The attributes, the source generator, the recording runtime (ring buffers, collectors,

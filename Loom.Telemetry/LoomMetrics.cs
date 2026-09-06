@@ -177,12 +177,26 @@ public static class LoomMetrics
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static MetricBuffer GetOrCreateBuffer(string name)
     {
-        return Buffers.GetOrAdd(name, static n =>
-        {
-            var buffer = new MetricBuffer(ConfiguredCapacity);
-            MetricsBridge.RegisterBufferDroppedProvider(n, () => buffer.DroppedCount);
-            return buffer;
-        });
+        // Fast path: buffer already exists (true for nearly every call once a metric
+        // name has been seen once) — no allocation, no registration attempt.
+        if (Buffers.TryGetValue(name, out var existing))
+            return existing;
+
+        // Slow path, first time this name is seen. Register against the buffer GetOrAdd
+        // actually resolved, not one built inside the factory: GetOrAdd's factory can run
+        // more than once under a race (two threads hitting the same brand-new name at
+        // once), constructing two buffers when only one is ever stored. Registering
+        // inside the factory risks wiring the dropped-count provider to whichever
+        // buffer's registration call happened to win the RegisterBufferDroppedProvider
+        // race, which is not guaranteed to be the same buffer GetOrAdd kept — silently
+        // orphaning the gauge on an abandoned buffer that never gets written to again.
+        // Every caller here holds the same resolved instance, so whichever one wins
+        // RegisterBufferDroppedProvider's TryAdd closes over the correct buffer. The
+        // closure allocation below only happens on this first-time path, not on every
+        // call, keeping the steady-state Record* path allocation-free.
+        var buffer = Buffers.GetOrAdd(name, static _ => new MetricBuffer(ConfiguredCapacity));
+        MetricsBridge.RegisterBufferDroppedProvider(name, () => buffer.DroppedCount);
+        return buffer;
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Diagnostics.Tracing;
+using System.Globalization;
 using Loom.Storage;
 using Loom.Telemetry;
 using Microsoft.Diagnostics.NETCore.Client;
@@ -21,6 +22,25 @@ public sealed class EventPipeCollector : IDisposable
     private readonly LogMessageParser _parser = new();
     private CancellationTokenSource? _cts;
     private Task? _collectionTask;
+    private long _recordsIngested;
+    private Exception? _lastError;
+
+    /// <summary>
+    /// Set when CollectLoop's session terminates via exception (wrong PID, permission
+    /// failure, target exit, ...). Without this an empty store is indistinguishable from
+    /// "the target published nothing" - see CLAUDE.md, "a negative probe with invalid
+    /// input reads exactly like a clean bill of health."
+    ///
+    /// Volatile because it is written on the collection thread and read by whichever
+    /// thread polls it. A plain field carries no ordering guarantee, so a poller can spin
+    /// on a cached null while the session is already dead - which is the exact silence
+    /// this property exists to break. RecordsIngested already gets this via Interlocked.
+    /// </summary>
+    public Exception? LastError => Volatile.Read(ref _lastError);
+
+    public bool IsFaulted => LastError is not null;
+
+    public long RecordsIngested => Interlocked.Read(ref _recordsIngested);
 
     // logStore is an APPENDED optional parameter, so every existing call site compiles
     // unchanged. When it is null the logging provider is not enabled at all - collecting
@@ -49,11 +69,29 @@ public sealed class EventPipeCollector : IDisposable
     public void Stop()
     {
         _cts?.Cancel();
+
+        // Join the processing thread instead of only asking it to stop. Cancelling sets
+        // a flag; until CollectLoop returns, a "stopped" collector still owns an
+        // EventPipe session and an event-processing thread, still writing into a store
+        // the caller may already have disposed. _collectionTask was captured but never
+        // awaited, so nothing observed that thread's end.
+        //
+        // Bounded: a wedged session must never hang a CLI command, and Stop() is on the
+        // path DashboardCommand/WatchCommand/DevCommand take on shutdown.
+        try
+        {
+            _collectionTask?.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (AggregateException)
+        {
+            // The task is cancelled or faulted - CollectLoop already recorded anything
+            // worth reporting in LastError, and Stop() must not throw during teardown.
+        }
     }
 
     public void Dispose()
     {
-        _cts?.Cancel();
+        Stop();
         _cts?.Dispose();
     }
 
@@ -145,6 +183,7 @@ public sealed class EventPipeCollector : IDisposable
 
                 string? metricName = null;
                 double value = 0;
+                string? tagPayload = null;
 
                 for (int i = 0; i < payloadNames.Length; i++)
                 {
@@ -159,8 +198,12 @@ public sealed class EventPipeCollector : IDisposable
                         case "Rate":
                         case "value":
                         case "sum":
-                            if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), out var v))
+                        case "lastValue":
+                            if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
                                 value = v;
+                            break;
+                        case "tags":
+                            tagPayload = traceEvent.PayloadValue(i)?.ToString();
                             break;
                     }
                 }
@@ -172,17 +215,22 @@ public sealed class EventPipeCollector : IDisposable
                     "CounterRateValuePublished" => MetricType.Counter,
                     "GaugeValuePublished" => MetricType.Gauge,
                     "HistogramValuePublished" => MetricType.Histogram,
+                    "UpDownCounterValuePublished" => MetricType.Gauge,
                     _ => MetricType.Gauge
                 };
 
-                var record = new MetricRecord(metricName, metricType, value, DateTime.UtcNow.Ticks);
+                var record = new MetricRecord(metricName, metricType, value, DateTime.UtcNow.Ticks, EventPipeTagPayload.Parse(tagPayload));
                 _store.Write(in record);
+                Interlocked.Increment(ref _recordsIngested);
             };
 
             using var reg = ct.Register(() => { try { session.Stop(); } catch { } });
             source.Process();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Volatile.Write(ref _lastError, ex);
+        }
         finally
         {
             session?.Dispose();
@@ -258,6 +306,7 @@ public sealed class EventPipeCollector : IDisposable
         foreach (var (name, type, value) in records)
         {
             _store.Write(new MetricRecord(name, type, value, now));
+            Interlocked.Increment(ref _recordsIngested);
         }
     }
 }

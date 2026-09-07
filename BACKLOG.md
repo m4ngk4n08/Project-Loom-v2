@@ -1251,6 +1251,63 @@ enumeration for free — which a `ConcurrentDictionary` does not.
 
 ---
 
+### 6.11 `SystemRuntimeCounters` Has Two Bugs That Currently Cancel Each Other 🟡 MEDIUM (OPEN — filed 2026-09-07)
+
+Found while building the EventPipe integration harness. **Neither is user-visible today, and
+that is precisely the hazard: fixing either one alone makes the other live.** Do not fix them
+separately.
+
+**Bug A — the `Mean` gate silently drops every `Sum`-type runtime counter.**
+`SystemRuntimeCounters.TryReadCounter` returns `null` unless the payload carries a `Mean`
+property. Counters the runtime publishes as `Increment` never have one, so they are rejected
+before `Classify` is ever consulted. Measured as affecting at least: `gen-0-gc-count`,
+`gen-1-gc-count`, `gen-2-gc-count`, `monitor-lock-contention-count`,
+`threadpool-completed-items-count`, `alloc-rate`, `exception-count`,
+`total-pause-time-by-gc`, `time-in-jit`.
+
+**Bug B — `Classify`'s counter list uses names the runtime does not publish.**
+It maps `gen-0-collection-count` / `gen-1-collection-count` / `gen-2-collection-count`, but
+.NET 10 publishes `gen-0-gc-count` etc. (`-gc-`, not `-collection-`). Those cases have never
+matched. The only two names in that list that do match live counters — `alloc-rate` and
+`exception-count` — are exactly the ones Bug A already drops.
+
+**Why they cancel.** Anything `Classify` would mistype as a `Counter` is already discarded by
+the `Mean` gate. Accepting `Increment` payloads (fixing A) would immediately route cumulative
+runtime counters into `InMemoryMetricStore.RecordCounterTotal`, which treats every `Counter`
+record as an increment — reproducing § 6.12's triangular-inflation bug against runtime
+counters. Fix A and B in one change, or neither.
+
+**Corroboration, not just assertion:** a harness run listing the `System.Runtime` names that
+actually reach the store showed `gc-heap-size`, `working-set`, `cpu-usage`, `gen-0-size`,
+`assembly-count`, `il-bytes-jitted`, `active-timer-count` and similar — and **no**
+`gen-0-gc-count` and no `gen-0-collection-count`, consistent with both bugs.
+
+---
+
+### 6.12 The Two EventPipe Ingest Parsers Are Hand-Synced Duplicates 🟡 MEDIUM (OPEN — filed 2026-09-07)
+
+`Loom.DevTools/Services/EventPipeCollector.cs` and
+`Loom.Dashboard.AspNetCore/EventPipeBridge.cs` carry near-identical payload-parsing logic —
+the same event-name table, the same value-field selection, the same tag read, the same
+`MetricRecord` construction. They have drifted before and have now been re-synced by hand
+four times in one session.
+
+**Evidence of real drift, not hypothetical:** before 2026-09-07 the bridge mapped
+`UpDownCounterValuePublished` and the collector did not. (That mapping turned out to be dead
+in both — see the decision log — but the divergence was real and nothing detected it.)
+
+**Why it matters more now.** The integration harness added on 2026-09-07 exercises only
+`EventPipeCollector`. `EventPipeBridge` — the path the dashboard actually uses — received
+every one of the same fixes with **zero test coverage**. The next divergence is silent again.
+
+**Shape of the fix:** lift the shared decision into a plain-value seam next to
+`EventPipeTagPayload` / `EventPipeLogPayload` in `Loom.Telemetry` — a function from event name
+and payload to `MetricRecord` fields, taking no `TraceEvent`, so it is unit-testable without a
+live session. Both call sites then read the payload and delegate. Deliberately not done in the
+same change as the fixes themselves, to keep the correctness fix reviewable on its own.
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)
@@ -2034,6 +2091,59 @@ install path.
 2. Package ID naming pass before any public push, since IDs are permanent.
 
 **Action:** None yet — no code or project files changed. Recorded ahead of implementation.
+
+---
+
+### 2026-09-07: The EventPipe Ingest Payload Was Never Measured Against a Live Session
+
+**Context:** an integration harness was built that starts a real child process
+(`Loom.TestFixtureApp`), attaches to it over EventPipe, and asserts on what comes back.
+Nothing in the previous 643 tests exercised a `DiagnosticsClient` attach at all.
+
+**What it found, in one sitting — four defects, all in code that had passed review by
+reading:**
+
+| Defect | Symptom before the fix |
+|---|---|
+| Tags never read off the wire | Every ingested series lost its dimensions |
+| Gauge value field unmatched (`lastValue`) | **Every gauge ingested as 0** |
+| Counter read the cumulative field, not `rate` | True total 30 reported as **105**; error compounds as ×(N+1)/2 |
+| `UpDownCounterValuePublished` misspelled | Mapping never matched; the runtime emits `UpDownCounterRateValuePublished` |
+
+**Root cause, common to all four:** the payload field names were written from expectation
+and never checked against a live session. The switch contained `Value`, `Mean` and `Rate`
+— capitalised — which match nothing the runtime emits and never have.
+
+**Decision:** the value field is now selected **by event type**, not by a flat list of
+candidate names. A flat list is not merely untidy here: several events carry more than one
+numeric field, the loop assigns on every match, and the last match silently wins. Adding
+`case "rate":` to the old switch would have compiled, looked correct, and changed nothing.
+
+**Measured semantics worth not rediscovering:**
+
+- `CounterRateValuePublished` carries `rate` (interval delta) **and** `value` (cumulative).
+  Summing `rate` reconstructs `value` exactly — measured 58 = 58. `rate` is correct here
+  because `InMemoryMetricStore`'s accumulator contract is increments.
+- `GaugeValuePublished` carries `lastValue`. `HistogramValuePublished` carries `quantiles`,
+  `count` and `sum`; only `sum` is used, deliberately.
+- `UpDownCounterRateValuePublished` carries the same `rate`/`value` pair. Loom reads
+  `value`: an up-down counter is ingested as a Gauge, a Gauge is exported as its newest
+  sample, and a level that stops moving publishes `rate=0` forever while `value` holds —
+  measured `rate=0 value=10` against a pool held at 10.
+- **Two runtime limitations no field choice can fix:** an up-down counter's `value` is
+  cumulative *within the session*, not since instrument creation; and an instrument with no
+  activity during a session is not reported by that session at all — attaching 15 s after
+  the level settled ingested zero records for it.
+
+**Method note, which is the durable lesson:** every one of the four was invisible to the
+build, to 643 passing tests, and to code review. Three were found by *measuring the payload*
+before writing code, and the fourth by *reverting each fix and confirming the test went red*
+— a step that caught a replacement test which passed under both the right and the wrong
+field because it asserted mid-ramp.
+
+**Follow-ups filed rather than folded in:** § 6.11 (`SystemRuntimeCounters`' two cancelling
+bugs) and § 6.12 (the two ingest parsers are hand-synced duplicates, and only one of them
+has tests).
 
 ---
 

@@ -69,11 +69,29 @@ public sealed class EventPipeCollector : IDisposable
     public void Stop()
     {
         _cts?.Cancel();
+
+        // Join the processing thread instead of only asking it to stop. Cancelling sets
+        // a flag; until CollectLoop returns, a "stopped" collector still owns an
+        // EventPipe session and an event-processing thread, still writing into a store
+        // the caller may already have disposed. _collectionTask was captured but never
+        // awaited, so nothing observed that thread's end.
+        //
+        // Bounded: a wedged session must never hang a CLI command, and Stop() is on the
+        // path DashboardCommand/WatchCommand/DevCommand take on shutdown.
+        try
+        {
+            _collectionTask?.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (AggregateException)
+        {
+            // The task is cancelled or faulted - CollectLoop already recorded anything
+            // worth reporting in LastError, and Stop() must not throw during teardown.
+        }
     }
 
     public void Dispose()
     {
-        _cts?.Cancel();
+        Stop();
         _cts?.Dispose();
     }
 

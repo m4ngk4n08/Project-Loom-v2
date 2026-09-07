@@ -186,14 +186,28 @@ public sealed class EventPipeCollector : IDisposable
                 // matched) carries the same rate/value shape as CounterRateValuePublished -
                 // measured against a live session with the fixture's up-down counter. It
                 // stays a Gauge (an up-down counter isn't monotonic, so this store's
-                // Counter-only accumulator is the wrong home for it), but its useful reading
-                // is still the interval delta, not the running total.
+                // Counter-only accumulator is the wrong home for it) and reads "value",
+                // NOT "rate": a gauge is exported as its newest sample, and once a level
+                // stops moving it publishes rate=0 every interval while value holds
+                // (measured: rate=0 value=10 against a pool held at 10). Reading "rate"
+                // would report a steady pool of 10 connections as 0.
+                //
+                // Two measured limitations of the runtime, NOT of this code, that no
+                // choice of field can fix. Both were observed directly:
+                //   - "value" is cumulative WITHIN THE SESSION, not since the instrument
+                //     was created. A session that attaches after the level settles sees
+                //     the change since it attached, not the absolute level.
+                //   - an up-down counter with no activity during a session is not
+                //     reported by that session at all: attaching 15s after the fixture
+                //     reached its plateau ingested zero records for it.
+                // Loom attaches for the life of the command, so the common case tracks
+                // the true level; a late attach to an idle instrument cannot.
                 var (metricType, valueField) = eventName switch
                 {
                     "CounterRateValuePublished" => (MetricType.Counter, "rate"),
                     "GaugeValuePublished" => (MetricType.Gauge, "lastValue"),
                     "HistogramValuePublished" => (MetricType.Histogram, "sum"),
-                    "UpDownCounterRateValuePublished" => (MetricType.Gauge, "rate"),
+                    "UpDownCounterRateValuePublished" => (MetricType.Gauge, "value"),
                     _ => (MetricType.Gauge, (string?)null)
                 };
 

@@ -18,7 +18,14 @@ using var cts = new CancellationTokenSource();
 // instrument, so this is picked up identically to a LoomMetrics.Record* call.
 using var meter = new Meter("Loom.Telemetry");
 var activeConnections = meter.CreateUpDownCounter<long>("fixture.active.connections");
-var connectionDelta = 1;
+
+// Ramps to a plateau and then HOLDS, rather than oscillating. Steady state is the only
+// case that distinguishes the two candidate value fields: once the level stops moving,
+// the event's "rate" is 0 forever while its "value" stays at the level. An oscillating
+// counter never holds still, so it cannot tell them apart - and a connection pool
+// sitting at a steady size is the ordinary case in a real workload, not an edge case.
+const int ConnectionPlateau = 5;
+var activeConnectionLevel = 0;
 
 void EmitOnce()
 {
@@ -26,8 +33,11 @@ void EmitOnce()
     LoomMetrics.RecordGauge("fixture.queue.depth", 10, new MetricTag("queue", "alpha"));
     LoomMetrics.RecordGauge("fixture.queue.depth", 20, new MetricTag("queue", "beta"));
     LoomMetrics.RecordHistogram("fixture.request.duration", 42.0, new MetricTag("route", "checkout"));
-    activeConnections.Add(connectionDelta, new KeyValuePair<string, object?>("pool", "primary"));
-    connectionDelta = -connectionDelta; // oscillates +1/-1 so the counter visibly moves both ways
+    if (activeConnectionLevel < ConnectionPlateau)
+    {
+        activeConnections.Add(1, new KeyValuePair<string, object?>("pool", "primary"));
+        activeConnectionLevel++;
+    }
     logger.LogInformation("fixture processed order {OrderId}", 4711);
     logger.LogError(new InvalidOperationException("fixture boom"), "fixture failed order {OrderId}", 4712);
 }

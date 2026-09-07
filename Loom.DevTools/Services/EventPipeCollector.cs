@@ -1,4 +1,5 @@
 using System.Diagnostics.Tracing;
+using System.Globalization;
 using Loom.Storage;
 using Loom.Telemetry;
 using Microsoft.Diagnostics.NETCore.Client;
@@ -21,6 +22,19 @@ public sealed class EventPipeCollector : IDisposable
     private readonly LogMessageParser _parser = new();
     private CancellationTokenSource? _cts;
     private Task? _collectionTask;
+    private long _recordsIngested;
+
+    /// <summary>
+    /// Set when CollectLoop's session terminates via exception (wrong PID, permission
+    /// failure, target exit, ...). Without this an empty store is indistinguishable from
+    /// "the target published nothing" - see CLAUDE.md, "a negative probe with invalid
+    /// input reads exactly like a clean bill of health."
+    /// </summary>
+    public Exception? LastError { get; private set; }
+
+    public bool IsFaulted => LastError is not null;
+
+    public long RecordsIngested => Interlocked.Read(ref _recordsIngested);
 
     // logStore is an APPENDED optional parameter, so every existing call site compiles
     // unchanged. When it is null the logging provider is not enabled at all - collecting
@@ -145,6 +159,7 @@ public sealed class EventPipeCollector : IDisposable
 
                 string? metricName = null;
                 double value = 0;
+                string? tagPayload = null;
 
                 for (int i = 0; i < payloadNames.Length; i++)
                 {
@@ -159,8 +174,12 @@ public sealed class EventPipeCollector : IDisposable
                         case "Rate":
                         case "value":
                         case "sum":
-                            if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), out var v))
+                        case "lastValue":
+                            if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
                                 value = v;
+                            break;
+                        case "tags":
+                            tagPayload = traceEvent.PayloadValue(i)?.ToString();
                             break;
                     }
                 }
@@ -172,17 +191,22 @@ public sealed class EventPipeCollector : IDisposable
                     "CounterRateValuePublished" => MetricType.Counter,
                     "GaugeValuePublished" => MetricType.Gauge,
                     "HistogramValuePublished" => MetricType.Histogram,
+                    "UpDownCounterValuePublished" => MetricType.Gauge,
                     _ => MetricType.Gauge
                 };
 
-                var record = new MetricRecord(metricName, metricType, value, DateTime.UtcNow.Ticks);
+                var record = new MetricRecord(metricName, metricType, value, DateTime.UtcNow.Ticks, EventPipeTagPayload.Parse(tagPayload));
                 _store.Write(in record);
+                Interlocked.Increment(ref _recordsIngested);
             };
 
             using var reg = ct.Register(() => { try { session.Stop(); } catch { } });
             source.Process();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            LastError = ex;
+        }
         finally
         {
             session?.Dispose();
@@ -258,6 +282,7 @@ public sealed class EventPipeCollector : IDisposable
         foreach (var (name, type, value) in records)
         {
             _store.Write(new MetricRecord(name, type, value, now));
+            Interlocked.Increment(ref _recordsIngested);
         }
     }
 }

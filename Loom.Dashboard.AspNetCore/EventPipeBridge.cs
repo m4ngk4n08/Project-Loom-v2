@@ -1,4 +1,5 @@
 using System.Diagnostics.Tracing;
+using System.Globalization;
 using Loom.Storage;
 using Loom.Telemetry;
 using Microsoft.Diagnostics.NETCore.Client;
@@ -148,6 +149,7 @@ public sealed class EventPipeBridge : BackgroundService
 
             string? metricName = null;
             double value = 0;
+            string? tagPayload = null;
             MetricType metricType = MetricType.Gauge;
 
             for (int i = 0; i < payloadNames.Length; i++)
@@ -163,8 +165,12 @@ public sealed class EventPipeBridge : BackgroundService
                     case "Rate":
                     case "value":
                     case "sum":
-                        if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), out var v))
+                    case "lastValue":
+                        if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
                             value = v;
+                        break;
+                    case "tags":
+                        tagPayload = traceEvent.PayloadValue(i)?.ToString();
                         break;
                 }
             }
@@ -184,7 +190,8 @@ public sealed class EventPipeBridge : BackgroundService
                 metricName,
                 metricType,
                 value,
-                DateTime.UtcNow.Ticks
+                DateTime.UtcNow.Ticks,
+                EventPipeTagPayload.Parse(tagPayload)
             );
             _store.Write(in record);
             Interlocked.Increment(ref _recordsIngested);

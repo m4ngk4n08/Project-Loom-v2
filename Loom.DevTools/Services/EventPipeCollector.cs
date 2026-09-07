@@ -163,43 +163,63 @@ public sealed class EventPipeCollector : IDisposable
                 var payloadNames = traceEvent.PayloadNames;
                 if (payloadNames == null) return;
 
+                // The value field is chosen BY EVENT TYPE, not by a flat set of alternative
+                // names: a single incoming "value" field means something different per event
+                // shape (CounterRateValuePublished's "rate" is a per-interval delta;
+                // GaugeValuePublished's "lastValue" is a point-in-time sample;
+                // HistogramValuePublished's "sum" is a summary total), and a name that
+                // happened to match more than one of those shapes would let whichever case
+                // came later in a flat switch silently win - the exact bug this rewrite
+                // replaces (see PROMPT-counter-rate-ingest.md). "rate"/"value"/"lastValue"/
+                // "sum" are the only four fields that carry a number on these events -
+                // verified against a live session - so nothing else could be captured here.
+                //
+                // Trade-off: summing per-interval "rate" deltas means a missed or dropped
+                // publish undercounts the total permanently, whereas re-reading the
+                // cumulative "value" would self-correct on the next publish. That is still
+                // the right choice here because InMemoryMetricStore's accumulator contract
+                // is increments, and it is monotonic - accepting occasional undercount on a
+                // dropped event beats guaranteed, unbounded overcount on every event.
+                //
+                // UpDownCounterRateValuePublished (not "UpDownCounterValuePublished" - that
+                // name was never emitted by the runtime and the mapping that used it never
+                // matched) carries the same rate/value shape as CounterRateValuePublished -
+                // measured against a live session with the fixture's up-down counter. It
+                // stays a Gauge (an up-down counter isn't monotonic, so this store's
+                // Counter-only accumulator is the wrong home for it), but its useful reading
+                // is still the interval delta, not the running total.
+                var (metricType, valueField) = eventName switch
+                {
+                    "CounterRateValuePublished" => (MetricType.Counter, "rate"),
+                    "GaugeValuePublished" => (MetricType.Gauge, "lastValue"),
+                    "HistogramValuePublished" => (MetricType.Histogram, "sum"),
+                    "UpDownCounterRateValuePublished" => (MetricType.Gauge, "rate"),
+                    _ => (MetricType.Gauge, (string?)null)
+                };
+
                 string? metricName = null;
                 double value = 0;
                 string? tagPayload = null;
 
                 for (int i = 0; i < payloadNames.Length; i++)
                 {
-                    switch (payloadNames[i])
+                    var payloadName = payloadNames[i];
+                    if (payloadName is "Name" or "instrumentName")
                     {
-                        case "Name":
-                        case "instrumentName":
-                            metricName = traceEvent.PayloadValue(i)?.ToString();
-                            break;
-                        case "Value":
-                        case "Mean":
-                        case "Rate":
-                        case "value":
-                        case "sum":
-                        case "lastValue":
-                            if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
-                                value = v;
-                            break;
-                        case "tags":
-                            tagPayload = traceEvent.PayloadValue(i)?.ToString();
-                            break;
+                        metricName = traceEvent.PayloadValue(i)?.ToString();
+                    }
+                    else if (payloadName == "tags")
+                    {
+                        tagPayload = traceEvent.PayloadValue(i)?.ToString();
+                    }
+                    else if (valueField != null && payloadName == valueField)
+                    {
+                        if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                            value = v;
                     }
                 }
 
                 if (metricName == null) return;
-
-                var metricType = eventName switch
-                {
-                    "CounterRateValuePublished" => MetricType.Counter,
-                    "GaugeValuePublished" => MetricType.Gauge,
-                    "HistogramValuePublished" => MetricType.Histogram,
-                    "UpDownCounterValuePublished" => MetricType.Gauge,
-                    _ => MetricType.Gauge
-                };
 
                 var record = new MetricRecord(metricName, metricType, value, DateTime.UtcNow.Ticks, EventPipeTagPayload.Parse(tagPayload));
                 _store.Write(in record);

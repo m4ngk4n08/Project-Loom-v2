@@ -173,6 +173,43 @@ public sealed class EventPipeHarnessTests : IClassFixture<FixtureProcess>
     }
 
     [Fact]
+    public async Task CounterTotal_ReflectsIntervalDeltas_NotCumulativeSum()
+    {
+        using var store = new InMemoryMetricStore();
+        using var collector = new EventPipeCollector(_fixture.Pid, store);
+
+        var sw = Stopwatch.StartNew();
+        collector.Start(CancellationToken.None);
+        await Task.Delay(TimeSpan.FromSeconds(8));
+        collector.Stop();
+        sw.Stop();
+
+        var elapsedSeconds = sw.Elapsed.TotalSeconds;
+
+        // Loom.TestFixtureApp increments fixture.orders.processed 5 times/second, so a
+        // correct ingest should land somewhere under elapsedSeconds * 5 (session
+        // attach takes a moment, so the collector always misses the first publish or
+        // two - measured 29 on an 8.1s window against a true ceiling of ~40.6). The
+        // bug this test guards against ingested the target's CUMULATIVE total once
+        // per ~1s publish and summed those totals into the accumulator, which grows
+        // triangularly: after N publishes the reported figure is roughly
+        // trueTotal * (N+1)/2 - measured 101 on the same 8.1s window, ~3.5x the true
+        // ceiling. 2x the true rate sits well clear of both measurements in either
+        // direction (comfortably above the correct ~29, comfortably below the buggy
+        // ~101), so this bound cannot pass by accident.
+        var upperBound = elapsedSeconds * 5 * 2;
+
+        var ordersTotal = store.GetCounterTotals().FirstOrDefault(t => t.MetricName == "fixture.orders.processed");
+
+        Assert.True(ordersTotal.MetricName != null,
+            $"No counter total recorded for fixture.orders.processed. collector.IsFaulted={collector.IsFaulted}, LastError={collector.LastError?.Message}, RecordsIngested={collector.RecordsIngested}");
+        Assert.True(ordersTotal.Total > 0, $"Counter total was not positive: {ordersTotal.Total}");
+        Assert.True(ordersTotal.Total <= upperBound,
+            $"Counter total {ordersTotal.Total} exceeds bound {upperBound:F1} (elapsed={elapsedSeconds:F1}s, true rate ~5/s so expected ~{elapsedSeconds * 5:F1}). " +
+            "This is the triangular-sum symptom of ingesting cumulative 'value' instead of per-interval 'rate'.");
+    }
+
+    [Fact]
     public async Task DeadPid_ReportsFailure_NotSilence()
     {
         var psi = new ProcessStartInfo("dotnet", "--version")

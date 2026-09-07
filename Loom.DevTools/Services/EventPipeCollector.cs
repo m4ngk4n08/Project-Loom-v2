@@ -23,14 +23,20 @@ public sealed class EventPipeCollector : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _collectionTask;
     private long _recordsIngested;
+    private Exception? _lastError;
 
     /// <summary>
     /// Set when CollectLoop's session terminates via exception (wrong PID, permission
     /// failure, target exit, ...). Without this an empty store is indistinguishable from
     /// "the target published nothing" - see CLAUDE.md, "a negative probe with invalid
     /// input reads exactly like a clean bill of health."
+    ///
+    /// Volatile because it is written on the collection thread and read by whichever
+    /// thread polls it. A plain field carries no ordering guarantee, so a poller can spin
+    /// on a cached null while the session is already dead - which is the exact silence
+    /// this property exists to break. RecordsIngested already gets this via Interlocked.
     /// </summary>
-    public Exception? LastError { get; private set; }
+    public Exception? LastError => Volatile.Read(ref _lastError);
 
     public bool IsFaulted => LastError is not null;
 
@@ -205,7 +211,7 @@ public sealed class EventPipeCollector : IDisposable
         }
         catch (Exception ex)
         {
-            LastError = ex;
+            Volatile.Write(ref _lastError, ex);
         }
         finally
         {

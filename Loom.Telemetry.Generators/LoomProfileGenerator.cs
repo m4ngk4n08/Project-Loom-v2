@@ -25,6 +25,26 @@ namespace Loom.Telemetry.Generators
         // that do this automatically - see Loom.Telemetry/build/LoomDiagnostics.Telemetry.props.
         internal const string InterceptorsNamespace = "Loom.Telemetry.GeneratedInterceptors";
 
+        // [LoomProfile] on a concrete class/struct method only intercepts calls that
+        // resolve directly to THAT method. A call made through an interface-typed
+        // reference resolves to the interface's method symbol instead, which carries no
+        // attribute unless the interface method itself is tagged - see PACKAGE.md's
+        // "Interfaces and dependency injection" section. That failure is otherwise
+        // silent: clean build, clean publish, no metrics. This diagnostic is the fix for
+        // the failure being undiscoverable - see PROMPT-interface-warning.md.
+        internal static readonly DiagnosticDescriptor InterfaceDispatchNotCoveredWarning = new(
+            id: "LOOM0001",
+            title: "LoomProfile does not intercept calls made through this interface",
+            messageFormat:
+                "[LoomProfile] on '{0}.{1}' will not intercept calls made through interface " +
+                "'{2}', because '{2}.{1}' does not itself carry [LoomProfile]. Add " +
+                "[LoomProfile] to '{2}.{1}' to cover calls made through that interface " +
+                "(dependency-injected callers typically call through the interface, not the " +
+                "concrete type).",
+            category: "Loom.Telemetry.Interceptors",
+            defaultSeverity: DiagnosticSeverity.Warning,
+            isEnabledByDefault: true);
+
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
             // Emit attributes
@@ -78,6 +98,11 @@ namespace Loom.Telemetry.Generators
             // Generate profiled wrappers
             context.RegisterSourceOutput(profiledMethods, static (spc, methods) =>
             {
+                foreach (var method in methods)
+                {
+                    ReportInterfaceDispatchWarningIfNeeded(spc, method!);
+                }
+
                 foreach (var group in methods.GroupBy(m => m!.ContainingType))
                 {
                     var source = GenerateProfiledWrappers(group.Key, group.ToList()!);
@@ -112,6 +137,13 @@ namespace Loom.Telemetry.Generators
                 .FirstOrDefault(kv => kv.Key == "Name")
                 .Value.Value as string;
 
+            // Prefer the attribute's own location so the interface-dispatch warning
+            // (Phase 1, PROMPT-interface-warning.md) lands on the [LoomProfile] tag
+            // itself; fall back to the method's name if the attribute syntax is
+            // unavailable for any reason.
+            var diagnosticLocation = attribute?.ApplicationSyntaxReference?.GetSyntax().GetLocation()
+                ?? method.Identifier.GetLocation();
+
             return new MethodInfo
             {
                 Method = method,
@@ -121,8 +153,54 @@ namespace Loom.Telemetry.Generators
                 IsAsync = symbol.IsAsync,
                 ReturnsVoid = symbol.ReturnsVoid,
                 ReturnType = symbol.ReturnType.ToDisplayString(),
-                IsStatic = symbol.IsStatic
+                IsStatic = symbol.IsStatic,
+                DiagnosticLocation = diagnosticLocation
             };
+        }
+
+        /// <summary>
+        /// Phase 1 of PROMPT-interface-warning.md: [LoomProfile] on a concrete method
+        /// only intercepts calls that resolve directly to it. A call made through an
+        /// interface reference resolves to the interface's own method symbol, which
+        /// carries no attribute unless tagged separately - and that failure is
+        /// otherwise silent. Warns when ALL of:
+        ///   - the tagged method is declared on a class or struct (not an interface -
+        ///     tagging the interface method directly is the documented fix and must
+        ///     stay silent);
+        ///   - the containing type implements an interface whose member this method
+        ///     implements;
+        ///   - that interface member does NOT itself carry [LoomProfile] (a
+        ///     correctly-tagged interface method must not also warn here).
+        /// </summary>
+        private static void ReportInterfaceDispatchWarningIfNeeded(SourceProductionContext spc, MethodInfo info)
+        {
+            var symbol = info.Symbol;
+            var containingType = symbol.ContainingType;
+
+            if (containingType.TypeKind != TypeKind.Class && containingType.TypeKind != TypeKind.Struct)
+                return;
+
+            foreach (var iface in containingType.AllInterfaces)
+            {
+                foreach (var interfaceMember in iface.GetMembers().OfType<IMethodSymbol>())
+                {
+                    var implementation = containingType.FindImplementationForInterfaceMember(interfaceMember);
+                    if (!SymbolEqualityComparer.Default.Equals(implementation, symbol))
+                        continue;
+
+                    var interfaceMemberIsTagged = interfaceMember.GetAttributes()
+                        .Any(a => a.AttributeClass?.ToDisplayString() == "Loom.Telemetry.LoomProfileAttribute");
+                    if (interfaceMemberIsTagged)
+                        continue;
+
+                    spc.ReportDiagnostic(Diagnostic.Create(
+                        InterfaceDispatchNotCoveredWarning,
+                        info.DiagnosticLocation,
+                        containingType.Name,
+                        symbol.Name,
+                        iface.ToDisplayString()));
+                }
+            }
         }
 
         /// <summary>
@@ -545,6 +623,7 @@ namespace Loom.Telemetry
             public bool ReturnsVoid { get; init; }
             public string ReturnType { get; init; } = null!;
             public bool IsStatic { get; init; }
+            public Location DiagnosticLocation { get; init; } = Location.None;
         }
 
         private sealed class PropertyInfo

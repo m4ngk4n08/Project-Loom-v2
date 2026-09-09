@@ -42,6 +42,13 @@ public sealed class EventPipeCollector : IDisposable
 
     public long RecordsIngested => Interlocked.Read(ref _recordsIngested);
 
+    /// <summary>
+    /// Completes when CollectLoop returns — the session ended, the target exited, or it
+    /// faulted. A caller that streams from a store subscription needs this: nothing else
+    /// completes the subscriber channel, so without it a dead session reads as an idle one.
+    /// </summary>
+    public Task Completion => _collectionTask ?? Task.CompletedTask;
+
     // logStore is an APPENDED optional parameter, so every existing call site compiles
     // unchanged. When it is null the logging provider is not enabled at all - collecting
     // Microsoft-Extensions-Logging at Verbose serializes every log event in the target

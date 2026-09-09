@@ -49,6 +49,13 @@ public static class WatchCommand
         using var collector = new EventPipeCollector(pid, store);
         collector.Start(ct);
 
+        // Nothing else completes the subscriber channel. Without this, a session that never
+        // started (bad PID, permission) or that has ended (target exited) leaves the loop
+        // below parked forever printing nothing — which is exactly what the pre-fold code
+        // did NOT do: it reported the error and exited. Disposing the store completes every
+        // subscriber channel, which ends the ReadAllAsync loop cleanly.
+        _ = collector.Completion.ContinueWith(_ => store.Dispose(), TaskScheduler.Default);
+
         try
         {
             await foreach (var record in reader.ReadAllAsync(ct))
@@ -63,6 +70,15 @@ public static class WatchCommand
         finally
         {
             store.Unsubscribe(reader);
+        }
+
+        if (!ct.IsCancellationRequested && collector.LastError is { } error)
+        {
+            // Distinguish "never attached" from "attached, then the target went away" —
+            // both surface here as an exception, but only the first is a user error.
+            Console.Error.WriteLine(collector.RecordsIngested == 0
+                ? $"Failed to attach to process {pid}: {error.Message}"
+                : $"Session ended: {error.Message}");
         }
 
         Console.WriteLine("\nStopped.");

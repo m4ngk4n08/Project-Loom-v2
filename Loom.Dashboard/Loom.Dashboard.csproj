@@ -33,6 +33,10 @@
     <ProjectReference Include="..\Loom.Dashboard.AspNetCore\Loom.Dashboard.AspNetCore.csproj" />
     <ProjectReference Include="..\Loom.Security\Loom.Security.csproj" />
     <ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
+    <!-- The library no longer references this - see PROMPT-assist-inversion.md and
+         BACKLOG.md 11.2 (Assist must never be in the default install path). This tool
+         opts in explicitly and performs the wiring the library used to do. -->
+    <ProjectReference Include="..\Loom.Telemetry.Assist\Loom.Telemetry.Assist.csproj" />
     <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>

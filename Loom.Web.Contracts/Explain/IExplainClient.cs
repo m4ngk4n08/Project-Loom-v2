@@ -1,4 +1,4 @@
-namespace Loom.Telemetry.Assist;
+namespace Loom.Web.Contracts.Explain;
 
 public sealed record ExplainResult(string Explanation, string ModelUsed, string SentText, int InputTokens, int OutputTokens);
 

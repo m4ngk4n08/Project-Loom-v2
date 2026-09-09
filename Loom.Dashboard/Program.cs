@@ -2,7 +2,9 @@ using Loom.Dashboard;
 using Loom.Dashboard.Extensions;
 using Loom.Security;
 using Loom.Storage;
+using Loom.Telemetry.Assist;
 using Loom.Web.Contracts;
+using Loom.Web.Contracts.Explain;
 using Microsoft.Extensions.FileProviders;
 using System.Diagnostics;
 using System.Net;
@@ -117,6 +119,18 @@ catch (InvalidOperationException ex)
     Console.Error.WriteLine("  Windows dev setup:  loom auth init");
     Console.Error.WriteLine($"  Then set {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable}.");
     return 1;
+}
+
+// The explain feature is absent, not broken, without a key: FromEnvironment returns
+// null, nothing is registered, and the dashboard library's own endpoint gate (which
+// checks the service provider for a registered IExplainClient, not any Anthropic-
+// specific configuration) never maps the route. This is the one Anthropic-specific
+// wiring point in the whole tool - the library itself has no reference to Assist.
+var assistOptions = AssistOptions.FromEnvironment();
+if (assistOptions is not null)
+{
+    builder.Services.AddSingleton(assistOptions);
+    builder.Services.AddHttpClient<IExplainClient, AnthropicExplainClient>();
 }
 
 // Kestrel config

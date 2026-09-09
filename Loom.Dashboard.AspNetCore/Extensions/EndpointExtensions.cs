@@ -8,14 +8,15 @@ using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Alerting.Interfaces;
-using Loom.Telemetry.Assist;
 using Loom.Telemetry.Exporters;
 using Loom.Telemetry.Exporters.Prometheus;
 using Loom.Telemetry.Query;
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
+using Loom.Web.Contracts.Explain;
 using Loom.Web.RealTime;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 
@@ -228,7 +229,7 @@ namespace Loom.Dashboard.Extensions
             return api;
         }
 
-        private static RouteGroupBuilder MapLogEndpoints(this RouteGroupBuilder api)
+        internal static RouteGroupBuilder MapLogEndpoints(this RouteGroupBuilder api)
         {
             api.MapGet("/logs", (int? count, string? category, ILogStore store) =>
             {
@@ -320,9 +321,13 @@ namespace Loom.Dashboard.Extensions
             .WithName("SearchLogs")
             .Produces<DiagnosticSearchResponse>(200);
 
-            // Mapped only when configured. An unconfigured deployment returns 404 from the
-            // router rather than 501 from a handler - there is no endpoint, not a disabled one.
-            if (AssistOptions.FromEnvironment() is not null)
+            // Mapped only when the host has registered an IExplainClient. This library has no
+            // Anthropic (or any provider) reference at all - the host decides whether the
+            // feature exists by what it puts in the container, and this checks the built
+            // service provider directly rather than any provider-specific configuration.
+            // An unconfigured deployment returns 404 from the router rather than 501 from a
+            // handler - there is no endpoint, not a disabled one.
+            if (((IEndpointRouteBuilder)api).ServiceProvider.GetService<IExplainClient>() is not null)
             {
                 api.MapPost("/logs/explain", async (
                     ExplainRequest request,

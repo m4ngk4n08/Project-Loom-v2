@@ -14,4 +14,13 @@
          under the unreserved Loom. prefix (11.7). -->
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- IExplainClient, ExplainResult, ExplainPayload, ExplainPayloadBuilder live here -
+         the provider-neutral half of the Explain feature, moved out of this project so
+         Loom.Dashboard.AspNetCore can depend on the abstraction without dragging in this
+         project's Anthropic-specific implementation. See PROMPT-assist-inversion.md and
+         BACKLOG.md 11.2. -->
+    <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
+  </ItemGroup>
 </Project>

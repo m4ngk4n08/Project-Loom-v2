@@ -1,16 +1,103 @@
 using Loom.DevTools.Rendering;
+using Loom.DevTools.Services;
+using Loom.Storage;
 using Loom.Telemetry;
 using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Diagnostics.Tracing;
-using Microsoft.Diagnostics.Tracing.Parsers;
 using Spectre.Console;
 using System.Diagnostics.Tracing;
+using System.Threading.Channels;
 
 namespace Loom.DevTools.Commands;
 
 public static class WatchCommand
 {
     public static async Task RunAsync(int pid, bool raw, CancellationToken ct)
+    {
+        if (raw)
+        {
+            await RunRawAsync(pid, ct);
+            return;
+        }
+
+        Console.WriteLine($"Watching Loom.Telemetry metrics from process {pid}...\n");
+        Console.WriteLine("Press Ctrl+C to stop.\n");
+
+        // Each record renders as exactly one line - a streaming log, not a layout that
+        // benefits from wrapping. Without this, Spectre's own width detection (which falls
+        // back to a narrow default whenever output is redirected - to a file, to `grep`, to
+        // anything other than a live terminal) wraps a tagged line's "[key=value]" suffix
+        // onto its own line, splitting one record into two. Measured directly: adding tag
+        // rendering below made lines long enough to trigger this for the first time.
+        AnsiConsole.Profile.Width = 4096;
+
+        // Formatted mode uses the same shared, tested parser as `loom explore` -
+        // EventPipeCollector - instead of the private payload switch this command used to
+        // carry. That private copy was the pre-2026-09-07 shape (case "Value"/"Mean"/"Rate"
+        // instead of the runtime's actual "lastValue" for gauges), had no "tags" case at
+        // all, and read a counter's cumulative "value" instead of its per-interval "rate".
+        // Every gauge - including this process's own loom.telemetry.up heartbeat - showed 0
+        // forever as a result. See PROMPT-watch-parser.md and BACKLOG.md 6.12.
+        //
+        // EventPipeCollector also enables the System.Runtime provider, so real .NET runtime
+        // counters (cpu-usage, gc-heap-size, ...) now stream here too - they did not before,
+        // since the old private session only enabled "System.Diagnostics.Metrics". This is a
+        // visible behaviour change, not a silent one: `loom explore` already shows the same
+        // runtime counters, so watch now matches it instead of being the odd one out.
+        var store = new InMemoryMetricStore();
+        var reader = store.Subscribe();
+        using var collector = new EventPipeCollector(pid, store);
+        collector.Start(ct);
+
+        try
+        {
+            await foreach (var record in reader.ReadAllAsync(ct))
+            {
+                PrintFormattedRecord(record);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when Ctrl+C is pressed
+        }
+        finally
+        {
+            store.Unsubscribe(reader);
+        }
+
+        Console.WriteLine("\nStopped.");
+    }
+
+    private static void PrintFormattedRecord(MetricRecord record)
+    {
+        var color = Hex(ColorForType(record.Type));
+        var dim = Hex(LoomTheme.Dim);
+        var typeLabel = record.Type.ToString().PadRight(10);
+        var tagsSuffix = record.Tags is { Length: > 0 }
+            ? $" [{dim}]{Markup.Escape("[" + string.Join(", ", record.Tags.Select(t => t.ToString())) + "]")}[/]"
+            : string.Empty;
+
+        AnsiConsole.MarkupLine(
+            $"[{dim}]{record.TimestampUtc.ToLocalTime():T}[/]  [{color}]{typeLabel}[/] " +
+            $"{Markup.Escape(record.Name)} = {UnitFormatter.Format(record.Name, record.Value)}{tagsSuffix}");
+    }
+
+    private static Color ColorForType(MetricType type) => type switch
+    {
+        MetricType.Gauge => LoomTheme.Series(0),
+        MetricType.Counter => LoomTheme.Series(1),
+        MetricType.Histogram => LoomTheme.Series(2),
+        MetricType.MethodExecution => LoomTheme.Series(3),
+        _ => LoomTheme.Dim,
+    };
+
+    private static string Hex(Color color) => $"#{color.ToHex()}";
+
+    // --raw keeps its own EventPipe session, deliberately: it dumps every payload field
+    // verbatim, which is its whole purpose and which EventPipeCollector's parsing would
+    // only get in the way of. It has no value-field switch to get wrong, so there is
+    // nothing here that can drift out of sync the way the formatted path did.
+    private static async Task RunRawAsync(int pid, CancellationToken ct)
     {
         Console.WriteLine($"Watching Loom.Telemetry metrics from process {pid}...\n");
         Console.WriteLine("Press Ctrl+C to stop.\n");
@@ -51,17 +138,11 @@ public static class WatchCommand
                 if (eventName.Contains("Collection") || eventName.Contains("ProcessInfo"))
                     return;
 
-                if (raw)
-                {
-                    var payloadNames = traceEvent.PayloadNames;
-                    var fields = payloadNames != null
-                        ? string.Join(", ", payloadNames.Select((n, i) => $"{n}={traceEvent.PayloadValue(i)}"))
-                        : "(no payloads)";
-                    Console.WriteLine($"[{DateTime.Now:T}] {eventName}: {fields}");
-                    return;
-                }
-
-                PrintFormattedEvent(eventName, traceEvent);
+                var payloadNames = traceEvent.PayloadNames;
+                var fields = payloadNames != null
+                    ? string.Join(", ", payloadNames.Select((n, i) => $"{n}={traceEvent.PayloadValue(i)}"))
+                    : "(no payloads)";
+                Console.WriteLine($"[{DateTime.Now:T}] {eventName}: {fields}");
             };
 
             // Register cancellation to stop the session
@@ -109,67 +190,4 @@ public static class WatchCommand
 
         Console.WriteLine("\nStopped.");
     }
-
-    /// <summary>
-    /// Only ValuePublished events carry metric data; BeginInstrumentReporting and
-    /// friends are metadata-only and are ignored, same as EventPipeCollector.
-    /// </summary>
-    private static void PrintFormattedEvent(string eventName, TraceEvent traceEvent)
-    {
-        if (!eventName.Contains("ValuePublished"))
-            return;
-
-        var payloadNames = traceEvent.PayloadNames;
-        if (payloadNames == null) return;
-
-        string? metricName = null;
-        double value = 0;
-
-        for (var i = 0; i < payloadNames.Length; i++)
-        {
-            switch (payloadNames[i])
-            {
-                case "Name":
-                case "instrumentName":
-                    metricName = traceEvent.PayloadValue(i)?.ToString();
-                    break;
-                case "Value":
-                case "Mean":
-                case "Rate":
-                case "value":
-                case "sum":
-                    if (double.TryParse(traceEvent.PayloadValue(i)?.ToString(), out var v))
-                        value = v;
-                    break;
-            }
-        }
-
-        if (metricName == null) return;
-
-        var metricType = eventName switch
-        {
-            "CounterRateValuePublished" => MetricType.Counter,
-            "GaugeValuePublished" => MetricType.Gauge,
-            "HistogramValuePublished" => MetricType.Histogram,
-            _ => MetricType.Gauge
-        };
-
-        var color = Hex(ColorForType(metricType));
-        var dim = Hex(LoomTheme.Dim);
-        var typeLabel = metricType.ToString().PadRight(10);
-
-        AnsiConsole.MarkupLine(
-            $"[{dim}]{DateTime.Now:T}[/]  [{color}]{typeLabel}[/] {Markup.Escape(metricName)} = {UnitFormatter.Format(metricName, value)}");
-    }
-
-    private static Color ColorForType(MetricType type) => type switch
-    {
-        MetricType.Gauge => LoomTheme.Series(0),
-        MetricType.Counter => LoomTheme.Series(1),
-        MetricType.Histogram => LoomTheme.Series(2),
-        MetricType.MethodExecution => LoomTheme.Series(3),
-        _ => LoomTheme.Dim,
-    };
-
-    private static string Hex(Color color) => $"#{color.ToHex()}";
 }

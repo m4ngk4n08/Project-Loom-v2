@@ -1328,6 +1328,17 @@ in both — see the decision log — but the divergence was real and nothing det
 `EventPipeCollector`. `EventPipeBridge` — the path the dashboard actually uses — received
 every one of the same fixes with **zero test coverage**. The next divergence is silent again.
 
+**Correction (PROMPT-watch-parser.md):** the heading above undercounted. There were **three**
+parsers, not two — `Loom.DevTools/Commands/WatchCommand.cs` carried its own private copy,
+independent of `EventPipeCollector`, and it was the one that shipped a live bug to users: every
+gauge `loom watch` displayed read `0` (the exact pre-2026-09-07 shape — `case "Value"/"Mean"/
+"Rate"` instead of the runtime's actual `lastValue`), tags were dropped entirely, and counters
+read the cumulative `value` instead of the per-interval `rate`. `WatchCommand` has now been
+folded into the shared path — it constructs an `EventPipeCollector`/`InMemoryMetricStore` and
+subscribes to the store, the same shape `ExploreCommand` already used — so it carries no
+parsing of its own left to drift. This entry stays **open**: `EventPipeCollector` and
+`EventPipeBridge` are still duplicates of each other.
+
 **Shape of the fix:** lift the shared decision into a plain-value seam next to
 `EventPipeTagPayload` / `EventPipeLogPayload` in `Loom.Telemetry` — a function from event name
 and payload to `MetricRecord` fields, taking no `TraceEvent`, so it is unit-testable without a

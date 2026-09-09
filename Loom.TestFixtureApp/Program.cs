@@ -19,13 +19,44 @@ using var cts = new CancellationTokenSource();
 using var meter = new Meter("Loom.Telemetry");
 var activeConnections = meter.CreateUpDownCounter<long>("fixture.active.connections");
 
-// Ramps to a plateau and then HOLDS, rather than oscillating. Steady state is the only
-// case that distinguishes the two candidate value fields: once the level stops moving,
-// the event's "rate" is 0 forever while its "value" stays at the level. An oscillating
-// counter never holds still, so it cannot tell them apart - and a connection pool
-// sitting at a steady size is the ordinary case in a real workload, not an edge case.
-const int ConnectionPlateau = 5;
+// Ramps to a starting level, then keeps climbing slowly and monotonically forever. This
+// replaced a plain ramp-and-hold that went silent forever once it reached the plateau
+// (see PROMPT-fixture-heartbeat.md) - a session attaching after that point saw NOTHING
+// for this instrument, measured as zero ingested records, because an up-down counter
+// with no activity during a session's window is not reported by that session at all.
+//
+// A "dip one, recover it immediately" heartbeat was tried first and measured NOT to
+// work: EventPipe's UpDownCounterRateValuePublished "value" field is cumulative WITHIN
+// THE SESSION, meaning it sums only the Add() calls a given session has observed since
+// IT attached, not the instrument's absolute level. A dip and its immediate recovery net
+// to zero, so a session attaching at any point after the ramp measured a "value" of 0 -
+// invisible in a different, more misleading way than the original bug, since a
+// downstream reader can't tell a genuine zero level from an instrument nobody's watched
+// long enough. A one-way, monotonic climb is the only shape where a session's own
+// since-attach cumulative total is guaranteed positive and growing regardless of when it
+// attaches.
+//
+// Two requirements pull against each other:
+//   - there must ALWAYS be activity, so a session attaching at any time reports the
+//     instrument at all, and accumulates a positive "value" within its own window;
+//   - the step size must stay small enough that the interval "rate" (the delta since the
+//     last ~1s publish) never approaches the ">= 3" threshold the ingest tests assert on
+//     - otherwise reading "rate" instead of "value" would ALSO pass, and the tests would
+//     stop discriminating between the two fields. See EventPipeUpDownCounterTests /
+//     EventPipeBridgeUpDownCounterTests for those assertions, and
+//     PROMPT-fixture-heartbeat.md Phase 3 for the sabotage checks that prove reading the
+//     wrong field still fails both.
+// One +1 every 8 ticks (1.6s at this loop's 200ms rate) guarantees at least 4 increments
+// land inside ANY 8-second collection window (floor(8s / 1.6s)), so a late-attaching
+// session's own "value" is safely >= 3 well before such a window closes, while the 1.6s
+// spacing - wider than the ~1s aggregation interval - means at most one increment can
+// ever land inside a single published interval, so "rate" never exceeds 1. The level
+// itself never goes below its InitialLevel of 5 (it only ever climbs), clear of the ">=
+// 3" floor the existing tests need.
+const int InitialLevel = 5;
+const int ClimbEveryNTicks = 8;
 var activeConnectionLevel = 0;
+var ticksSinceClimb = 0;
 
 void EmitOnce()
 {
@@ -33,11 +64,20 @@ void EmitOnce()
     LoomMetrics.RecordGauge("fixture.queue.depth", 10, new MetricTag("queue", "alpha"));
     LoomMetrics.RecordGauge("fixture.queue.depth", 20, new MetricTag("queue", "beta"));
     LoomMetrics.RecordHistogram("fixture.request.duration", 42.0, new MetricTag("route", "checkout"));
-    if (activeConnectionLevel < ConnectionPlateau)
+
+    var connectionTag = new KeyValuePair<string, object?>("pool", "primary");
+    if (activeConnectionLevel < InitialLevel)
     {
-        activeConnections.Add(1, new KeyValuePair<string, object?>("pool", "primary"));
+        activeConnections.Add(1, connectionTag);
         activeConnectionLevel++;
     }
+    else if (++ticksSinceClimb >= ClimbEveryNTicks)
+    {
+        activeConnections.Add(1, connectionTag);
+        activeConnectionLevel++;
+        ticksSinceClimb = 0;
+    }
+
     logger.LogInformation("fixture processed order {OrderId}", 4711);
     logger.LogError(new InvalidOperationException("fixture boom"), "fixture failed order {OrderId}", 4712);
 }

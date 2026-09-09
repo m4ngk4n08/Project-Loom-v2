@@ -142,8 +142,18 @@ public sealed class EventPipeBridgeTests : IClassFixture<FixtureProcess>
         // implementation. Collect for a fixed window and assert on the settled state.
         var sw = Stopwatch.StartNew();
         await bridge.StartAsync(CancellationToken.None);
-        await Task.Delay(TimeSpan.FromSeconds(8));
-        await bridge.StopAsync(CancellationToken.None);
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(8));
+        }
+        finally
+        {
+            // In a finally like every other test in these two files: without it, a
+            // throw between Start and Stop leaves a BackgroundService holding an
+            // EventPipe session for the rest of the run, against a fixture process
+            // that later tests share.
+            await bridge.StopAsync(CancellationToken.None);
+        }
         sw.Stop();
 
         var elapsedSeconds = sw.Elapsed.TotalSeconds;

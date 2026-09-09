@@ -26,7 +26,7 @@ code that acts on them.
 ```csharp
 using Loom.Telemetry;
 
-public partial class OrderService
+public class OrderService
 {
     [LoomProfile(Name = "Order.Submit")]
     public void Submit(Order order)
@@ -36,9 +36,7 @@ public partial class OrderService
 }
 ```
 
-**The class must be `partial`.** The generator emits the recording helpers into a second
-declaration of your class, so a non-partial class fails to compile with `CS0260`. It cannot
-be `sealed` and non-partial. `Name` is optional and defaults to `ClassName.MethodName`.
+`Name` is optional and defaults to `ClassName.MethodName`.
 
 To collect what the wrappers record, register the runtime in any
 `IServiceCollection`-based host:
@@ -51,6 +49,11 @@ The `options` callback is currently required and `LoomTelemetryOptions` has no s
 yet, so an empty lambda is the correct call today.
 
 `[LoomTrack]` does the same for a property, recording a metric whenever its value changes.
+**Unlike `[LoomProfile]`, the class must be `partial`** for `[LoomTrack]`: its generator
+emits the tracked property into a second declaration of your class, so a non-partial
+class fails to compile with `CS0260`. It cannot be `sealed` and non-partial.
+`[LoomProfile]` has not needed `partial` since the interceptor work of 2026-09-07 — it
+intercepts existing call sites directly rather than emitting into your class.
 
 ### Interfaces and dependency injection
 
@@ -77,6 +80,10 @@ Tag whichever one matches how your code actually calls it — the interface meth
 DI-resolved calls, the concrete method for direct calls on the concrete type. Tagging
 both is safe if your code genuinely calls it both ways; each tagged declaration only
 affects calls that resolve to it.
+
+Tagging only the concrete method when its containing type implements an interface
+raises **`LOOM0001`**: a warning naming the interface and the fix (tag the interface
+member too). It stays silent once the interface member itself carries `[LoomProfile]`.
 
 ## What is in this package
 

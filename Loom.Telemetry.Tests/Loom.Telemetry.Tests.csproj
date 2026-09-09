@@ -26,6 +26,10 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<!-- Pinned to the exact version Loom.Telemetry.Generators.csproj pins, so
+		     GeneratorTests exercises LoomProfileGenerator against the same compiler
+		     surface it will actually run under. -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
 		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
 		<PackageReference Include="xunit" Version="2.9.0" />
 		<PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
@@ -44,7 +48,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\Loom.Security\Loom.Security.csproj" />
 		<ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
-		<ProjectReference Include="..\Loom.Telemetry.Generators\Loom.Telemetry.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\Loom.Telemetry.Generators\Loom.Telemetry.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
 	  <ProjectReference Include="..\Loom.Telemetry.Query\Loom.Telemetry.Query.csproj" />
 	  <ProjectReference Include="..\Loom.Telemetry\Loom.Telemetry.csproj" />
 	  <ProjectReference Include="..\Loom.Telemetry.Alerting\Loom.Telemetry.Alerting.csproj" />

@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Text.Json;
 using Loom.Storage;
 using Loom.Telemetry;
 using Xunit;
@@ -84,16 +85,27 @@ public sealed class SystemRuntimeCountersTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData("not json at all")]
     [InlineData("""{ "Payload": { "NoNameHere": true, "Mean": 1 } }""")]
     [InlineData("""{ "Payload": { "Name": "cpu-usage" } }""")]
     [InlineData("""{ "Payload": "not an object" }""")]
     [InlineData("""[ { "Name": "cpu-usage" } ]""")]
     [InlineData("[ 1, 2, 3 ]")]
-    public void Parse_MalformedOrIncompletePayload_YieldsNoRecords_NeverThrows(string json)
+    public void Parse_WellFormedButUnrecognisedPayload_YieldsNoRecords(string json)
     {
         var records = SystemRuntimeCounters.Parse(json).ToArray();
 
         Assert.Empty(records);
+    }
+
+    [Fact]
+    public void Parse_NonJsonText_Throws_SoTheCallerCanLogIt()
+    {
+        // Deliberately NOT swallowed. Both call sites wrap Parse in a try/catch that
+        // logs the failure (EventPipeCollector.IngestEventCounters, EventPipeBridge),
+        // and neither lets it reach the session. Returning empty here instead would
+        // leave those handlers as dead code and turn a logged failure into zero
+        // records with no explanation - indistinguishable from a target that simply
+        // published nothing.
+        Assert.ThrowsAny<JsonException>(() => SystemRuntimeCounters.Parse("not json at all").ToArray());
     }
 }

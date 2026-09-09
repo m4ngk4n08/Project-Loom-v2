@@ -30,55 +30,43 @@ public static class SystemRuntimeCounters
     public static IEnumerable<(string Name, MetricType Type, double Value)> Parse(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
-            return Array.Empty<(string, MetricType, double)>();
+            yield break;
 
-        // Parsed outside the iterator: yield return cannot appear inside a try block
-        // that has a catch clause, and truly malformed (non-JSON) text must be skipped,
-        // never thrown - same tolerance TryReadCounter already gives a well-formed but
-        // unrecognized payload shape.
-        JsonDocument doc;
-        try
+        // Malformed JSON throws out of here on purpose. Both call sites already wrap this
+        // in a try/catch that LOGS the failure - EventPipeCollector.IngestEventCounters
+        // writes "EventCounters parse failed", EventPipeBridge logs a warning - and
+        // neither lets it reach the session. Swallowing it here would keep the callers
+        // compiling while making their handlers dead code, turning a logged failure into
+        // zero records and no explanation. That is the failure mode this file's own
+        // history is made of: a bad payload must not read like a target with nothing to
+        // say. Unrecognised-but-well-formed payloads are a different case and are still
+        // skipped silently, by TryReadCounter.
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Payload", out var payloadObj))
         {
-            doc = JsonDocument.Parse(json);
-        }
-        catch (JsonException)
-        {
-            return Array.Empty<(string, MetricType, double)>();
-        }
-
-        return ParseDocument(doc);
-    }
-
-    private static IEnumerable<(string Name, MetricType Type, double Value)> ParseDocument(JsonDocument doc)
-    {
-        using (doc)
-        {
-            var root = doc.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Payload", out var payloadObj))
-            {
-                var counter = payloadObj;
-                if (counter.ValueKind != JsonValueKind.Object)
-                    yield break;
-
-                var parsed = TryReadCounter(counter);
-                if (parsed is not null)
-                    yield return parsed.Value;
-                yield break;
-            }
-
-            if (root.ValueKind != JsonValueKind.Array)
+            var counter = payloadObj;
+            if (counter.ValueKind != JsonValueKind.Object)
                 yield break;
 
-            foreach (var counter in root.EnumerateArray())
-            {
-                if (counter.ValueKind != JsonValueKind.Object)
-                    continue;
+            var parsed = TryReadCounter(counter);
+            if (parsed is not null)
+                yield return parsed.Value;
+            yield break;
+        }
 
-                var parsed = TryReadCounter(counter);
-                if (parsed is not null)
-                    yield return parsed.Value;
-            }
+        if (root.ValueKind != JsonValueKind.Array)
+            yield break;
+
+        foreach (var counter in root.EnumerateArray())
+        {
+            if (counter.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var parsed = TryReadCounter(counter);
+            if (parsed is not null)
+                yield return parsed.Value;
         }
     }
 

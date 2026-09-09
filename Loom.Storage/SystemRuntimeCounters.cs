@@ -32,6 +32,15 @@ public static class SystemRuntimeCounters
         if (string.IsNullOrWhiteSpace(json))
             yield break;
 
+        // Malformed JSON throws out of here on purpose. Both call sites already wrap this
+        // in a try/catch that LOGS the failure - EventPipeCollector.IngestEventCounters
+        // writes "EventCounters parse failed", EventPipeBridge logs a warning - and
+        // neither lets it reach the session. Swallowing it here would keep the callers
+        // compiling while making their handlers dead code, turning a logged failure into
+        // zero records and no explanation. That is the failure mode this file's own
+        // history is made of: a bad payload must not read like a target with nothing to
+        // say. Unrecognised-but-well-formed payloads are a different case and are still
+        // skipped silently, by TryReadCounter.
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -66,17 +75,33 @@ public static class SystemRuntimeCounters
         if (!counter.TryGetProperty("Name", out var nameProp) || nameProp.ValueKind != JsonValueKind.String)
             return null;
 
-        if (!counter.TryGetProperty("Mean", out var meanProp))
+        // The runtime publishes two counter shapes (see the class doc): a polling
+        // counter's payload carries "Mean" (a point-in-time sample), an incrementing
+        // counter's carries "Increment" instead (measured, against a live session, to be
+        // a PER-INTERVAL DELTA, not a cumulative total - see BACKLOG.md 6.11). Checking
+        // "Mean" first and falling back to "Increment" - rather than requiring "Mean" -
+        // is Bug A's fix: every incrementing counter (gen-N-gc-count,
+        // monitor-lock-contention-count, alloc-rate, exception-count, and others) was
+        // being rejected here before Classify was ever consulted.
+        double value;
+        if (counter.TryGetProperty("Mean", out var meanProp) && meanProp.TryGetDouble(out var mean))
+        {
+            value = mean;
+        }
+        else if (counter.TryGetProperty("Increment", out var incrementProp) && incrementProp.TryGetDouble(out var increment))
+        {
+            value = increment;
+        }
+        else
+        {
             return null;
-
-        if (!meanProp.TryGetDouble(out var mean))
-            return null;
+        }
 
         var name = nameProp.GetString();
         if (string.IsNullOrEmpty(name))
             return null;
 
-        return (name, Classify(name), mean);
+        return (name, Classify(name), value);
     }
 
     private static MetricType Classify(string name) => name switch
@@ -101,15 +126,26 @@ public static class SystemRuntimeCounters
         "assembly-count" or
         "methods-jitted-count" or
         "il-bytes-jitted" or
-        "active-timer-count" or
-        "monitor-lock-contention-count" => MetricType.Gauge,
-        // Rate/count-like: monotonic or per-interval values
+        "active-timer-count" => MetricType.Gauge,
+        // Counter-like: the runtime's "Increment" field, measured to be a per-interval
+        // delta (see TryReadCounter) - summing deltas reconstructs the total, which is
+        // exactly what InMemoryMetricStore.RecordCounterTotal's accumulator wants (the
+        // same "rate" decision made for CounterRateValuePublished on 2026-09-07). Names
+        // below are exactly what a live .NET 10 System.Runtime session was measured to
+        // publish (BACKLOG.md 6.11) - "gen-N-gc-count", NOT "gen-N-collection-count"
+        // (Bug B: the runtime has never published that name), and
+        // "monitor-lock-contention-count" moved here from the Gauge list above because it
+        // was measured carrying "Increment", not "Mean". "threadpool-queue-length-delta"
+        // was removed: it never appeared in a live session, on any shape.
         "alloc-rate" or
         "exception-count" or
-        "gen-0-collection-count" or
-        "gen-1-collection-count" or
-        "gen-2-collection-count" or
-        "threadpool-queue-length-delta" => MetricType.Counter,
+        "gen-0-gc-count" or
+        "gen-1-gc-count" or
+        "gen-2-gc-count" or
+        "monitor-lock-contention-count" or
+        "threadpool-completed-items-count" or
+        "total-pause-time-by-gc" or
+        "time-in-jit" => MetricType.Counter,
         _ => MetricType.Gauge
     };
 }

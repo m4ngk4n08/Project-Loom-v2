@@ -30,34 +30,55 @@ public static class SystemRuntimeCounters
     public static IEnumerable<(string Name, MetricType Type, double Value)> Parse(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
-            yield break;
+            return Array.Empty<(string, MetricType, double)>();
 
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-
-        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Payload", out var payloadObj))
+        // Parsed outside the iterator: yield return cannot appear inside a try block
+        // that has a catch clause, and truly malformed (non-JSON) text must be skipped,
+        // never thrown - same tolerance TryReadCounter already gives a well-formed but
+        // unrecognized payload shape.
+        JsonDocument doc;
+        try
         {
-            var counter = payloadObj;
-            if (counter.ValueKind != JsonValueKind.Object)
-                yield break;
-
-            var parsed = TryReadCounter(counter);
-            if (parsed is not null)
-                yield return parsed.Value;
-            yield break;
+            doc = JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<(string, MetricType, double)>();
         }
 
-        if (root.ValueKind != JsonValueKind.Array)
-            yield break;
+        return ParseDocument(doc);
+    }
 
-        foreach (var counter in root.EnumerateArray())
+    private static IEnumerable<(string Name, MetricType Type, double Value)> ParseDocument(JsonDocument doc)
+    {
+        using (doc)
         {
-            if (counter.ValueKind != JsonValueKind.Object)
-                continue;
+            var root = doc.RootElement;
 
-            var parsed = TryReadCounter(counter);
-            if (parsed is not null)
-                yield return parsed.Value;
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("Payload", out var payloadObj))
+            {
+                var counter = payloadObj;
+                if (counter.ValueKind != JsonValueKind.Object)
+                    yield break;
+
+                var parsed = TryReadCounter(counter);
+                if (parsed is not null)
+                    yield return parsed.Value;
+                yield break;
+            }
+
+            if (root.ValueKind != JsonValueKind.Array)
+                yield break;
+
+            foreach (var counter in root.EnumerateArray())
+            {
+                if (counter.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var parsed = TryReadCounter(counter);
+                if (parsed is not null)
+                    yield return parsed.Value;
+            }
         }
     }
 
@@ -66,17 +87,33 @@ public static class SystemRuntimeCounters
         if (!counter.TryGetProperty("Name", out var nameProp) || nameProp.ValueKind != JsonValueKind.String)
             return null;
 
-        if (!counter.TryGetProperty("Mean", out var meanProp))
+        // The runtime publishes two counter shapes (see the class doc): a polling
+        // counter's payload carries "Mean" (a point-in-time sample), an incrementing
+        // counter's carries "Increment" instead (measured, against a live session, to be
+        // a PER-INTERVAL DELTA, not a cumulative total - see BACKLOG.md 6.11). Checking
+        // "Mean" first and falling back to "Increment" - rather than requiring "Mean" -
+        // is Bug A's fix: every incrementing counter (gen-N-gc-count,
+        // monitor-lock-contention-count, alloc-rate, exception-count, and others) was
+        // being rejected here before Classify was ever consulted.
+        double value;
+        if (counter.TryGetProperty("Mean", out var meanProp) && meanProp.TryGetDouble(out var mean))
+        {
+            value = mean;
+        }
+        else if (counter.TryGetProperty("Increment", out var incrementProp) && incrementProp.TryGetDouble(out var increment))
+        {
+            value = increment;
+        }
+        else
+        {
             return null;
-
-        if (!meanProp.TryGetDouble(out var mean))
-            return null;
+        }
 
         var name = nameProp.GetString();
         if (string.IsNullOrEmpty(name))
             return null;
 
-        return (name, Classify(name), mean);
+        return (name, Classify(name), value);
     }
 
     private static MetricType Classify(string name) => name switch
@@ -101,15 +138,26 @@ public static class SystemRuntimeCounters
         "assembly-count" or
         "methods-jitted-count" or
         "il-bytes-jitted" or
-        "active-timer-count" or
-        "monitor-lock-contention-count" => MetricType.Gauge,
-        // Rate/count-like: monotonic or per-interval values
+        "active-timer-count" => MetricType.Gauge,
+        // Counter-like: the runtime's "Increment" field, measured to be a per-interval
+        // delta (see TryReadCounter) - summing deltas reconstructs the total, which is
+        // exactly what InMemoryMetricStore.RecordCounterTotal's accumulator wants (the
+        // same "rate" decision made for CounterRateValuePublished on 2026-09-07). Names
+        // below are exactly what a live .NET 10 System.Runtime session was measured to
+        // publish (BACKLOG.md 6.11) - "gen-N-gc-count", NOT "gen-N-collection-count"
+        // (Bug B: the runtime has never published that name), and
+        // "monitor-lock-contention-count" moved here from the Gauge list above because it
+        // was measured carrying "Increment", not "Mean". "threadpool-queue-length-delta"
+        // was removed: it never appeared in a live session, on any shape.
         "alloc-rate" or
         "exception-count" or
-        "gen-0-collection-count" or
-        "gen-1-collection-count" or
-        "gen-2-collection-count" or
-        "threadpool-queue-length-delta" => MetricType.Counter,
+        "gen-0-gc-count" or
+        "gen-1-gc-count" or
+        "gen-2-gc-count" or
+        "monitor-lock-contention-count" or
+        "threadpool-completed-items-count" or
+        "total-pause-time-by-gc" or
+        "time-in-jit" => MetricType.Counter,
         _ => MetricType.Gauge
     };
 }

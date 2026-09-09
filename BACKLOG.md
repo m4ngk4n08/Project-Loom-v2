@@ -1251,7 +1251,7 @@ enumeration for free — which a `ConcurrentDictionary` does not.
 
 ---
 
-### 6.11 `SystemRuntimeCounters` Has Two Bugs That Currently Cancel Each Other 🟡 MEDIUM (OPEN — filed 2026-09-07)
+### 6.11 `SystemRuntimeCounters` Has Two Bugs That Currently Cancel Each Other ✅ CLOSED (filed 2026-09-07, closed 2026-09-09)
 
 Found while building the EventPipe integration harness. **Neither is user-visible today, and
 that is precisely the hazard: fixing either one alone makes the other live.** Do not fix them
@@ -1281,6 +1281,34 @@ counters. Fix A and B in one change, or neither.
 actually reach the store showed `gc-heap-size`, `working-set`, `cpu-usage`, `gen-0-size`,
 `assembly-count`, `il-bytes-jitted`, `active-timer-count` and similar — and **no**
 `gen-0-gc-count` and no `gen-0-collection-count`, consistent with both bugs.
+
+**Resolution (2026-09-09):** fixed both in one change, per a live-session measurement against
+`Loom.TestFixtureApp` (a throwaway spike, not committed) that dumped every `System.Runtime`
+counter's raw JSON. `Increment` was confirmed a **per-interval delta**, not cumulative —
+`threadpool-completed-items-count` held steady around 5 per 1s interval across six consecutive
+publishes rather than climbing 5, 10, 15, 20..., and `alloc-rate`/`time-in-jit` fluctuated up and
+down rather than only ever increasing. That makes `Increment` the same shape as
+`CounterRateValuePublished`'s `rate` field (2026-09-07 decision): summing it reconstructs the
+total, which is what `InMemoryMetricStore.RecordCounterTotal`'s accumulator wants.
+
+`TryReadCounter` now reads `Mean` when present and falls back to `Increment` otherwise (Bug A).
+`Classify`'s counter list now reads `gen-0-gc-count` / `gen-1-gc-count` / `gen-2-gc-count` in
+place of the never-matched `-collection-count` names (Bug B), gained
+`threadpool-completed-items-count`, `total-pause-time-by-gc` and `time-in-jit` (all measured
+live), and moved `monitor-lock-contention-count` out of the `Gauge` list into `Counter` (measured
+carrying `Increment`, not `Mean`). `threadpool-queue-length-delta` was removed — it never
+appeared in a live session on either payload shape Phase 0 checked.
+
+`SystemRuntimeCounters.Parse` also gained tolerance for genuinely malformed (non-JSON) input: it
+previously let `JsonDocument.Parse` throw uncaught, relying on the caller's `try`/`catch`, which
+did not satisfy "a malformed payload must be skipped, never throw" as a property of the parser
+itself.
+
+New tests: `Loom.Telemetry.Tests/Storage/SystemRuntimeCountersTests.cs` (unit, using payload
+strings copied from the live dump) and
+`Loom.Telemetry.Tests/Integration/SystemRuntimeCounterIngestTests.cs` (one integration test
+against a live fixture process). Reverting either bug's fix in isolation was confirmed to fail
+the matching test before this fix was committed.
 
 ---
 

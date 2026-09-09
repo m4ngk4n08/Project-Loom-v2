@@ -2047,6 +2047,57 @@ request can succeed at all.
 
 ---
 
+### 11.8 Whether to Support .NET 8 As Well as .NET 10 🟡 MEDIUM (OPEN DECISION — filed 2026-09-09)
+
+**Not a commitment to do it. Filed so the choice is made deliberately rather than made by
+default at the moment someone runs `dotnet nuget push`.**
+
+**Current state, measured 2026-09-09** by grepping every `.csproj`: every project targets
+`net10.0` and nothing else. `Loom.Telemetry.Generators` targets `netstandard2.0`, which is a
+Roslyn requirement and unrelated. There is **no** `TargetFrameworks` (plural) anywhere, and no
+mention of .NET 8 or multi-targeting in any tracked or untracked document. This entry is the
+first time the question has been recorded.
+
+**Why it matters for a package and not for a host.** `LoomDiagnostics.Telemetry` is meant to be
+referenced by other people's applications. A `net10.0`-only package can only be installed by an
+application already on .NET 10. .NET 8 is the current long-term-support release and is where
+most production services actually sit, so the addressable audience today is a small fraction of
+.NET shops. That is a reach problem, not a correctness problem.
+
+**Why deferring is genuinely safe.** Adding a target framework later is **not** a breaking
+change for anyone who already installed the package — an existing `net10.0` consumer keeps
+resolving the same assets. Removing one is breaking. So `net10.0` now and `net8.0` in a later
+minor version is a legitimate order, and this decision does **not** block first publish the way
+§ 11.1 item 3 (public IDs for the eight supporting libraries) does.
+
+**The argument for staying single-target, which is not weak:**
+
+- HIM, the first real consumer, is `net10.0` throughout. The audience that exists today is
+  already covered.
+- Multi-targeting doubles the build-and-test matrix for a project that found four silent ingest
+  defects in the week of 2026-09-06 (see the 2026-09-07 decision entry). Widening the surface
+  while the foundations are still moving buys reach at the cost of confidence.
+- Some of what Loom leans on is version-sensitive. **Unverified, and the first thing to check if
+  this is ever picked up:** C# interceptors (`[LoomProfile]`'s mechanism since 2026-09-07) and
+  `System.Diagnostics.Metrics`' EventPipe payload shape both need confirming against a .NET 8
+  target before assuming a second target is a csproj edit. Do not estimate this without
+  measuring — the payload field names were assumed once already and were wrong.
+
+**The argument for doing it:**
+
+- The pitch is "reference a package, get your own business metrics." That pitch lands with far
+  fewer people while the package requires the newest runtime.
+- Early consumers are how install ergonomics get found while names are still free to change
+  (§ 11.1, and the 2026-09-01 decision entry). A smaller eligible audience means fewer of them.
+
+**Decision owner:** the user. **Sequencing:** revisit alongside § 11.1 item 3, since both are
+"what does v1 promise" questions and both are cheaper to settle before first publish than after
+— even though only § 11.1 item 3 actually blocks it.
+
+**Do not action this entry without an explicit decision.** It is recorded, not scheduled.
+
+---
+
 ### 2026-09-01: Loom Distributes as NuGet Packages; Split Over Monolith; Private Before Public
 
 **Decision:** Reorient Loom's primary distribution from "a host you run" to "a package you

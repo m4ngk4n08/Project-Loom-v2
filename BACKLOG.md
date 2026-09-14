@@ -1347,6 +1347,66 @@ same change as the fixes themselves, to keep the correctness fix reviewable on i
 
 ---
 
+### 6.13 The SPA Fallback Swallows Unmapped `/api/*` Routes and Returns 200 HTML 🟡 MEDIUM (OPEN — filed 2026-09-14)
+
+`MapSpaFallback` (`Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs:595`) catches
+**every** unmatched request, including `POST /api/...`, and serves `index.html` with a **200**.
+No `/api/` prefix is excluded. An API route that does not exist is therefore indistinguishable
+from one that succeeded and returned HTML.
+
+**This silently defeats a contract both sides were deliberately written to.** The Explain
+feature is mapped only when `LOOM_LLM_API_KEY` is set (`EndpointExtensions.cs:325`), and its
+own comment at `:323` states the intent:
+
+> *"An unconfigured deployment returns 404 from the router rather than 501 from a handler —
+> there is no endpoint, not a disabled one."*
+
+The frontend was built against exactly that promise. `explainErrorMessage`
+(`Loom.Web.Frontend/src/app/features/logs/logs.component.ts:179`) branches on 404 and returns
+*"The explain feature is not configured. Set LOOM_LLM_API_KEY to turn it on."* — with a comment
+at `:175` explaining why the wording matters: *"'it broke' sends someone debugging; 'it is not
+turned on' sends them to the env var."* There is even a unit test for it
+(`logs.component.spec.ts:443`).
+
+**That 404 branch is dead code in practice.** The fallback answers first, so the response is
+200 with `text/html`. The client never sees 404, falls through to the default branch, and
+displays *"Could not reach the model. Check the connection and try again."* — which sends the
+operator to debug their network for a feature that was never enabled. Both authors did the
+right thing independently; the fallback quietly broke the contract between them.
+
+**Observed, not theorised** (2026-09-14, dashboard at `b2a9cb6` attached to HIM's AI service
+with no `LOOM_LLM_API_KEY` set). Four clicks on "Explain this event", four identical entries:
+
+```
+Request starting HTTP/1.1 POST http://localhost:5209/api/logs/explain - application/json 339
+  Executing endpoint 'Fallback {*path:nonfile}'
+Request finished HTTP/1.1 POST http://localhost:5209/api/logs/explain - 200 - text/html 0.98ms
+```
+
+**Scope is wider than Explain.** Any unmapped `/api/*` path on either host behaves this way —
+a typo'd route, a client on a newer API than the server, a removed endpoint. Each returns a
+200 page of HTML to something expecting JSON. The failure surfaces wherever that response is
+parsed, not where it originated, which is the expensive kind of bug to chase.
+
+**Secondary, 🟢 LOW:** the fallback carries `LoomAllowAnonymous`
+(`EndpointExtensions.cs:610`), so unmapped `/api/*` requests bypass authentication to reach
+it. Nothing is disclosed — the response is the same `index.html` served to every anonymous
+visitor — but "every `/api/` route is protected" is not literally true today, and the
+exception is invisible at the call site.
+
+**Shape of the fix:** exclude `/api/` from the fallback rather than teaching each caller to
+detect HTML. A short-circuit at the top of the fallback delegate — if the path starts with
+`/api/`, set 404 and return without a body — restores the documented behaviour for every
+endpoint at once, including ones not yet written. `MapFallback`'s `{*path:nonfile}` constraint
+already excludes static assets, so SPA deep links are unaffected. Worth a test asserting
+`POST /api/does-not-exist` returns 404 and not `text/html`, since the current shape passes
+every existing test.
+
+**Do not "fix" this by changing the frontend's default message.** The message is correct for
+the case it names; the status code reaching it is what is wrong.
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)

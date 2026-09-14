@@ -1,4 +1,4 @@
-import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel, isInteractiveEventTarget, canExplain, explainErrorMessage, hasNoPlaceholders } from './logs.component';
+import { toUtcIso, isSearchableQuery, scoreBarWidth, shortTraceId, matchesTraceFilter, groupByTemplate, levelRank, parseArguments, rowKey, DisplayRow, meetsMinLevel, isInteractiveEventTarget, canExplain, explainErrorMessage, hasNoPlaceholders, toDisplayOrder } from './logs.component';
 import { LogEntry } from '../../core/services/logs.service';
 
 describe('toUtcIso', () => {
@@ -446,5 +446,24 @@ describe('explainErrorMessage', () => {
   it('returns the same generic message as 500 for a 0 status and does not throw', () => {
     expect(() => explainErrorMessage(0)).not.toThrow();
     expect(explainErrorMessage(0)).toBe(explainErrorMessage(500));
+  });
+});
+
+describe('toDisplayOrder', () => {
+  it('puts the newest entry first', () => {
+    const chronological = ['oldest', 'middle', 'newest'];
+    expect(toDisplayOrder(chronological)).toEqual(['newest', 'middle', 'oldest']);
+  });
+
+  it('does not mutate its input', () => {
+    // filteredEntries() is a computed's output; reversing it in place would
+    // corrupt the signal's value for every other reader.
+    const chronological = ['a', 'b', 'c'];
+    toDisplayOrder(chronological);
+    expect(chronological).toEqual(['a', 'b', 'c']);
+  });
+
+  it('handles an empty list', () => {
+    expect(toDisplayOrder([])).toEqual([]);
   });
 });

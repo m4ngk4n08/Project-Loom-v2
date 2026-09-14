@@ -217,6 +217,14 @@ export function rowKey(row: DisplayRow): string {
   return `${row.timestampUtc}#${row.level}#${row.message}`;
 }
 
+// The live buffer is kept chronological (oldest first) so appendEntry can push
+// and trim from the front cheaply. The list is read newest-first, so the flip
+// happens on the way to the view and nowhere else. Copies rather than reversing
+// in place: the input is a computed's output and must not be mutated.
+export function toDisplayOrder<T>(entries: readonly T[]): T[] {
+  return [...entries].reverse();
+}
+
 // Level is a filter, not a search term. BM25 indexes LogRecord.Message and
 // nothing else, so typing "warning" into the search box can never match a
 // severity - and indexing it would be wrong anyway: IDF collapses over a
@@ -361,7 +369,10 @@ export class LogsComponent implements OnInit {
         spanId: r.spanId
       }));
     }
-    return this.filteredEntries().map(e => ({
+    // Newest first - see toDisplayOrder. Search results above are deliberately
+    // NOT reversed: they arrive ranked by relevance, and re-ordering them by
+    // time would throw that ranking away.
+    return toDisplayOrder(this.filteredEntries()).map(e => ({
       timestampUtc: e.timestampUtc,
       level: e.level,
       category: e.category,

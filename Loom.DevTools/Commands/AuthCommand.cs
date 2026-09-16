@@ -213,7 +213,14 @@ public static class AuthCommand
             var directory = Path.GetDirectoryName(profilePath);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
-            var existing = File.Exists(profilePath) ? File.ReadAllText(profilePath) : string.Empty;
+            // Latin-1 maps every byte 0-255 to the identically-numbered code point, so
+            // decoding and later re-encoding with it round-trips the file's bytes exactly
+            // - unlike UTF-8, which decodes an invalid or non-UTF-8 sequence (a latin-1
+            // .bashrc with accented comments, say) as U+FFFD and then WRITES BACK that
+            // replacement character, permanently corrupting bytes we never needed to
+            // understand. Our own block text is pure ASCII, so this is transparent to it.
+            var existingBytes = File.Exists(profilePath) ? File.ReadAllBytes(profilePath) : [];
+            var existing = Encoding.Latin1.GetString(existingBytes);
 
             foreach (var variable in FindVariablesAssignedOutsideBlock(existing))
                 Console.WriteLine($"Warning: {profilePath} already assigns {variable} outside loom's block - the block added below will take precedence.");
@@ -227,7 +234,22 @@ public static class AuthCommand
             var block = RenderUnixPersistBlock(shellEnvValue, keyPath, effectiveUsersPath);
 
             var updated = UpsertUnixPersistBlock(existing, block);
-            File.WriteAllText(profilePath, updated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            var updatedBytes = Encoding.Latin1.GetBytes(updated);
+
+            // Write-then-rename rather than truncate-in-place, so a crash mid-write
+            // leaves either the old file or the new one intact, never a truncated shell
+            // profile. File.Move's overwrite is atomic on the same filesystem, and the
+            // temp file sits next to the target so it always is one.
+            var tempPath = profilePath + $".loom-tmp-{Guid.NewGuid():N}";
+            try
+            {
+                File.WriteAllBytes(tempPath, updatedBytes);
+                File.Move(tempPath, profilePath, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(tempPath)) File.Delete(tempPath);
+            }
 
             Console.WriteLine($"Wrote to {profilePath}.");
         }

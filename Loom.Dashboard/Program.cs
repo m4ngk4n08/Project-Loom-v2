@@ -114,8 +114,10 @@ catch (InvalidOperationException ex)
     Console.Error.WriteLine(ex.Message);
     Console.Error.WriteLine();
     Console.Error.WriteLine("Loom fails closed: there is no generated-on-the-fly key in any environment.");
-    Console.Error.WriteLine("  Windows dev setup:  loom auth init");
-    Console.Error.WriteLine($"  Then set {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable}.");
+    Console.Error.WriteLine("  No 'loom' command? Install it:  dotnet tool install -g LoomDiagnostics.Cli");
+    Console.Error.WriteLine("  Dev setup:  loom auth init --persist");
+    Console.Error.WriteLine("              loom auth add-user <name>");
+    Console.Error.WriteLine($"  {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable} are only needed to override the default location.");
     return 1;
 }
 

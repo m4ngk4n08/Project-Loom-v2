@@ -376,6 +376,28 @@ public class AuthCommandTests
         Assert.Equal(Encoding.UTF8.GetBytes(block), result[4..]);
     }
 
+    // The item 2 regression: ExtractExistingUsersPath's caller works against the Latin-1
+    // decoding of the profile's raw bytes (so match indices line up with byte offsets),
+    // but a UTF-8-encoded path with a non-ASCII segment then comes back garbled unless the
+    // extracted value is re-decoded as UTF-8 before use. This drives the exact pipeline
+    // PersistEnvironmentVariablesUnix uses - render as UTF-8 bytes, decode as Latin-1
+    // (what "existing" is in that method), extract, then recover via the fix - for both a
+    // Latin script accent and a CJK segment.
+    [Theory]
+    [InlineData("/home/andré/dev-secrets/users")]
+    [InlineData("/home/用户/dev-secrets/users")]
+    public void ExtractExistingUsersPath_CarryForwardOfNonAsciiPath_SurvivesLatin1DecodeUtf8RecodeRoundTrip(string originalPath)
+    {
+        var block = AuthCommand.RenderUnixPersistBlock("/bin/bash", "/home/u/jwt.key", originalPath);
+        var blockBytes = Encoding.UTF8.GetBytes(block);
+        var latin1Decoded = Encoding.Latin1.GetString(blockBytes);
+
+        var extracted = AuthCommand.ExtractExistingUsersPath(latin1Decoded);
+        var recovered = Encoding.UTF8.GetString(Encoding.Latin1.GetBytes(extracted!));
+
+        Assert.Equal(originalPath, recovered);
+    }
+
     [Fact]
     public void UpsertUnixPersistBlockBytes_ReplacesExistingBlockAndPreservesSurroundingBytesVerbatim()
     {

@@ -288,7 +288,7 @@ public static class AuthCommand
             // entirely, and UpsertUnixPersistBlock replaces the WHOLE block - so a
             // LOOM_AUTH_USERS_FILE export the user was relying on would silently vanish
             // unless we carry it forward from whatever block is already there.
-            effectiveUsersPath = usersPath ?? ExtractExistingUsersPath(existing);
+            effectiveUsersPath = usersPath ?? DecodeLatin1ExtractedValue(ExtractExistingUsersPath(existing));
             var block = RenderUnixPersistBlock(shellEnvValue, keyPath, effectiveUsersPath);
 
             // Computed after effectiveUsersPath, and skips LOOM_AUTH_USERS_FILE when the
@@ -443,6 +443,16 @@ public static class AuthCommand
         var assignment = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+");
         return assignment.Success ? ParseShellValue(blockMatch.Value, assignment.Index + assignment.Length) : null;
     }
+
+    /// <summary>Pure. ExtractExistingUsersPath is called against the Latin-1 decoding of
+    /// the profile's bytes (see PersistEnvironmentVariablesUnix - Latin-1 is used there
+    /// only so match indices line up with byte offsets), so the value it returns is still
+    /// Latin-1-decoded text, while the block that holds it was written as UTF-8. A path
+    /// like "/home/andré/..." then comes back garbled. Because Latin-1 is a 1:1
+    /// byte&lt;-&gt;codepoint mapping, re-encoding with Latin-1 recovers the original
+    /// bytes exactly, and decoding those as UTF-8 recovers the original text.</summary>
+    private static string? DecodeLatin1ExtractedValue(string? latin1DecodedValue) =>
+        latin1DecodedValue is null ? null : Encoding.UTF8.GetString(Encoding.Latin1.GetBytes(latin1DecodedValue));
 
     /// <summary>Pure. Parses one shell value starting at valueStart: a single-quoted
     /// value understanding BOTH quoting conventions this file writes - POSIX's

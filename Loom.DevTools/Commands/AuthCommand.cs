@@ -227,7 +227,11 @@ public static class AuthCommand
         return ClassifyUnixShell(shellEnvValue) switch
         {
             "zsh" => $"{home}/.zshrc",
-            "bash" => $"{home}/.bashrc",
+            // Terminal.app and iTerm start bash as a login shell on macOS, which reads
+            // .bash_profile (or .bash_login / .profile) and never .bashrc - a stock
+            // .bash_profile does not source .bashrc either. Linux interactive bash reads
+            // .bashrc.
+            "bash" => OperatingSystem.IsMacOS() ? $"{home}/.bash_profile" : $"{home}/.bashrc",
             "fish" => $"{home}/.config/fish/config.fish",
             _ => $"{home}/.profile",
         };

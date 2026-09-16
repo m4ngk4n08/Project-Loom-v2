@@ -41,7 +41,21 @@ public static class AuthCommand
         var keyPath = Path.Combine(DevSecretsDirectory, "jwt.key");
         var usersPath = Path.Combine(DevSecretsDirectory, "users");
 
-        if (File.Exists(keyPath))
+        // File.Exists(keyPath) alone would report Missing (silently) when dev-secrets
+        // itself cannot be traversed - e.g. a leftover from an earlier `sudo -E loom auth
+        // init`, where the directory's mode is already 700 so EnsureDevSecretsDirectory
+        // tightens nothing and returns true. Taking the fresh-key path there used to call
+        // WriteSecretFile against a directory this process cannot write into, crashing with
+        // an uncaught UnauthorizedAccessException instead of exiting 1.
+        var keyState = FileAccessCheck.Check(keyPath);
+        if (keyState == FileAccessState.Indeterminate)
+        {
+            Console.Error.WriteLine($"Cannot access {keyPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
+            Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
+            return false;
+        }
+
+        if (keyState == FileAccessState.Exists)
         {
             var keyTightened = TightenIfLoose(keyPath, SecretFileMode);
             var usersTightened = !File.Exists(usersPath) || TightenIfLoose(usersPath, SecretFileMode);
@@ -81,7 +95,20 @@ public static class AuthCommand
             return directoryTightened && keyTightened && usersTightened && persisted;
         }
 
-        WriteSecretFile(keyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        // Backstop for the same failure class as the keyState check above: if dev-secrets
+        // became inaccessible between that check and this write (or in any other path that
+        // reaches here), fail closed with a message instead of an uncaught crash.
+        try
+        {
+            WriteSecretFile(keyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Could not write {keyPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
+            Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
+            return false;
+        }
+
         var usersFileAlreadyExisted = File.Exists(usersPath);
         var usersFileTightened = true;
         if (!usersFileAlreadyExisted) WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");

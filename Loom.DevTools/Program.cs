@@ -60,8 +60,28 @@ switch (args)
     case ["auth", "init", "--persist"]:
         AuthCommand.Init(persist: true);
         break;
-    case ["auth", "add-user", var newUser]:
-        AuthCommand.AddUser(newUser);
+    case ["auth", "add-user", var newUser, ..]:
+        {
+            string? usersFile = null;
+            var bad = false;
+            for (var i = 3; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--users-file" when i + 1 < args.Length: usersFile = args[++i]; break;
+                    default: bad = true; break;
+                }
+            }
+            if (bad)
+            {
+                Console.WriteLine("Usage: loom auth add-user <name> [--users-file <path>]");
+                Environment.Exit(1);
+            }
+            else
+            {
+                AuthCommand.AddUser(newUser, usersFile);
+            }
+        }
         break;
     case ["auth", "hash"]:
         AuthCommand.Hash();
@@ -71,6 +91,7 @@ switch (args)
             string? sub = null;
             var scope = JwtScope.Full;
             var ttl = TimeSpan.FromDays(90);
+            string? keyFile = null;
             var bad = false;
             for (var i = 2; i < args.Length; i++)
             {
@@ -83,13 +104,19 @@ switch (args)
                     case "--ttl" when i + 1 < args.Length:
                         if (!AuthCommand.TryParseTtl(args[++i], out ttl)) bad = true;
                         break;
+                    case "--key-file" when i + 1 < args.Length: keyFile = args[++i]; break;
                     default: bad = true; break;
                 }
             }
             if (bad || string.IsNullOrEmpty(sub))
-                Console.WriteLine("Usage: loom auth token --sub <name> [--scope metrics|full] [--ttl 90d]");
+            {
+                Console.WriteLine("Usage: loom auth token --sub <name> [--scope metrics|full] [--ttl 90d] [--key-file <path>]");
+                Environment.Exit(1);
+            }
             else
-                AuthCommand.Token(sub, scope, ttl);
+            {
+                AuthCommand.Token(sub, scope, ttl, keyFile);
+            }
         }
         break;
     default:
@@ -105,9 +132,9 @@ switch (args)
         Console.WriteLine("  loom search <pid> \"<query>\" [--max N] [--seconds N]        BM25 search over captured logs");
         Console.WriteLine("  loom auth init [--persist]              Create a dev signing key and users file");
         Console.WriteLine("                                          (--persist also sets the env vars permanently)");
-        Console.WriteLine("  loom auth add-user <name>               Append a user (prompts for a password)");
+        Console.WriteLine("  loom auth add-user <name> [--users-file <path>]  Append a user (prompts for a password)");
         Console.WriteLine("  loom auth hash                          Print a password hash to stdout");
         Console.WriteLine("                                          (the users-file line is <name>:<hash>)");
-        Console.WriteLine("  loom auth token --sub <name> [--scope metrics|full] [--ttl 90d]  Mint a service token");
+        Console.WriteLine("  loom auth token --sub <name> [--scope metrics|full] [--ttl 90d] [--key-file <path>]  Mint a service token");
         break;
 }

@@ -73,7 +73,7 @@ public static class AuthCommand
         }
 
         Console.WriteLine();
-        Console.WriteLine("Then add an operator:  loom auth add-user operator");
+        Console.WriteLine($"Then add an operator:  loom auth add-user operator --users-file {QuoteForCurrentShell(usersPath)}");
     }
 
     /// <summary>The "set these before starting" line, in the syntax the terminal the user
@@ -86,9 +86,20 @@ public static class AuthCommand
     /// as safe as the file loom writes.</summary>
     private static string FormatSetVarLine(string variable, string value)
     {
-        if (OperatingSystem.IsWindows()) return $"  $env:{variable} = \"{value}\"";
+        if (OperatingSystem.IsWindows()) return $"  $env:{variable} = {QuoteForCurrentShell(value)}";
         var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
         return "  " + RenderUnixExportLine(isFish, variable, value);
+    }
+
+    /// <summary>Quotes a value for whatever shell the user is actually in, matching
+    /// FormatSetVarLine's own per-platform choice, so a printed CLI command (e.g. the
+    /// "add-user" line Init prints) can be copied and pasted with the same safety as the
+    /// "set these" lines - one path value, one quoting rule, everywhere it is printed.</summary>
+    private static string QuoteForCurrentShell(string value)
+    {
+        if (OperatingSystem.IsWindows()) return $"\"{value}\"";
+        var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
+        return isFish ? QuoteFishSingle(value) : QuotePosixSingle(value);
     }
 
     /// <summary>Creates dev-secrets at 700 on Unix. If it already exists (a re-run, or a
@@ -621,9 +632,12 @@ public static class AuthCommand
         return devPath;
     }
 
-    public static void AddUser(string username)
+    /// <summary>usersFile, when given (--users-file), is used exactly as supplied - no
+    /// fallback, no search, no environment lookup. Only when it is null does resolution
+    /// fall back to ResolveUsersFileForCli's guess.</summary>
+    public static void AddUser(string username, string? usersFile = null)
     {
-        var usersPath = ResolveUsersFileForCli();
+        var usersPath = usersFile ?? ResolveUsersFileForCli();
         if (!File.Exists(usersPath))
         {
             Console.WriteLine($"Users file not found at {usersPath}. Run 'loom auth init' first.");
@@ -637,9 +651,22 @@ public static class AuthCommand
 
     public static void Hash() => Console.WriteLine(PasswordHasher.Hash(ReadPassword()));
 
-    public static void Token(string subject, JwtScope scope, TimeSpan ttl)
+    /// <summary>keyFile, when given (--key-file), is used exactly as supplied - no
+    /// fallback, no search, no environment lookup. Only when it is null does resolution
+    /// fall back to ResolveKeyFileForCli's guess. stdout here is the product - a caller
+    /// redirects it straight to a token file - so the not-found message goes to stderr,
+    /// not stdout, and this never calls KeyMaterial.LoadSigningKey against a path known
+    /// not to exist, which would otherwise surface as an uncaught exception.</summary>
+    public static void Token(string subject, JwtScope scope, TimeSpan ttl, string? keyFile = null)
     {
-        var key = KeyMaterial.LoadSigningKey(ResolveKeyFileForCli());
+        var keyPath = keyFile ?? ResolveKeyFileForCli();
+        if (keyFile is not null && !File.Exists(keyPath))
+        {
+            Console.Error.WriteLine($"Key file not found at {keyPath}.");
+            return;
+        }
+
+        var key = KeyMaterial.LoadSigningKey(keyPath);
         var issuer = new JwtIssuer(key, TimeProvider.System);
         Console.WriteLine(issuer.Issue(subject, ttl, scope));
     }

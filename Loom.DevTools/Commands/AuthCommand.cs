@@ -61,11 +61,16 @@ public static class AuthCommand
         }
 
         WriteSecretFile(keyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
-        if (!File.Exists(usersPath)) WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
+        var usersFileAlreadyExisted = File.Exists(usersPath);
+        if (!usersFileAlreadyExisted) WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
         else TightenIfLoose(usersPath, SecretFileMode);
 
         Console.WriteLine($"Wrote {keyPath}");
-        Console.WriteLine($"Wrote {usersPath}");
+        // "Wrote {usersPath}" was previously printed unconditionally, including here
+        // where the file already existed and was only permission-tightened - telling
+        // the user a file was created that was not, right before the next step appends
+        // credentials to it.
+        Console.WriteLine(usersFileAlreadyExisted ? $"Users file already exists at {usersPath}." : $"Wrote {usersPath}");
         Console.WriteLine();
         Console.WriteLine("Set these before starting loom-dashboard:");
         Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));

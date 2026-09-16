@@ -206,7 +206,7 @@ public static class AuthCommand
             return;
         }
 
-        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory);
+        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
 
         try
         {
@@ -265,7 +265,7 @@ public static class AuthCommand
 
     /// <summary>Pure. Maps $SHELL's basename to the profile file loom persists into.
     /// Unknown or unset shells fall back to ~/.profile rather than guessing.</summary>
-    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory)
+    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory, string? xdgConfigHome = null)
     {
         var home = homeDirectory.TrimEnd('/');
         return ClassifyUnixShell(shellEnvValue) switch
@@ -276,10 +276,16 @@ public static class AuthCommand
             // .bash_profile does not source .bashrc either. Linux interactive bash reads
             // .bashrc.
             "bash" => OperatingSystem.IsMacOS() ? $"{home}/.bash_profile" : $"{home}/.bashrc",
-            "fish" => $"{home}/.config/fish/config.fish",
+            // fish reads its config from $XDG_CONFIG_HOME/fish, not a hardcoded ~/.config -
+            // a fish user with XDG_CONFIG_HOME set elsewhere would otherwise get a file
+            // fish never reads, reported as success.
+            "fish" => $"{ResolveConfigHome(xdgConfigHome, home)}/fish/config.fish",
             _ => $"{home}/.profile",
         };
     }
+
+    private static string ResolveConfigHome(string? xdgConfigHome, string home) =>
+        string.IsNullOrEmpty(xdgConfigHome) ? $"{home}/.config" : xdgConfigHome.TrimEnd('/');
 
     /// <summary>Pure. Renders the marked block for the given shell. fish needs
     /// `set -gx VAR "value"` - `export VAR="value"` is a syntax error there, and writing

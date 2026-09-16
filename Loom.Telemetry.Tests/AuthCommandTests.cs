@@ -53,6 +53,16 @@ public class AuthCommandTests
         Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath(shellEnvValue, "/home/u"));
     }
 
+    [Theory]
+    [InlineData(null, "/home/u/.config/fish/config.fish")]
+    [InlineData("", "/home/u/.config/fish/config.fish")]
+    [InlineData("/home/u/xdgcfg", "/home/u/xdgcfg/fish/config.fish")]
+    [InlineData("/home/u/xdgcfg/", "/home/u/xdgcfg/fish/config.fish")]
+    public void ResolveUnixProfilePath_Fish_HonoursXdgConfigHome(string? xdgConfigHome, string expected)
+    {
+        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/local/bin/fish", "/home/u", xdgConfigHome));
+    }
+
     [Fact]
     public void RenderUnixPersistBlock_Fish_UsesSetDashGx()
     {

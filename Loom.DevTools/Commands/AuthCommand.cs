@@ -693,19 +693,28 @@ public static class AuthCommand
 
     /// <summary>usersFile, when given (--users-file), is used exactly as supplied - no
     /// fallback, no search, no environment lookup. Only when it is null does resolution
-    /// fall back to ResolveUsersFileForCli's guess.</summary>
-    public static void AddUser(string username, string? usersFile = null)
+    /// fall back to ResolveUsersFileForCli's guess.
+    ///
+    /// Returns false on failure so the caller exits non-zero. It used to print and return,
+    /// so `loom auth add-user x --users-file /wrong/path` exited 0 having written nothing -
+    /// a script aimed at a production users file saw success for a no-op. "Run 'loom auth
+    /// init' first" is only offered when the path was guessed: init never writes to a path
+    /// someone supplied, so for an explicit path that advice sends them the wrong way.</summary>
+    public static bool AddUser(string username, string? usersFile = null)
     {
         var usersPath = usersFile ?? ResolveUsersFileForCli();
         if (!File.Exists(usersPath))
         {
-            Console.WriteLine($"Users file not found at {usersPath}. Run 'loom auth init' first.");
-            return;
+            Console.Error.WriteLine(usersFile is not null
+                ? $"Users file not found at {usersPath}."
+                : $"Users file not found at {usersPath}. Run 'loom auth init' first.");
+            return false;
         }
 
         var line = $"{username}:{PasswordHasher.Hash(ReadPassword())}";
         File.AppendAllText(usersPath, line + Environment.NewLine);
         Console.WriteLine($"Added '{username}' to {usersPath}.");
+        return true;
     }
 
     public static void Hash() => Console.WriteLine(PasswordHasher.Hash(ReadPassword()));
@@ -713,21 +722,41 @@ public static class AuthCommand
     /// <summary>keyFile, when given (--key-file), is used exactly as supplied - no
     /// fallback, no search, no environment lookup. Only when it is null does resolution
     /// fall back to ResolveKeyFileForCli's guess. stdout here is the product - a caller
-    /// redirects it straight to a token file - so the not-found message goes to stderr,
-    /// not stdout, and this never calls KeyMaterial.LoadSigningKey against a path known
-    /// not to exist, which would otherwise surface as an uncaught exception.</summary>
-    public static void Token(string subject, JwtScope scope, TimeSpan ttl, string? keyFile = null)
+    /// redirects it straight to a token file - so every failure message goes to stderr.
+    ///
+    /// Returns false on failure so the caller exits non-zero. Two failure paths used to be
+    /// wrong: an explicit --key-file that did not exist exited 0 with an empty stdout, so
+    /// `loom auth token ... > token.txt` wrote an empty credential file and reported success;
+    /// and a LOOM_JWT_KEY_FILE pointing at a missing, non-base64 or too-short file let
+    /// LoadSigningKey's InvalidOperationException escape as an unhandled crash with a stack
+    /// trace and exit -532462766. Those are operator-fixable configuration errors, not
+    /// defects, and KeyMaterial's message already says what to do - the same reasoning, and
+    /// the same catch, as the dashboard host's startup in Loom.Dashboard/Program.cs.</summary>
+    public static bool Token(string subject, JwtScope scope, TimeSpan ttl, string? keyFile = null)
     {
         var keyPath = keyFile ?? ResolveKeyFileForCli();
         if (keyFile is not null && !File.Exists(keyPath))
         {
+            // Checked here rather than left to LoadSigningKey: its message advises
+            // "run 'loom auth init'", which is wrong for a path the caller supplied.
             Console.Error.WriteLine($"Key file not found at {keyPath}.");
-            return;
+            return false;
         }
 
-        var key = KeyMaterial.LoadSigningKey(keyPath);
+        byte[] key;
+        try
+        {
+            key = KeyMaterial.LoadSigningKey(keyPath);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return false;
+        }
+
         var issuer = new JwtIssuer(key, TimeProvider.System);
         Console.WriteLine(issuer.Issue(subject, ttl, scope));
+        return true;
     }
 
     /// <summary>Pure. Strips a leading UTF-8 BOM from a password read off redirected stdin.

@@ -77,9 +77,9 @@ switch (args)
                 Console.WriteLine("Usage: loom auth add-user <name> [--users-file <path>]");
                 Environment.Exit(1);
             }
-            else
+            else if (!AuthCommand.AddUser(newUser, usersFile))
             {
-                AuthCommand.AddUser(newUser, usersFile);
+                Environment.Exit(1);
             }
         }
         break;
@@ -113,9 +113,9 @@ switch (args)
                 Console.WriteLine("Usage: loom auth token --sub <name> [--scope metrics|full] [--ttl 90d] [--key-file <path>]");
                 Environment.Exit(1);
             }
-            else
+            else if (!AuthCommand.Token(sub, scope, ttl, keyFile))
             {
-                AuthCommand.Token(sub, scope, ttl, keyFile);
+                Environment.Exit(1);
             }
         }
         break;

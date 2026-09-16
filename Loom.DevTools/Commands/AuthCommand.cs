@@ -41,10 +41,20 @@ public static class AuthCommand
                 Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
                 if (existingUsersPath is not null)
                     Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, existingUsersPath));
-                else
-                    Console.WriteLine($"No users file found at {usersPath} - persisting only {KeyMaterial.KeyFileVariable}.");
                 Console.WriteLine();
-                PersistEnvironmentVariables(keyPath, existingUsersPath);
+
+                // Printed AFTER persisting, from what actually happened - not before,
+                // from a guess. On Unix, PersistEnvironmentVariables can carry a
+                // pre-existing LOOM_AUTH_USERS_FILE forward out of the shell profile's
+                // loom block even though usersPath itself is missing here, so "persisting
+                // only the key" would be false whenever that carry-forward fires.
+                var persistedUsersPath = PersistEnvironmentVariables(keyPath, existingUsersPath);
+                if (existingUsersPath is null)
+                {
+                    Console.WriteLine(persistedUsersPath is not null
+                        ? $"No users file found at {usersPath} - kept the existing {KeyMaterial.UsersFileVariable} already in your shell profile ({persistedUsersPath})."
+                        : $"No users file found at {usersPath} - persisting only {KeyMaterial.KeyFileVariable}.");
+                }
             }
 
             return;
@@ -171,13 +181,14 @@ public static class AuthCommand
         return octal.ToString("D3");
     }
 
-    private static void PersistEnvironmentVariables(string keyPath, string? usersPath)
+    /// <summary>Returns the users-file path that actually ended up persisted (which, on
+    /// Unix, may differ from the usersPath argument via carry-forward - see
+    /// PersistEnvironmentVariablesUnix), or null if none was. Callers use this to report
+    /// what actually happened rather than what they assumed would happen.</summary>
+    private static string? PersistEnvironmentVariables(string keyPath, string? usersPath)
     {
         if (!OperatingSystem.IsWindows())
-        {
-            PersistEnvironmentVariablesUnix(keyPath, usersPath);
-            return;
-        }
+            return PersistEnvironmentVariablesUnix(keyPath, usersPath);
 
         WarnIfDifferentExistingValue(KeyMaterial.KeyFileVariable, keyPath);
         Environment.SetEnvironmentVariable(KeyMaterial.KeyFileVariable, keyPath, EnvironmentVariableTarget.User);
@@ -194,6 +205,7 @@ public static class AuthCommand
         }
 
         Console.WriteLine("Open a NEW terminal to pick them up - this terminal's environment does not change.");
+        return usersPath;
     }
 
     private static void WarnIfDifferentExistingValue(string variable, string newValue)
@@ -213,7 +225,7 @@ public static class AuthCommand
     /// EnvironmentVariableTarget.User is a Windows/registry concept. The only durable
     /// place is a shell startup file, chosen from $SHELL's basename so it matches the
     /// shell the user actually runs.</summary>
-    private static void PersistEnvironmentVariablesUnix(string keyPath, string? usersPath)
+    private static string? PersistEnvironmentVariablesUnix(string keyPath, string? usersPath)
     {
         var shellEnvValue = Environment.GetEnvironmentVariable("SHELL");
 
@@ -226,10 +238,11 @@ public static class AuthCommand
         {
             Console.WriteLine("Could not determine your home directory - refusing to guess a shell profile path.");
             Console.WriteLine("Add the exports above to your shell profile manually.");
-            return;
+            return null;
         }
 
         var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, OperatingSystem.IsMacOS(), Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
+        string? effectiveUsersPath;
 
         try
         {
@@ -257,7 +270,7 @@ public static class AuthCommand
             // entirely, and UpsertUnixPersistBlock replaces the WHOLE block - so a
             // LOOM_AUTH_USERS_FILE export the user was relying on would silently vanish
             // unless we carry it forward from whatever block is already there.
-            var effectiveUsersPath = usersPath ?? ExtractExistingUsersPath(existing);
+            effectiveUsersPath = usersPath ?? ExtractExistingUsersPath(existing);
             var block = RenderUnixPersistBlock(shellEnvValue, keyPath, effectiveUsersPath);
 
             var updatedBytes = UpsertUnixPersistBlockBytes(existingBytes, existing, block);
@@ -308,10 +321,11 @@ public static class AuthCommand
         {
             Console.WriteLine($"Could not write {profilePath}: {ex.Message}");
             Console.WriteLine("Add the exports above to your shell profile manually.");
-            return;
+            return null;
         }
 
         Console.WriteLine($"This terminal's environment does not change - open a new terminal or run `source {profilePath}` to pick them up.");
+        return effectiveUsersPath;
     }
 
     /// <summary>Pure. Maps $SHELL's basename to the profile file loom persists into.

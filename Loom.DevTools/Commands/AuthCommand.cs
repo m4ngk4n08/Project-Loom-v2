@@ -182,7 +182,19 @@ public static class AuthCommand
     private static void PersistEnvironmentVariablesUnix(string keyPath, string? usersPath)
     {
         var shellEnvValue = Environment.GetEnvironmentVariable("SHELL");
-        var homeDirectory = Environment.GetEnvironmentVariable("HOME") ?? "~";
+
+        // HOME unset or empty must never fall back to a literal "~" - Directory.CreateDirectory
+        // would then create a real directory named "~" in the working directory, and the
+        // profile path printed would be junk that does not match where LocalApplicationData
+        // (via getpwuid) actually resolved the key to.
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrEmpty(homeDirectory) || !Path.IsPathRooted(homeDirectory))
+        {
+            Console.WriteLine("Could not determine your home directory - refusing to guess a shell profile path.");
+            Console.WriteLine("Add the exports above to your shell profile manually.");
+            return;
+        }
+
         var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory);
         var block = RenderUnixPersistBlock(shellEnvValue, keyPath, usersPath);
 

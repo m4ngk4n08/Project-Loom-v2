@@ -10,14 +10,22 @@ public static class AuthCommand
 {
     private static string DevSecretsDirectory => KeyMaterial.DevSecretsDirectory;
 
+    // Unix only - these APIs throw PlatformNotSupportedException on Windows, where
+    // %LOCALAPPDATA% is already per-user and needs no tightening.
+    private const UnixFileMode SecretDirMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+    private const UnixFileMode SecretFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
     public static void Init(bool persist = false)
     {
-        Directory.CreateDirectory(DevSecretsDirectory);
+        EnsureDevSecretsDirectory();
         var keyPath = Path.Combine(DevSecretsDirectory, "jwt.key");
         var usersPath = Path.Combine(DevSecretsDirectory, "users");
 
         if (File.Exists(keyPath))
         {
+            TightenIfLoose(keyPath, SecretFileMode);
+            if (File.Exists(usersPath)) TightenIfLoose(usersPath, SecretFileMode);
+
             Console.WriteLine($"Refusing to overwrite an existing signing key at {keyPath}.");
             Console.WriteLine("Delete it deliberately if you intend to rotate - every outstanding token dies with it.");
 
@@ -33,8 +41,9 @@ public static class AuthCommand
             return;
         }
 
-        File.WriteAllText(keyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
-        if (!File.Exists(usersPath)) File.WriteAllText(usersPath, "# username:pbkdf2-sha256$...\n");
+        WriteSecretFile(keyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+        if (!File.Exists(usersPath)) WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
+        else TightenIfLoose(usersPath, SecretFileMode);
 
         Console.WriteLine($"Wrote {keyPath}");
         Console.WriteLine($"Wrote {usersPath}");
@@ -57,6 +66,75 @@ public static class AuthCommand
 
         Console.WriteLine();
         Console.WriteLine("Then add an operator:  loom auth add-user operator");
+    }
+
+    /// <summary>Creates dev-secrets at 700 on Unix. If it already exists (a re-run, or a
+    /// leftover from before this fix), tightens it in place rather than trusting the mode
+    /// it already has.</summary>
+    private static void EnsureDevSecretsDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.CreateDirectory(DevSecretsDirectory);
+            return;
+        }
+
+        if (Directory.Exists(DevSecretsDirectory))
+            TightenIfLoose(DevSecretsDirectory, SecretDirMode);
+        else
+            Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode);
+    }
+
+    /// <summary>Creates a new file at 600 on Unix by passing the mode to the OS at create
+    /// time, so the key is never observable on disk with looser permissions - a
+    /// WriteAllText followed by a chmod leaves exactly that window open. On Windows,
+    /// permissions are left alone.</summary>
+    private static void WriteSecretFile(string path, string content)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            File.WriteAllText(path, content);
+            return;
+        }
+
+        using var stream = new FileStream(path, new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            UnixCreateMode = SecretFileMode,
+        });
+        using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        writer.Write(content);
+    }
+
+    /// <summary>Unix only. A user who ran a previous version of this tool has a
+    /// world-readable key sitting on disk right now with no way to know - tighten it and
+    /// say so.</summary>
+    private static void TightenIfLoose(string path, UnixFileMode required)
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var current = File.GetUnixFileMode(path);
+        if ((current & ~required) != 0)
+        {
+            File.SetUnixFileMode(path, required);
+            Console.WriteLine($"Tightened permissions on {path} to {ModeString(required)} (was {ModeString(current)}).");
+        }
+    }
+
+    private static string ModeString(UnixFileMode mode)
+    {
+        var octal = 0;
+        if (mode.HasFlag(UnixFileMode.UserRead)) octal += 400;
+        if (mode.HasFlag(UnixFileMode.UserWrite)) octal += 200;
+        if (mode.HasFlag(UnixFileMode.UserExecute)) octal += 100;
+        if (mode.HasFlag(UnixFileMode.GroupRead)) octal += 40;
+        if (mode.HasFlag(UnixFileMode.GroupWrite)) octal += 20;
+        if (mode.HasFlag(UnixFileMode.GroupExecute)) octal += 10;
+        if (mode.HasFlag(UnixFileMode.OtherRead)) octal += 4;
+        if (mode.HasFlag(UnixFileMode.OtherWrite)) octal += 2;
+        if (mode.HasFlag(UnixFileMode.OtherExecute)) octal += 1;
+        return octal.ToString("D3");
     }
 
     private static void PersistEnvironmentVariables(string keyPath, string? usersPath)

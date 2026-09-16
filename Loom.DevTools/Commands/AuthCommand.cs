@@ -90,10 +90,13 @@ public static class AuthCommand
     /// is actually in will accept - PowerShell on Windows, otherwise whatever
     /// RenderUnixExportLine would put in the shell profile. Printing `$env:` syntax to a
     /// Linux or macOS terminal is not just cosmetic: pasted verbatim, it is a syntax
-    /// error there. Routed through the same renderer as the persisted file rather than
-    /// its own always-double-quoted format, so a path containing `$` or a backtick can't
-    /// print one thing here and write another - copy this line verbatim and it is exactly
-    /// as safe as the file loom writes.</summary>
+    /// error there. Routed through QuoteForCurrentShell rather than a hand-rolled,
+    /// always-double-quoted format, so a path containing `$` or a backtick can't print
+    /// one thing here and be misread as something else when pasted: PowerShell
+    /// interpolates both inside double quotes, so the Windows branch uses PowerShell's
+    /// single-quoted literal form - the same quoting QuoteForCurrentShell gives the
+    /// printed `add-user --users-file` line - and the Unix branch uses the same
+    /// per-shell renderer the persisted file itself is written with.</summary>
     private static string FormatSetVarLine(string variable, string value)
     {
         if (OperatingSystem.IsWindows()) return $"  $env:{variable} = {QuoteForCurrentShell(value)}";
@@ -104,10 +107,13 @@ public static class AuthCommand
     /// <summary>Quotes a value for whatever shell the user is actually in, matching
     /// FormatSetVarLine's own per-platform choice, so a printed CLI command (e.g. the
     /// "add-user" line Init prints) can be copied and pasted with the same safety as the
-    /// "set these" lines - one path value, one quoting rule, everywhere it is printed.</summary>
+    /// "set these" lines - one path value, one quoting rule, everywhere it is printed.
+    /// PowerShell's literal form is single-quoted with `''` doubling for an embedded
+    /// quote - NOT double quotes, which PowerShell interpolates: a path containing `$`
+    /// or a backtick inside `"..."` sets a wrong or empty value when pasted.</summary>
     private static string QuoteForCurrentShell(string value)
     {
-        if (OperatingSystem.IsWindows()) return $"\"{value}\"";
+        if (OperatingSystem.IsWindows()) return "'" + value.Replace("'", "''") + "'";
         var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
         return isFish ? QuoteFishSingle(value) : QuotePosixSingle(value);
     }

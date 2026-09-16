@@ -39,7 +39,7 @@ public static class AuthCommand
         Console.WriteLine($"Wrote {keyPath}");
         Console.WriteLine($"Wrote {usersPath}");
         Console.WriteLine();
-        Console.WriteLine("Set these before starting Loom.Web.Api or loom-dashboard:");
+        Console.WriteLine("Set these before starting loom-dashboard:");
         Console.WriteLine($"  $env:{KeyMaterial.KeyFileVariable} = \"{keyPath}\"");
         Console.WriteLine($"  $env:{KeyMaterial.UsersFileVariable} = \"{usersPath}\"");
 

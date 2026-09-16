@@ -55,10 +55,10 @@ switch (args)
         await MetricsCommand.RunAsync(metricsPid2, category, cts.Token);
         break;
     case ["auth", "init"]:
-        AuthCommand.Init(persist: false);
+        if (!AuthCommand.Init(persist: false)) Environment.Exit(1);
         break;
     case ["auth", "init", "--persist"]:
-        AuthCommand.Init(persist: true);
+        if (!AuthCommand.Init(persist: true)) Environment.Exit(1);
         break;
     case ["auth", "add-user", var newUser, ..]:
         {

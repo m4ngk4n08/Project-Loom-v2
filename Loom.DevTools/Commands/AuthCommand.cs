@@ -15,7 +15,13 @@ public static class AuthCommand
     private const UnixFileMode SecretDirMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
     private const UnixFileMode SecretFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
-    public static void Init(bool persist = false)
+    /// <summary>Returns false on a genuine failure - so a caller such as
+    /// `loom auth init --persist &amp;&amp; loom-dashboard` does not proceed on a refusal.
+    /// The routine, idempotent re-run against an existing key ("Refusing to overwrite...")
+    /// is NOT a failure - it is the state init exists to produce, already holding - and
+    /// keeps returning true unless something alongside it (tightening permissions,
+    /// persisting) genuinely goes wrong.</summary>
+    public static bool Init(bool persist = false)
     {
         // Checked before EnsureDevSecretsDirectory does anything on disk. If
         // LocalApplicationData resolves empty, Path.Combine yields the relative
@@ -28,21 +34,22 @@ public static class AuthCommand
         {
             Console.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devSecretsDirectory}'.");
             Console.WriteLine("Refusing to write a signing key under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix) and try again.");
-            return;
+            return false;
         }
 
-        EnsureDevSecretsDirectory();
+        var directoryTightened = EnsureDevSecretsDirectory();
         var keyPath = Path.Combine(DevSecretsDirectory, "jwt.key");
         var usersPath = Path.Combine(DevSecretsDirectory, "users");
 
         if (File.Exists(keyPath))
         {
-            TightenIfLoose(keyPath, SecretFileMode);
-            if (File.Exists(usersPath)) TightenIfLoose(usersPath, SecretFileMode);
+            var keyTightened = TightenIfLoose(keyPath, SecretFileMode);
+            var usersTightened = !File.Exists(usersPath) || TightenIfLoose(usersPath, SecretFileMode);
 
             Console.WriteLine($"Refusing to overwrite an existing signing key at {keyPath}.");
             Console.WriteLine("Delete it deliberately if you intend to rotate - every outstanding token dies with it.");
 
+            var persisted = true;
             if (persist)
             {
                 // PersistEnvironmentVariablesUnix's failure paths say "Add the exports
@@ -62,7 +69,7 @@ public static class AuthCommand
                 // pre-existing LOOM_AUTH_USERS_FILE forward out of the shell profile's
                 // loom block even though usersPath itself is missing here, so "persisting
                 // only the key" would be false whenever that carry-forward fires.
-                var persistedUsersPath = PersistEnvironmentVariables(keyPath, existingUsersPath);
+                var persistedUsersPath = PersistEnvironmentVariables(keyPath, existingUsersPath, out persisted);
                 if (existingUsersPath is null)
                 {
                     Console.WriteLine(persistedUsersPath is not null
@@ -71,13 +78,14 @@ public static class AuthCommand
                 }
             }
 
-            return;
+            return directoryTightened && keyTightened && usersTightened && persisted;
         }
 
         WriteSecretFile(keyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
         var usersFileAlreadyExisted = File.Exists(usersPath);
+        var usersFileTightened = true;
         if (!usersFileAlreadyExisted) WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
-        else TightenIfLoose(usersPath, SecretFileMode);
+        else usersFileTightened = TightenIfLoose(usersPath, SecretFileMode);
 
         Console.WriteLine($"Wrote {keyPath}");
         // "Wrote {usersPath}" was previously printed unconditionally, including here
@@ -90,10 +98,11 @@ public static class AuthCommand
         Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
         Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, usersPath));
 
+        var freshPersisted = true;
         if (persist)
         {
             Console.WriteLine();
-            PersistEnvironmentVariables(keyPath, usersPath);
+            PersistEnvironmentVariables(keyPath, usersPath, out freshPersisted);
         }
         else
         {
@@ -103,6 +112,8 @@ public static class AuthCommand
 
         Console.WriteLine();
         Console.WriteLine($"Then add an operator:  loom auth add-user operator --users-file {QuoteForCurrentShell(usersPath)}");
+
+        return directoryTightened && usersFileTightened && freshPersisted;
     }
 
     /// <summary>The "set these before starting" line, in the syntax the terminal the user
@@ -229,11 +240,15 @@ public static class AuthCommand
     /// <summary>Returns the users-file path that actually ended up persisted (which, on
     /// Unix, may differ from the usersPath argument via carry-forward - see
     /// PersistEnvironmentVariablesUnix), or null if none was. Callers use this to report
-    /// what actually happened rather than what they assumed would happen.</summary>
-    private static string? PersistEnvironmentVariables(string keyPath, string? usersPath)
+    /// what actually happened rather than what they assumed would happen. `succeeded` is
+    /// separate from the return value because a null return is not itself a failure - it
+    /// also means "there was no users path to persist and none to carry forward".
+    /// Persisting on Windows cannot fail: it is a registry write with no home-directory
+    /// lookup or file write to fail on.</summary>
+    private static string? PersistEnvironmentVariables(string keyPath, string? usersPath, out bool succeeded)
     {
         if (!OperatingSystem.IsWindows())
-            return PersistEnvironmentVariablesUnix(keyPath, usersPath);
+            return PersistEnvironmentVariablesUnix(keyPath, usersPath, out succeeded);
 
         WarnIfDifferentExistingValue(KeyMaterial.KeyFileVariable, keyPath);
         Environment.SetEnvironmentVariable(KeyMaterial.KeyFileVariable, keyPath, EnvironmentVariableTarget.User);
@@ -250,6 +265,7 @@ public static class AuthCommand
         }
 
         Console.WriteLine("Open a NEW terminal to pick them up - this terminal's environment does not change.");
+        succeeded = true;
         return usersPath;
     }
 
@@ -270,7 +286,7 @@ public static class AuthCommand
     /// EnvironmentVariableTarget.User is a Windows/registry concept. The only durable
     /// place is a shell startup file, chosen from $SHELL's basename so it matches the
     /// shell the user actually runs.</summary>
-    private static string? PersistEnvironmentVariablesUnix(string keyPath, string? usersPath)
+    private static string? PersistEnvironmentVariablesUnix(string keyPath, string? usersPath, out bool succeeded)
     {
         var shellEnvValue = Environment.GetEnvironmentVariable("SHELL");
 
@@ -283,6 +299,7 @@ public static class AuthCommand
         {
             Console.WriteLine("Could not determine your home directory - refusing to guess a shell profile path.");
             Console.WriteLine("Add the exports above to your shell profile manually.");
+            succeeded = false;
             return null;
         }
 
@@ -373,9 +390,11 @@ public static class AuthCommand
         {
             Console.WriteLine($"Could not write {profilePath}: {ex.Message}");
             Console.WriteLine("Add the exports above to your shell profile manually.");
+            succeeded = false;
             return null;
         }
 
+        succeeded = true;
         Console.WriteLine($"This terminal's environment does not change - open a new terminal or run `source {profilePath}` to pick them up.");
         return effectiveUsersPath;
     }

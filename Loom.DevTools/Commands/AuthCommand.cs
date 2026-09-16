@@ -139,19 +139,22 @@ public static class AuthCommand
 
     /// <summary>Creates dev-secrets at 700 on Unix. If it already exists (a re-run, or a
     /// leftover from before this fix), tightens it in place rather than trusting the mode
-    /// it already has.</summary>
-    private static void EnsureDevSecretsDirectory()
+    /// it already has. Returns false when it exists but could not be tightened (see
+    /// TightenIfLoose) - init's whole promise on Unix is a private dev-secrets directory,
+    /// and succeeding while that promise is unmet would be a lie.</summary>
+    private static bool EnsureDevSecretsDirectory()
     {
         if (OperatingSystem.IsWindows())
         {
             Directory.CreateDirectory(DevSecretsDirectory);
-            return;
+            return true;
         }
 
         if (Directory.Exists(DevSecretsDirectory))
-            TightenIfLoose(DevSecretsDirectory, SecretDirMode);
-        else
-            Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode);
+            return TightenIfLoose(DevSecretsDirectory, SecretDirMode);
+
+        Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode);
+        return true;
     }
 
     /// <summary>Creates a new file at 600 on Unix by passing the mode to the OS at create
@@ -178,17 +181,34 @@ public static class AuthCommand
 
     /// <summary>Unix only. A user who ran a previous version of this tool has a
     /// world-readable key sitting on disk right now with no way to know - tighten it and
-    /// say so.</summary>
-    private static void TightenIfLoose(string path, UnixFileMode required)
+    /// say so. Returns false, without throwing, when the current user does not own the
+    /// path (e.g. a leftover from an earlier `sudo loom auth init`) - File.SetUnixFileMode
+    /// throws UnauthorizedAccessException there, and init's whole promise on Unix is a
+    /// 600 key; if it cannot deliver that, succeeding would be a lie about a security
+    /// property.</summary>
+    private static bool TightenIfLoose(string path, UnixFileMode required)
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows()) return true;
 
         var current = File.GetUnixFileMode(path);
         if ((current & ~required) != 0)
         {
-            File.SetUnixFileMode(path, required);
+            try
+            {
+                File.SetUnixFileMode(path, required);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Not naming the file's owner: the BCL exposes no owning-uid API on Unix,
+                // and adding native `stat` interop here is not worth the AOT risk - "chown
+                // to yourself" is actionable without it.
+                Console.Error.WriteLine($"Could not tighten permissions on {path} - you do not own it (currently {ModeString(current)}, needs {ModeString(required)}).");
+                Console.Error.WriteLine($"  Fix it manually:  chown \"$(whoami)\" {path} && chmod {ModeString(required)} {path}");
+                return false;
+            }
             Console.WriteLine($"Tightened permissions on {path} to {ModeString(required)} (was {ModeString(current)}).");
         }
+        return true;
     }
 
     private static string ModeString(UnixFileMode mode)

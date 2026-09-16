@@ -19,7 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # macos-latest was added 2026-09-16 so the Unix shell-profile path in
+        # `loom auth init --persist` has a real Mac to run against. Nobody on this
+        # project has one, and Apple's licence only permits macOS on Apple hardware,
+        # so a local VM is not an option. GitHub's runners are free for public repos.
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

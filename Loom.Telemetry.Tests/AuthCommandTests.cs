@@ -128,6 +128,36 @@ public class AuthCommandTests
     }
 
     [Fact]
+    public void ExtractExistingUsersPath_BlockPresentWithExportSyntax_ReturnsValue()
+    {
+        const string content = "# before\n# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"k\"\nexport LOOM_AUTH_USERS_FILE=\"u\"\n# <<< loom <<<\n";
+
+        Assert.Equal("u", AuthCommand.ExtractExistingUsersPath(content));
+    }
+
+    [Fact]
+    public void ExtractExistingUsersPath_BlockPresentWithFishSyntax_ReturnsValue()
+    {
+        const string content = "# >>> loom >>>\nset -gx LOOM_JWT_KEY_FILE \"k\"\nset -gx LOOM_AUTH_USERS_FILE \"u\"\n# <<< loom <<<\n";
+
+        Assert.Equal("u", AuthCommand.ExtractExistingUsersPath(content));
+    }
+
+    [Fact]
+    public void ExtractExistingUsersPath_BlockPresentWithNoUsersLine_ReturnsNull()
+    {
+        const string content = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"k\"\n# <<< loom <<<\n";
+
+        Assert.Null(AuthCommand.ExtractExistingUsersPath(content));
+    }
+
+    [Fact]
+    public void ExtractExistingUsersPath_NoBlock_ReturnsNull()
+    {
+        Assert.Null(AuthCommand.ExtractExistingUsersPath("export EDITOR=vim\n"));
+    }
+
+    [Fact]
     public void UpsertUnixPersistBlock_TwoExistingBlocks_CollapsesToOneAtFirstPosition()
     {
         const string before = "# before\n";

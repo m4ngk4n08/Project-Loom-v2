@@ -207,7 +207,6 @@ public static class AuthCommand
         }
 
         var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory);
-        var block = RenderUnixPersistBlock(shellEnvValue, keyPath, usersPath);
 
         try
         {
@@ -215,6 +214,15 @@ public static class AuthCommand
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
             var existing = File.Exists(profilePath) ? File.ReadAllText(profilePath) : string.Empty;
+
+            // The re-run path (key exists, users file missing) calls here with
+            // usersPath: null. RenderUnixPersistBlock then omits the users line
+            // entirely, and UpsertUnixPersistBlock replaces the WHOLE block - so a
+            // LOOM_AUTH_USERS_FILE export the user was relying on would silently vanish
+            // unless we carry it forward from whatever block is already there.
+            var effectiveUsersPath = usersPath ?? ExtractExistingUsersPath(existing);
+            var block = RenderUnixPersistBlock(shellEnvValue, keyPath, effectiveUsersPath);
+
             var updated = UpsertUnixPersistBlock(existing, block);
             File.WriteAllText(profilePath, updated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
@@ -266,6 +274,22 @@ public static class AuthCommand
 
     private static string RenderUnixExportLine(bool isFish, string variable, string value) =>
         isFish ? $"set -gx {variable} \"{value}\"" : $"export {variable}=\"{value}\"";
+
+    /// <summary>Pure. Finds the first loom block in existingContent and pulls the value
+    /// already assigned to LOOM_AUTH_USERS_FILE out of it, in either `export VAR="..."`
+    /// or fish's `set -gx VAR "..."` form. Returns null when there is no block or no such
+    /// line - the caller then has nothing to preserve.</summary>
+    public static string? ExtractExistingUsersPath(string existingContent)
+    {
+        var blockPattern = new Regex(
+            Regex.Escape(UnixBlockStart) + @".*?" + Regex.Escape(UnixBlockEnd),
+            RegexOptions.Singleline);
+        var blockMatch = blockPattern.Match(existingContent);
+        if (!blockMatch.Success) return null;
+
+        var lineMatch = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+\"([^\"]*)\"");
+        return lineMatch.Success ? lineMatch.Groups[1].Value : null;
+    }
 
     private static string ClassifyUnixShell(string? shellEnvValue)
     {

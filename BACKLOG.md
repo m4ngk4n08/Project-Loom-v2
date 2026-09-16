@@ -1478,6 +1478,52 @@ target. **Do not** fall back to writing a regular file in the link's place.
 
 ---
 
+### 6.16 `loom auth` Prints PowerShell-Only Commands to Every Windows Shell 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
+`sonnet/auth-init-unix-persist` — **not yet on `main`**. Line numbers from the branch at `d758e14`.
+
+On Windows, everything `loom auth init` prints for the user to copy assumes **PowerShell**:
+
+- the next-step line (`:114`) quotes its path through `QuoteForCurrentShell` (`:144`), which on
+  Windows always emits PowerShell's single-quoted literal form:
+  `loom auth add-user operator --users-file 'C:\Users\x\AppData\Local\Loom\dev-secrets\users'`
+- the "set these before starting" lines (`:132`) are `$env:LOOM_JWT_KEY_FILE = '...'`
+
+**In the classic Command Prompt (`cmd.exe`) neither works.** `cmd` does not treat single quotes
+as quoting, so they reach the program literally and the pasted command fails with
+`Users file not found at 'C:\...'`. And `$env:NAME = value` is not `cmd` syntax at all — `cmd`
+uses `set NAME=value`.
+
+**Why it is this way.** Round 4 deliberately moved the Windows form from double quotes to
+PowerShell single quotes: PowerShell interpolates `$` and backticks inside double quotes, and both
+are legal in Windows paths, so a double-quoted path could silently set a wrong or empty value.
+That fix was correct for PowerShell and is what makes `cmd` fail.
+
+**Why LOW:** PowerShell is the default shell in Windows Terminal and in modern Windows. A `cmd`
+user gets a **loud** failure that shows the stray quotes in its own message — and, since round 5,
+a non-zero exit — rather than a silent wrong result.
+
+**Why it is not simply "detect the shell":** a child process cannot reliably tell whether its
+parent is `cmd` or PowerShell. `PSModulePath` is set system-wide on current Windows, so its
+presence proves nothing, and walking the parent process tree is fragile across terminal hosts.
+
+**Fix options, not yet chosen:**
+
+1. **Print both forms**, labelled — one line for PowerShell, one for Command Prompt. Most robust;
+   noisier output.
+2. **Double quotes for the `add-user` path only**, which both shells accept, and keep single
+   quotes for `$env:` lines, which are PowerShell-only anyway. Reopens the `$`/backtick risk for
+   that one line; paths under `%LOCALAPPDATA%` rarely contain either, but "rarely" is the argument
+   round 4 rejected.
+3. **Label the output as PowerShell** and leave `cmd` users to translate. Cheapest, least helpful.
+
+**Found by** `/code-review high` on round 5 of that branch. Filed rather than fixed: it is a
+convenience defect with a loud failure mode, and the right fix is a presentation decision rather
+than a correctness one.
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)

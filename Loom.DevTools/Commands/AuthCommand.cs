@@ -272,8 +272,25 @@ public static class AuthCommand
         return sb.ToString();
     }
 
+    /// <summary>Single-quoted, not double-quoted: the value is a filesystem path that can
+    /// come from an environment variable (XDG_DATA_HOME feeds LocalApplicationData), so a
+    /// backtick, `$`, or embedded `"` inside a double-quoted rc line would either set the
+    /// wrong value or run a command substitution on every new shell - worse than a wrong
+    /// path.</summary>
     private static string RenderUnixExportLine(bool isFish, string variable, string value) =>
-        isFish ? $"set -gx {variable} \"{value}\"" : $"export {variable}=\"{value}\"";
+        isFish ? $"set -gx {variable} {QuoteFishSingle(value)}" : $"export {variable}={QuotePosixSingle(value)}";
+
+    /// <summary>POSIX single quotes admit no escape at all - the standard trick to
+    /// include a literal quote is to close the quoted string, splice in an escaped quote,
+    /// and reopen: 'it'\''s' for it's.</summary>
+    private static string QuotePosixSingle(string value) =>
+        "'" + value.Replace("'", "'\\''") + "'";
+
+    /// <summary>fish's single-quoted strings recognize \\ and \' as escapes (everything
+    /// else, `$` and backticks included, is literal) - the opposite convention from
+    /// POSIX, so it needs its own escaping rather than reusing QuotePosixSingle.</summary>
+    private static string QuoteFishSingle(string value) =>
+        "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
     /// <summary>Pure. Finds the first loom block in existingContent and pulls the value
     /// already assigned to LOOM_AUTH_USERS_FILE out of it, in either `export VAR="..."`
@@ -287,7 +304,10 @@ public static class AuthCommand
         var blockMatch = blockPattern.Match(existingContent);
         if (!blockMatch.Success) return null;
 
-        var lineMatch = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+\"([^\"]*)\"");
+        // Matches both the current single-quoted form and the double-quoted form written
+        // by loom before item 7's quoting fix, so a block written by an older loom is
+        // still recognized.
+        var lineMatch = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+['\"]([^'\"]*)['\"]");
         return lineMatch.Success ? lineMatch.Groups[1].Value : null;
     }
 

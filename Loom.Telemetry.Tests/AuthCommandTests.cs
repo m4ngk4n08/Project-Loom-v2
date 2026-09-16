@@ -60,8 +60,8 @@ public class AuthCommandTests
 
         Assert.Equal(
             "# >>> loom >>>\n" +
-            "set -gx LOOM_JWT_KEY_FILE \"/home/u/.local/share/Loom/dev-secrets/jwt.key\"\n" +
-            "set -gx LOOM_AUTH_USERS_FILE \"/home/u/.local/share/Loom/dev-secrets/users\"\n" +
+            "set -gx LOOM_JWT_KEY_FILE '/home/u/.local/share/Loom/dev-secrets/jwt.key'\n" +
+            "set -gx LOOM_AUTH_USERS_FILE '/home/u/.local/share/Loom/dev-secrets/users'\n" +
             "# <<< loom <<<\n",
             block);
     }
@@ -75,10 +75,30 @@ public class AuthCommandTests
 
         Assert.Equal(
             "# >>> loom >>>\n" +
-            "export LOOM_JWT_KEY_FILE=\"/home/u/jwt.key\"\n" +
-            "export LOOM_AUTH_USERS_FILE=\"/home/u/users\"\n" +
+            "export LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n" +
+            "export LOOM_AUTH_USERS_FILE='/home/u/users'\n" +
             "# <<< loom <<<\n",
             block);
+    }
+
+    [Fact]
+    public void RenderUnixPersistBlock_ValueWithShellMetacharacters_IsSingleQuotedAndEscaped()
+    {
+        const string weirdPath = "/home/u/a`b$c'd/jwt.key";
+
+        var bashBlock = AuthCommand.RenderUnixPersistBlock("/bin/bash", weirdPath, null);
+        Assert.Equal(
+            "# >>> loom >>>\n" +
+            "export LOOM_JWT_KEY_FILE='/home/u/a`b$c'\\''d/jwt.key'\n" +
+            "# <<< loom <<<\n",
+            bashBlock);
+
+        var fishBlock = AuthCommand.RenderUnixPersistBlock("/usr/local/bin/fish", weirdPath, null);
+        Assert.Equal(
+            "# >>> loom >>>\n" +
+            "set -gx LOOM_JWT_KEY_FILE '/home/u/a`b$c\\'d/jwt.key'\n" +
+            "# <<< loom <<<\n",
+            fishBlock);
     }
 
     [Fact]

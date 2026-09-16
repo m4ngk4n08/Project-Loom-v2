@@ -4,9 +4,17 @@ public static class KeyMaterial
 {
     public const string KeyFileVariable = "LOOM_JWT_KEY_FILE";
     public const string UsersFileVariable = "LOOM_AUTH_USERS_FILE";
-    public const string DefaultKeyFile = "/var/secrets/loom/jwt.key";
-    public const string DefaultUsersFile = "/var/secrets/loom/users";
     private const int MinimumKeyBytes = 32;
+
+    /// <summary>The one definition of where dev-secrets live. `loom auth init` writes
+    /// here and, absent the env vars, this is also where the host looks - so setup and
+    /// lookup cannot disagree.</summary>
+    public static string DevSecretsDirectory =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Loom", "dev-secrets");
+
+    public static string DefaultKeyFile => Path.Combine(DevSecretsDirectory, "jwt.key");
+
+    public static string DefaultUsersFile => Path.Combine(DevSecretsDirectory, "users");
 
     public static string ResolveKeyFile() =>
         Environment.GetEnvironmentVariable(KeyFileVariable) ?? DefaultKeyFile;

@@ -7,8 +7,7 @@ namespace Loom.DevTools.Commands;
 /// <summary>loom auth init | add-user &lt;name&gt; | hash | token --sub X [--scope metrics] [--ttl 90d]</summary>
 public static class AuthCommand
 {
-    private static string DevSecretsDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Loom", "dev-secrets");
+    private static string DevSecretsDirectory => KeyMaterial.DevSecretsDirectory;
 
     public static void Init(bool persist = false)
     {

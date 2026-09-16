@@ -235,15 +235,40 @@ public static class AuthCommand
 
             var updatedBytes = UpsertUnixPersistBlockBytes(existingBytes, existing, block);
 
+            // Many people's shell profile is a symlink into a dotfiles repo (stow,
+            // chezmoi, a plain git repo). File.Move REPLACES the target rather than
+            // writing through it - unlinking the symlink and dropping a regular file in
+            // its place, silently detaching the user's setup. Resolve to the final
+            // target first and write-then-rename there instead; a non-symlink
+            // profilePath resolves to itself (ResolveLinkTarget returns null).
+            var writeTargetPath = profilePath;
+            if (File.Exists(profilePath))
+            {
+                var resolvedTarget = File.ResolveLinkTarget(profilePath, returnFinalTarget: true);
+                if (resolvedTarget is not null) writeTargetPath = resolvedTarget.FullName;
+            }
+
+            // File.Move also does not preserve the replaced file's permissions - a 600
+            // profile would come back 644. Capture the current mode and re-apply it to
+            // the temp file before the rename so it survives. The !IsWindows() guard is
+            // redundant with the caller's (this method only runs on Unix) but is what
+            // the platform-compat analyzer needs to see directly around a Unix-only
+            // API to accept the call - see TightenIfLoose above for the same pattern.
+            UnixFileMode? existingMode = null;
+            if (!OperatingSystem.IsWindows() && File.Exists(writeTargetPath))
+                existingMode = File.GetUnixFileMode(writeTargetPath);
+
             // Write-then-rename rather than truncate-in-place, so a crash mid-write
             // leaves either the old file or the new one intact, never a truncated shell
             // profile. File.Move's overwrite is atomic on the same filesystem, and the
             // temp file sits next to the target so it always is one.
-            var tempPath = profilePath + $".loom-tmp-{Guid.NewGuid():N}";
+            var tempPath = writeTargetPath + $".loom-tmp-{Guid.NewGuid():N}";
             try
             {
                 File.WriteAllBytes(tempPath, updatedBytes);
-                File.Move(tempPath, profilePath, overwrite: true);
+                if (!OperatingSystem.IsWindows() && existingMode is not null)
+                    File.SetUnixFileMode(tempPath, existingMode.Value);
+                File.Move(tempPath, writeTargetPath, overwrite: true);
             }
             finally
             {

@@ -25,10 +25,21 @@ public sealed class UserStore
         if (!File.Exists(path))
             throw new InvalidOperationException($"Loom auth: users file not found at '{path}'. Run 'loom auth init'.");
 
+        string[] lines;
+        try
+        {
+            lines = File.ReadAllLines(path);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            throw new InvalidOperationException(
+                $"Loom auth: '{path}' exists but this process cannot read it. Check its ownership and permissions.");
+        }
+
         var users = new Dictionary<string, UserRecord>(StringComparer.Ordinal);
         var lineNumber = 0;
 
-        foreach (var raw in File.ReadLines(path))
+        foreach (var raw in lines)
         {
             lineNumber++;
             var line = raw.Trim();

@@ -49,10 +49,21 @@ public static class KeyMaterial
             throw new InvalidOperationException(
                 $"Loom auth: signing key not found at '{path}'. Set {KeyFileVariable} or run 'loom auth init'.");
 
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            throw new InvalidOperationException(
+                $"Loom auth: '{path}' exists but this process cannot read it. Check its ownership and permissions.");
+        }
+
         byte[] key;
         try
         {
-            key = Convert.FromBase64String(File.ReadAllText(path).Trim());
+            key = Convert.FromBase64String(text.Trim());
         }
         catch (FormatException)
         {

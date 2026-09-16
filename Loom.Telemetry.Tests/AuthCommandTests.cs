@@ -48,9 +48,34 @@ public class AuthCommandTests
     [InlineData("/bin/tcsh", "/home/u/.profile")]
     [InlineData(null, "/home/u/.profile")]
     [InlineData("", "/home/u/.profile")]
-    public void ResolveUnixProfilePath_MapsShellBasenameToExpectedFile(string? shellEnvValue, string expected)
+    public void ResolveUnixProfilePath_Linux_MapsShellBasenameToExpectedFile(string? shellEnvValue, string expected)
     {
-        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath(shellEnvValue, "/home/u"));
+        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath(shellEnvValue, "/home/u", isMacOS: false));
+    }
+
+    // isMacOS is now an explicit parameter rather than an OperatingSystem.IsMacOS()
+    // read inside ResolveUnixProfilePath, so both branches of the bash mapping are
+    // testable here on Windows CI with no Mac required.
+    [Fact]
+    public void ResolveUnixProfilePath_MacOsBash_UsesBashProfileNotBashrc()
+    {
+        Assert.Equal("/home/u/.bash_profile", AuthCommand.ResolveUnixProfilePath("/bin/bash", "/home/u", isMacOS: true));
+    }
+
+    [Fact]
+    public void ResolveUnixProfilePath_LinuxBash_UsesBashrcNotBashProfile()
+    {
+        Assert.Equal("/home/u/.bashrc", AuthCommand.ResolveUnixProfilePath("/bin/bash", "/home/u", isMacOS: false));
+    }
+
+    // Non-bash shells are unaffected by isMacOS - covers both values so a future
+    // regression that starts branching on it for zsh/fish is caught here.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ResolveUnixProfilePath_NonBashShells_UnaffectedByIsMacOs(bool isMacOS)
+    {
+        Assert.Equal("/home/u/.zshrc", AuthCommand.ResolveUnixProfilePath("/usr/bin/zsh", "/home/u", isMacOS));
     }
 
     [Theory]
@@ -60,7 +85,7 @@ public class AuthCommandTests
     [InlineData("/home/u/xdgcfg/", "/home/u/xdgcfg/fish/config.fish")]
     public void ResolveUnixProfilePath_Fish_HonoursXdgConfigHome(string? xdgConfigHome, string expected)
     {
-        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/local/bin/fish", "/home/u", xdgConfigHome));
+        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/local/bin/fish", "/home/u", isMacOS: false, xdgConfigHome));
     }
 
     [Fact]

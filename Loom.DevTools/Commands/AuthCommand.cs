@@ -206,7 +206,7 @@ public static class AuthCommand
             return;
         }
 
-        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
+        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, OperatingSystem.IsMacOS(), Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
 
         try
         {
@@ -264,8 +264,11 @@ public static class AuthCommand
     }
 
     /// <summary>Pure. Maps $SHELL's basename to the profile file loom persists into.
-    /// Unknown or unset shells fall back to ~/.profile rather than guessing.</summary>
-    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory, string? xdgConfigHome = null)
+    /// Unknown or unset shells fall back to ~/.profile rather than guessing. isMacOS is
+    /// an explicit parameter, not an internal OperatingSystem.IsMacOS() read, so this
+    /// stays pure and testable for both branches on any host - the caller passes what
+    /// it detects.</summary>
+    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory, bool isMacOS, string? xdgConfigHome = null)
     {
         var home = homeDirectory.TrimEnd('/');
         return ClassifyUnixShell(shellEnvValue) switch
@@ -275,7 +278,7 @@ public static class AuthCommand
             // .bash_profile (or .bash_login / .profile) and never .bashrc - a stock
             // .bash_profile does not source .bashrc either. Linux interactive bash reads
             // .bashrc.
-            "bash" => OperatingSystem.IsMacOS() ? $"{home}/.bash_profile" : $"{home}/.bashrc",
+            "bash" => isMacOS ? $"{home}/.bash_profile" : $"{home}/.bashrc",
             // fish reads its config from $XDG_CONFIG_HOME/fish, not a hardcoded ~/.config -
             // a fish user with XDG_CONFIG_HOME set elsewhere would otherwise get a file
             // fish never reads, reported as success.

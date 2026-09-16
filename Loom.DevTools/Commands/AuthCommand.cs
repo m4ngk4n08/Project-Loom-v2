@@ -31,10 +31,19 @@ public static class AuthCommand
 
             if (persist)
             {
+                // PersistEnvironmentVariablesUnix's failure paths say "Add the exports
+                // above" - that instruction is only followable if something was
+                // actually printed above it, which this branch (unlike the fresh-key
+                // path below) previously never did.
                 Console.WriteLine();
                 var existingUsersPath = File.Exists(usersPath) ? usersPath : null;
-                if (existingUsersPath is null)
+                Console.WriteLine("Set these before starting loom-dashboard:");
+                Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
+                if (existingUsersPath is not null)
+                    Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, existingUsersPath));
+                else
                     Console.WriteLine($"No users file found at {usersPath} - persisting only {KeyMaterial.KeyFileVariable}.");
+                Console.WriteLine();
                 PersistEnvironmentVariables(keyPath, existingUsersPath);
             }
 

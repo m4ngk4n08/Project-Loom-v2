@@ -17,6 +17,20 @@ public static class AuthCommand
 
     public static void Init(bool persist = false)
     {
+        // Checked before EnsureDevSecretsDirectory does anything on disk. If
+        // LocalApplicationData resolves empty, Path.Combine yields the relative
+        // "Loom/dev-secrets" - EnsureDevSecretsDirectory would then create it (and
+        // WriteSecretFile the signing key into it) under the current working directory,
+        // possibly inside a git repo, while PersistEnvironmentVariablesUnix's own
+        // home-directory check later reports that it refused to guess.
+        var devSecretsDirectory = DevSecretsDirectory;
+        if (!Path.IsPathRooted(devSecretsDirectory))
+        {
+            Console.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devSecretsDirectory}'.");
+            Console.WriteLine("Refusing to write a signing key under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix) and try again.");
+            return;
+        }
+
         EnsureDevSecretsDirectory();
         var keyPath = Path.Combine(DevSecretsDirectory, "jwt.key");
         var usersPath = Path.Combine(DevSecretsDirectory, "users");

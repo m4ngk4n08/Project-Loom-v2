@@ -351,9 +351,14 @@ public static class AuthCommand
         "'" + value.Replace("\\", "\\\\").Replace("'", "\\'") + "'";
 
     /// <summary>Pure. Finds the first loom block in existingContent and pulls the value
-    /// already assigned to LOOM_AUTH_USERS_FILE out of it, in either `export VAR="..."`
-    /// or fish's `set -gx VAR "..."` form. Returns null when there is no block or no such
-    /// line - the caller then has nothing to preserve.</summary>
+    /// already assigned to LOOM_AUTH_USERS_FILE out of it, in either `export VAR=...`
+    /// or fish's `set -gx VAR ...` form, across every form loom (or a human) may have
+    /// written: single-quoted with POSIX '\''-escaping (the current writer),
+    /// double-quoted, and bare/unquoted. A naive [^'"]* scan (the previous approach)
+    /// truncated at the FIRST embedded quote, so a path containing an apostrophe - now
+    /// written as '/home/u/a'\''b/users' - extracted as just "/home/u/a". Returns null
+    /// when there is no block or no such line - the caller then has nothing to
+    /// preserve.</summary>
     public static string? ExtractExistingUsersPath(string existingContent)
     {
         var blockPattern = new Regex(
@@ -362,11 +367,68 @@ public static class AuthCommand
         var blockMatch = blockPattern.Match(existingContent);
         if (!blockMatch.Success) return null;
 
-        // Matches both the current single-quoted form and the double-quoted form written
-        // by loom before item 7's quoting fix, so a block written by an older loom is
-        // still recognized.
-        var lineMatch = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+['\"]([^'\"]*)['\"]");
-        return lineMatch.Success ? lineMatch.Groups[1].Value : null;
+        var assignment = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+");
+        return assignment.Success ? ParseShellValue(blockMatch.Value, assignment.Index + assignment.Length) : null;
+    }
+
+    /// <summary>Pure. Parses one shell value starting at valueStart: a POSIX
+    /// single-quoted value with '\''-escaping reversed to a literal quote, a
+    /// double-quoted value with \" and \\ unescaped, or - if valueStart is neither
+    /// quote character - a bare value running to end of line. Returns null on an
+    /// unterminated quote, which reads as "nothing to preserve" rather than a mangled
+    /// partial value.</summary>
+    private static string? ParseShellValue(string content, int valueStart)
+    {
+        if (valueStart >= content.Length) return null;
+
+        if (content[valueStart] == '\'')
+        {
+            var sb = new StringBuilder();
+            var pos = valueStart + 1;
+            while (true)
+            {
+                var closeQuote = content.IndexOf('\'', pos);
+                if (closeQuote < 0) return null;
+                sb.Append(content, pos, closeQuote - pos);
+
+                // '\'' - the standard POSIX splice for a literal quote: close (this
+                // quote), an escaped literal quote outside any quoting (\'), then
+                // reopen (a 4th quote char) - four characters total, not the value's
+                // end.
+                if (closeQuote + 3 < content.Length && content[closeQuote + 1] == '\\' && content[closeQuote + 2] == '\'' && content[closeQuote + 3] == '\'')
+                {
+                    sb.Append('\'');
+                    pos = closeQuote + 4;
+                    continue;
+                }
+
+                return sb.ToString();
+            }
+        }
+
+        if (content[valueStart] == '"')
+        {
+            var sb = new StringBuilder();
+            var pos = valueStart + 1;
+            while (pos < content.Length)
+            {
+                var c = content[pos];
+                if (c == '"') return sb.ToString();
+                if (c == '\\' && pos + 1 < content.Length && (content[pos + 1] == '"' || content[pos + 1] == '\\'))
+                {
+                    sb.Append(content[pos + 1]);
+                    pos += 2;
+                    continue;
+                }
+                sb.Append(c);
+                pos++;
+            }
+            return null;
+        }
+
+        var end = content.IndexOfAny(new[] { '\r', '\n' }, valueStart);
+        var rawValue = end < 0 ? content[valueStart..] : content[valueStart..end];
+        return rawValue.TrimEnd();
     }
 
     /// <summary>Pure. Detects a hand-written assignment to either loom variable OUTSIDE

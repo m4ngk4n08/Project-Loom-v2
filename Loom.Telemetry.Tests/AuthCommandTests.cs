@@ -243,6 +243,43 @@ public class AuthCommandTests
         Assert.Null(AuthCommand.ExtractExistingUsersPath("export EDITOR=vim\n"));
     }
 
+    // The exact regression this item fixes: a naive [^'"]* scan stopped at the FIRST
+    // embedded quote, so this round-trip through the real writer used to come back
+    // truncated as "/home/u/a" instead of the full path.
+    [Fact]
+    public void ExtractExistingUsersPath_RoundTripsPathContainingAnApostrophe()
+    {
+        var block = AuthCommand.RenderUnixPersistBlock("/bin/bash", "/home/u/jwt.key", "/home/u/a'b/users");
+
+        Assert.Equal("/home/u/a'b/users", AuthCommand.ExtractExistingUsersPath(block));
+    }
+
+    [Fact]
+    public void ExtractExistingUsersPath_SingleQuotedValueWithEscapedApostrophe_ReturnsFullValueNotTruncated()
+    {
+        const string content = "# >>> loom >>>\nexport LOOM_AUTH_USERS_FILE='/home/u/a'\\''b/users'\n# <<< loom <<<\n";
+
+        Assert.Equal("/home/u/a'b/users", AuthCommand.ExtractExistingUsersPath(content));
+    }
+
+    [Fact]
+    public void ExtractExistingUsersPath_DoubleQuotedValueWithEscapedQuote_ReturnsUnescapedValue()
+    {
+        const string content = "# >>> loom >>>\nexport LOOM_AUTH_USERS_FILE=\"/home/u/a\\\"b/users\"\n# <<< loom <<<\n";
+
+        Assert.Equal("/home/u/a\"b/users", AuthCommand.ExtractExistingUsersPath(content));
+    }
+
+    // A hand-edited block or a pre-quoting version of loom writes this form - it must
+    // not be dropped, which the carry-forward logic depends on.
+    [Fact]
+    public void ExtractExistingUsersPath_UnquotedValue_ReturnsValue()
+    {
+        const string content = "# >>> loom >>>\nexport LOOM_AUTH_USERS_FILE=/home/u/users\n# <<< loom <<<\n";
+
+        Assert.Equal("/home/u/users", AuthCommand.ExtractExistingUsersPath(content));
+    }
+
     [Fact]
     public void UpsertUnixPersistBlock_TwoExistingBlocks_CollapsesToOneAtFirstPosition()
     {

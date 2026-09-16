@@ -49,8 +49,8 @@ public static class AuthCommand
         Console.WriteLine($"Wrote {usersPath}");
         Console.WriteLine();
         Console.WriteLine("Set these before starting loom-dashboard:");
-        Console.WriteLine($"  $env:{KeyMaterial.KeyFileVariable} = \"{keyPath}\"");
-        Console.WriteLine($"  $env:{KeyMaterial.UsersFileVariable} = \"{usersPath}\"");
+        Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
+        Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, usersPath));
 
         if (persist)
         {
@@ -60,12 +60,23 @@ public static class AuthCommand
         else
         {
             Console.WriteLine();
-            Console.WriteLine("Those last only for this terminal. Re-run with --persist to set them for your user");
-            Console.WriteLine("account permanently.");
+            Console.WriteLine("Those last only for this terminal. Re-run with --persist to set them permanently.");
         }
 
         Console.WriteLine();
         Console.WriteLine("Then add an operator:  loom auth add-user operator");
+    }
+
+    /// <summary>The "set these before starting" line, in the syntax the terminal the user
+    /// is actually in will accept - PowerShell on Windows, fish's `set -gx` when $SHELL
+    /// says fish, POSIX `export` otherwise. Printing `$env:` syntax to a Linux or macOS
+    /// terminal is not just cosmetic: pasted verbatim, it is a syntax error there.</summary>
+    private static string FormatSetVarLine(string variable, string value)
+    {
+        if (OperatingSystem.IsWindows()) return $"  $env:{variable} = \"{value}\"";
+        if (ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish")
+            return $"  set -gx {variable} \"{value}\"";
+        return $"  export {variable}=\"{value}\"";
     }
 
     /// <summary>Creates dev-secrets at 700 on Unix. If it already exists (a re-run, or a

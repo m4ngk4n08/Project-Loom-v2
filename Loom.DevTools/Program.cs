@@ -104,7 +104,7 @@ switch (args)
         Console.WriteLine("  loom logs <pid> [--count N] [--category X] [--seconds N]   Show recent captured logs");
         Console.WriteLine("  loom search <pid> \"<query>\" [--max N] [--seconds N]        BM25 search over captured logs");
         Console.WriteLine("  loom auth init [--persist]              Create a dev signing key and users file");
-        Console.WriteLine("                                          (--persist also sets the env vars for your user account)");
+        Console.WriteLine("                                          (--persist also sets the env vars permanently)");
         Console.WriteLine("  loom auth add-user <name>               Append a user (prompts for a password)");
         Console.WriteLine("  loom auth hash                          Print a password hash to stdout");
         Console.WriteLine("                                          (the users-file line is <name>:<hash>)");

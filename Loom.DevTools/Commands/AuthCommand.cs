@@ -616,7 +616,7 @@ public static class AuthCommand
         if (File.Exists(KeyMaterial.DefaultUsersFile)) return KeyMaterial.DefaultUsersFile;
 
         var devPath = Path.Combine(DevSecretsDirectory, "users");
-        Console.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
+        Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
         return devPath;
     }
 
@@ -628,7 +628,7 @@ public static class AuthCommand
         if (File.Exists(KeyMaterial.DefaultKeyFile)) return KeyMaterial.DefaultKeyFile;
 
         var devPath = Path.Combine(DevSecretsDirectory, "jwt.key");
-        Console.WriteLine($"{KeyMaterial.KeyFileVariable} is not set and no key file exists at the system default - using {devPath}.");
+        Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set and no key file exists at the system default - using {devPath}.");
         return devPath;
     }
 

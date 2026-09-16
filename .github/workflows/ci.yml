@@ -19,12 +19,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest was added 2026-09-16 so the Unix shell-profile path in
-        # `loom auth init --persist` has a real Mac to run against. Nobody on this
-        # project has one, and Apple's licence only permits macOS on Apple hardware,
-        # so a local VM is not an option. GitHub's runners are free for public repos.
+        # macos-latest (added 2026-09-16) is general coverage: does Loom build and pass
+        # its suite on macOS at all. It is NOT coverage for `loom auth init --persist`'s
+        # shell-profile writing - that logic is tested as pure functions that run on any
+        # OS, and no job here writes a real profile. Nobody on this project has a Mac,
+        # Apple's licence permits macOS only on Apple hardware, and these runners are free
+        # for public repositories.
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # macOS is advisory until it has proven itself. aot-publish-linux and
+    # consumer-aot-gate both `needs: build-and-test`, which waits on EVERY matrix leg -
+    # `fail-fast: false` does not change that - so without this a macOS-only failure
+    # would silently skip both Linux AOT gates on the same push. macOS failures still
+    # show red on the job; they just cannot switch off the AOT checks. Nothing is known
+    # yet about the EventPipe integration tests on the arm64 runners macos-latest uses.
+    # Remove this once macOS has passed several consecutive runs.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
       - uses: actions/checkout@v4
 

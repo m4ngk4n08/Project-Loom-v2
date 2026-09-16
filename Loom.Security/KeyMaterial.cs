@@ -7,19 +7,28 @@ public static class KeyMaterial
     private const int MinimumKeyBytes = 32;
 
     /// <summary>The one definition of where dev-secrets live. `loom auth init` writes
-    /// here. This is NOT where the host looks by default - see SystemDefaultDirectory.
-    /// Setup and lookup are connected by the environment variables, which `--persist`
-    /// sets; they never silently coincide.</summary>
+    /// here. On Unix this is NOT where the host looks by default - see
+    /// SystemDefaultDirectory; setup and lookup there are connected only by the
+    /// environment variables, which `--persist` sets, and never silently coincide. On
+    /// Windows this folder IS the host's default (see SystemDefaultDirectory) because
+    /// there is no separate production deployment to protect from it.</summary>
     public static string DevSecretsDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Loom", "dev-secrets");
 
-    /// <summary>Where the host looks when the env vars are unset - system-scoped, not
-    /// user-writable, so an ephemeral dev key cannot reach production as a silent
-    /// fallback. Do not use SpecialFolder.CommonApplicationData on Unix: .NET maps it to
-    /// /usr/share there, which is not a secrets location.</summary>
-    private static string SystemDefaultDirectory => OperatingSystem.IsWindows()
-        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Loom", "secrets")
-        : "/var/secrets/loom";
+    /// <summary>Where the host looks when the env vars are unset. On Unix this is
+    /// system-scoped and not user-writable, so an ephemeral dev key cannot reach
+    /// production as a silent fallback - Loom has a documented Linux production
+    /// deployment (systemd unit, `loomd` service user, this path at mode 400). On
+    /// Windows there is no production deployment at all - no service unit, no
+    /// installer, no hardening guide - so the default is deliberately the developer's
+    /// own per-user folder. %ProgramData% was considered and rejected: `icacls
+    /// C:\ProgramData` grants BUILTIN\Users (WD,AD) - any standard user can create and
+    /// own a subdirectory there, including one named to match this path, before Loom
+    /// ever runs. LoadSigningKey validates only base64 and length, never ownership, so
+    /// that would let an unprivileged user plant the signing key a real deployment
+    /// trusts by default - worse than the per-user default it would replace.</summary>
+    private static string SystemDefaultDirectory =>
+        OperatingSystem.IsWindows() ? DevSecretsDirectory : "/var/secrets/loom";
 
     public static string DefaultKeyFile => Path.Combine(SystemDefaultDirectory, "jwt.key");
 

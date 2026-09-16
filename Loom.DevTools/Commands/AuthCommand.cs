@@ -744,6 +744,18 @@ public static class AuthCommand
     private static string? ResolveUsersFileForCli()
     {
         var envValue = Environment.GetEnvironmentVariable(KeyMaterial.UsersFileVariable);
+
+        // Same "no per-user data folder" case KeyMaterial.ResolveUsersFile guards for the
+        // host (an account with no profile folder makes DefaultUsersFile relative) - here
+        // it must refuse rather than let FileAccessCheck/File.Exists resolve a relative
+        // path against whatever the current working directory happens to be.
+        if (envValue is null && !KeyMaterial.IsUsableDefaultPath(KeyMaterial.DefaultUsersFile))
+        {
+            Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set, and no per-user data folder could be determined for the default users-file location.");
+            Console.Error.WriteLine($"  Set {KeyMaterial.UsersFileVariable} explicitly, or pass --users-file.");
+            return null;
+        }
+
         var devPath = Path.Combine(DevSecretsDirectory, "users");
         var state = envValue is null ? FileAccessCheck.Check(KeyMaterial.DefaultUsersFile) : FileAccessState.Exists;
         var resolved = ResolveCliPath(envValue, state, KeyMaterial.DefaultUsersFile, devPath);
@@ -766,6 +778,14 @@ public static class AuthCommand
     private static string? ResolveKeyFileForCli()
     {
         var envValue = Environment.GetEnvironmentVariable(KeyMaterial.KeyFileVariable);
+
+        if (envValue is null && !KeyMaterial.IsUsableDefaultPath(KeyMaterial.DefaultKeyFile))
+        {
+            Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set, and no per-user data folder could be determined for the default key location.");
+            Console.Error.WriteLine($"  Set {KeyMaterial.KeyFileVariable} explicitly, or pass --key-file.");
+            return null;
+        }
+
         var devPath = Path.Combine(DevSecretsDirectory, "jwt.key");
         var state = envValue is null ? FileAccessCheck.Check(KeyMaterial.DefaultKeyFile) : FileAccessState.Exists;
         var resolved = ResolveCliPath(envValue, state, KeyMaterial.DefaultKeyFile, devPath);

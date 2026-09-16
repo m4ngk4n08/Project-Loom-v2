@@ -34,11 +34,44 @@ public static class KeyMaterial
 
     public static string DefaultUsersFile => Path.Combine(SystemDefaultDirectory, "users");
 
-    public static string ResolveKeyFile() =>
-        Environment.GetEnvironmentVariable(KeyFileVariable) ?? DefaultKeyFile;
+    /// <summary>Pure. Extracted so the rooted-default decision below can be unit-tested
+    /// with an injected path - GetFolderPath(LocalApplicationData) cannot be made to
+    /// return "" on this machine to exercise the real case (an account with no profile
+    /// folder, e.g. a service or virtual account) at runtime.</summary>
+    public static bool IsUsableDefaultPath(string defaultPath) => Path.IsPathRooted(defaultPath);
 
-    public static string ResolveUsersFile() =>
-        Environment.GetEnvironmentVariable(UsersFileVariable) ?? DefaultUsersFile;
+    /// <summary>Fails closed when no explicit value is set and the default is not rooted -
+    /// which happens on Windows for an account with no profile folder, where
+    /// GetFolderPath(LocalApplicationData) returns "" and Path.Combine yields the RELATIVE
+    /// "Loom\dev-secrets\jwt.key". Without this check the host would load its signing key
+    /// from whatever its working directory happens to be - this is the security boundary,
+    /// and a quietly-relative default here is worse than the same failure in the CLI. A
+    /// relative path set explicitly via the environment variable is a deliberate operator
+    /// choice and is left working untouched.</summary>
+    public static string ResolveKeyFile()
+    {
+        var envValue = Environment.GetEnvironmentVariable(KeyFileVariable);
+        if (envValue is not null) return envValue;
+
+        if (!IsUsableDefaultPath(DefaultKeyFile))
+            throw new InvalidOperationException(
+                $"Loom auth: could not determine a per-user data folder, so the default signing-key location is not usable. Set {KeyFileVariable} explicitly.");
+
+        return DefaultKeyFile;
+    }
+
+    /// <summary>Same reasoning as ResolveKeyFile - see its remarks.</summary>
+    public static string ResolveUsersFile()
+    {
+        var envValue = Environment.GetEnvironmentVariable(UsersFileVariable);
+        if (envValue is not null) return envValue;
+
+        if (!IsUsableDefaultPath(DefaultUsersFile))
+            throw new InvalidOperationException(
+                $"Loom auth: could not determine a per-user data folder, so the default users-file location is not usable. Set {UsersFileVariable} explicitly.");
+
+        return DefaultUsersFile;
+    }
 
     /// <summary>Fail closed. There is no generated-on-the-fly fallback in any
     /// environment - an ephemeral dev key is precisely the convenience that reaches

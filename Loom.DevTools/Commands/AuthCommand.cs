@@ -401,9 +401,28 @@ public static class AuthCommand
             var tempPath = writeTargetPath + $".loom-tmp-{Guid.NewGuid():N}";
             try
             {
-                File.WriteAllBytes(tempPath, updatedBytes);
+                // When the target already exists, create the temp file WITH its mode from
+                // the moment it comes into being - the same technique WriteSecretFile uses
+                // for key files - rather than WriteAllBytes (default permissions, typically
+                // 644) followed by SetUnixFileMode. For a profile deliberately kept at 600
+                // (e.g. because it exports tokens), that write-then-chmod left its full
+                // contents world-readable beside the target for the gap between the two
+                // calls. A brand-new profile (no existing mode) keeps today's default
+                // permissions - this must not quietly make a fresh .zshrc 600.
                 if (!OperatingSystem.IsWindows() && existingMode is not null)
-                    File.SetUnixFileMode(tempPath, existingMode.Value);
+                {
+                    using var stream = new FileStream(tempPath, new FileStreamOptions
+                    {
+                        Mode = FileMode.CreateNew,
+                        Access = FileAccess.Write,
+                        UnixCreateMode = existingMode.Value,
+                    });
+                    stream.Write(updatedBytes, 0, updatedBytes.Length);
+                }
+                else
+                {
+                    File.WriteAllBytes(tempPath, updatedBytes);
+                }
                 File.Move(tempPath, writeTargetPath, overwrite: true);
             }
             finally

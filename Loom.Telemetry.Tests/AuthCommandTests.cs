@@ -40,4 +40,105 @@ public class AuthCommandTests
     {
         Assert.False(AuthCommand.TryParseScope(input, out _));
     }
+
+    [Theory]
+    [InlineData("/usr/bin/zsh", "/home/u/.zshrc")]
+    [InlineData("/bin/bash", "/home/u/.bashrc")]
+    [InlineData("/usr/local/bin/fish", "/home/u/.config/fish/config.fish")]
+    [InlineData("/bin/tcsh", "/home/u/.profile")]
+    [InlineData(null, "/home/u/.profile")]
+    [InlineData("", "/home/u/.profile")]
+    public void ResolveUnixProfilePath_MapsShellBasenameToExpectedFile(string? shellEnvValue, string expected)
+    {
+        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath(shellEnvValue, "/home/u"));
+    }
+
+    [Fact]
+    public void RenderUnixPersistBlock_Fish_UsesSetDashGx()
+    {
+        var block = AuthCommand.RenderUnixPersistBlock("/usr/local/bin/fish", "/home/u/.local/share/Loom/dev-secrets/jwt.key", "/home/u/.local/share/Loom/dev-secrets/users");
+
+        Assert.Equal(
+            "# >>> loom >>>\n" +
+            "set -gx LOOM_JWT_KEY_FILE \"/home/u/.local/share/Loom/dev-secrets/jwt.key\"\n" +
+            "set -gx LOOM_AUTH_USERS_FILE \"/home/u/.local/share/Loom/dev-secrets/users\"\n" +
+            "# <<< loom <<<\n",
+            block);
+    }
+
+    [Theory]
+    [InlineData("/bin/bash")]
+    [InlineData("/usr/bin/zsh")]
+    public void RenderUnixPersistBlock_BashAndZsh_UseExport(string shellEnvValue)
+    {
+        var block = AuthCommand.RenderUnixPersistBlock(shellEnvValue, "/home/u/jwt.key", "/home/u/users");
+
+        Assert.Equal(
+            "# >>> loom >>>\n" +
+            "export LOOM_JWT_KEY_FILE=\"/home/u/jwt.key\"\n" +
+            "export LOOM_AUTH_USERS_FILE=\"/home/u/users\"\n" +
+            "# <<< loom <<<\n",
+            block);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlock_NoExistingBlock_AppendsAndKeepsOriginalContent()
+    {
+        const string existing = "# my custom profile\nexport EDITOR=vim\n";
+        const string block = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"x\"\n# <<< loom <<<\n";
+
+        var result = AuthCommand.UpsertUnixPersistBlock(existing, block);
+
+        Assert.Equal(existing + block, result);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlock_NoExistingBlock_EmptyContent_JustReturnsBlock()
+    {
+        const string block = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"x\"\n# <<< loom <<<\n";
+
+        var result = AuthCommand.UpsertUnixPersistBlock(string.Empty, block);
+
+        Assert.Equal(block, result);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlock_ExistingBlock_ReplacesInPlaceWithoutDuplicating()
+    {
+        const string before = "# before\n";
+        const string oldBlock = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"old\"\n# <<< loom <<<\n";
+        const string after = "# after\n";
+        const string newBlock = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"new\"\n# <<< loom <<<\n";
+
+        var result = AuthCommand.UpsertUnixPersistBlock(before + oldBlock + after, newBlock);
+
+        Assert.Equal(before + newBlock + after, result);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlock_BlockAtEndOfFileWithNoTrailingNewline_IsReplaced()
+    {
+        const string before = "# before\n";
+        const string oldBlockNoTrailingNewline = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"old\"\n# <<< loom <<<";
+        const string newBlock = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"new\"\n# <<< loom <<<\n";
+
+        var result = AuthCommand.UpsertUnixPersistBlock(before + oldBlockNoTrailingNewline, newBlock);
+
+        Assert.Equal(before + newBlock, result);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlock_TwoExistingBlocks_CollapsesToOneAtFirstPosition()
+    {
+        const string before = "# before\n";
+        const string oldBlockA = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"a\"\n# <<< loom <<<\n";
+        const string middle = "# middle\n";
+        const string oldBlockB = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"b\"\n# <<< loom <<<\n";
+        const string after = "# after\n";
+        const string newBlock = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"new\"\n# <<< loom <<<\n";
+
+        var result = AuthCommand.UpsertUnixPersistBlock(before + oldBlockA + middle + oldBlockB + after, newBlock);
+
+        Assert.Equal(before + newBlock + middle + after, result);
+    }
 }

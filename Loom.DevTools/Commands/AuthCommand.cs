@@ -1,6 +1,7 @@
 using Loom.Security;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Loom.DevTools.Commands;
 
@@ -62,8 +63,7 @@ public static class AuthCommand
     {
         if (!OperatingSystem.IsWindows())
         {
-            Console.WriteLine("--persist writes a Windows user environment variable and does nothing here.");
-            Console.WriteLine("Add the exports above to your shell profile instead.");
+            PersistEnvironmentVariablesUnix(keyPath, usersPath);
             return;
         }
 
@@ -92,6 +92,119 @@ public static class AuthCommand
             Console.WriteLine($"Warning: {variable} is already set for your user account to '{existing}'.");
             Console.WriteLine($"  It will be replaced with '{newValue}'.");
         }
+    }
+
+    private const string UnixBlockStart = "# >>> loom >>>";
+    private const string UnixBlockEnd = "# <<< loom <<<";
+
+    /// <summary>Unix has no per-user environment store for .NET to write to -
+    /// EnvironmentVariableTarget.User is a Windows/registry concept. The only durable
+    /// place is a shell startup file, chosen from $SHELL's basename so it matches the
+    /// shell the user actually runs.</summary>
+    private static void PersistEnvironmentVariablesUnix(string keyPath, string? usersPath)
+    {
+        var shellEnvValue = Environment.GetEnvironmentVariable("SHELL");
+        var homeDirectory = Environment.GetEnvironmentVariable("HOME") ?? "~";
+        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory);
+        var block = RenderUnixPersistBlock(shellEnvValue, keyPath, usersPath);
+
+        try
+        {
+            var directory = Path.GetDirectoryName(profilePath);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+
+            var existing = File.Exists(profilePath) ? File.ReadAllText(profilePath) : string.Empty;
+            var updated = UpsertUnixPersistBlock(existing, block);
+            File.WriteAllText(profilePath, updated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            Console.WriteLine($"Wrote to {profilePath}.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"Could not write {profilePath}: {ex.Message}");
+            Console.WriteLine("Add the exports above to your shell profile manually.");
+            return;
+        }
+
+        Console.WriteLine($"This terminal's environment does not change - open a new terminal or run `source {profilePath}` to pick them up.");
+    }
+
+    /// <summary>Pure. Maps $SHELL's basename to the profile file loom persists into.
+    /// Unknown or unset shells fall back to ~/.profile rather than guessing.</summary>
+    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory)
+    {
+        var home = homeDirectory.TrimEnd('/');
+        return ClassifyUnixShell(shellEnvValue) switch
+        {
+            "zsh" => $"{home}/.zshrc",
+            "bash" => $"{home}/.bashrc",
+            "fish" => $"{home}/.config/fish/config.fish",
+            _ => $"{home}/.profile",
+        };
+    }
+
+    /// <summary>Pure. Renders the marked block for the given shell. fish needs
+    /// `set -gx VAR "value"` - `export VAR="value"` is a syntax error there, and writing
+    /// the wrong form breaks the user's shell silently, the next time they open a
+    /// terminal.</summary>
+    public static string RenderUnixPersistBlock(string? shellEnvValue, string keyPath, string? usersPath)
+    {
+        var isFish = ClassifyUnixShell(shellEnvValue) == "fish";
+        var sb = new StringBuilder();
+        sb.Append(UnixBlockStart).Append('\n');
+        sb.Append(RenderUnixExportLine(isFish, KeyMaterial.KeyFileVariable, keyPath)).Append('\n');
+        if (usersPath is not null)
+            sb.Append(RenderUnixExportLine(isFish, KeyMaterial.UsersFileVariable, usersPath)).Append('\n');
+        sb.Append(UnixBlockEnd).Append('\n');
+        return sb.ToString();
+    }
+
+    private static string RenderUnixExportLine(bool isFish, string variable, string value) =>
+        isFish ? $"set -gx {variable} \"{value}\"" : $"export {variable}=\"{value}\"";
+
+    private static string ClassifyUnixShell(string? shellEnvValue)
+    {
+        if (string.IsNullOrEmpty(shellEnvValue)) return "other";
+        var lastSlash = shellEnvValue.LastIndexOf('/');
+        var name = lastSlash >= 0 ? shellEnvValue[(lastSlash + 1)..] : shellEnvValue;
+        return name is "zsh" or "bash" or "fish" ? name : "other";
+    }
+
+    /// <summary>Pure. Idempotent upsert of the marked loom block into existing shell
+    /// profile content. Content outside the block survives byte-for-byte; if the block
+    /// already exists its position is preserved and it is replaced in place; if it
+    /// appears more than once (hand-edited, or an earlier buggy run) every occurrence
+    /// collapses to one, at the position of the first. Never touches individual
+    /// `export LOOM_...` lines directly - there is no way to tell loom's own line from
+    /// one the user wrote deliberately, so only the marked block is ever touched.</summary>
+    public static string UpsertUnixPersistBlock(string existingContent, string block)
+    {
+        var pattern = new Regex(
+            Regex.Escape(UnixBlockStart) + @".*?" + Regex.Escape(UnixBlockEnd) + @"\r?\n?",
+            RegexOptions.Singleline);
+        var matches = pattern.Matches(existingContent);
+
+        if (matches.Count == 0)
+        {
+            var separator = existingContent.Length == 0 || existingContent.EndsWith('\n') ? "" : "\n";
+            return existingContent + separator + block;
+        }
+
+        var sb = new StringBuilder();
+        var lastEnd = 0;
+        var replaced = false;
+        foreach (Match m in matches)
+        {
+            sb.Append(existingContent, lastEnd, m.Index - lastEnd);
+            if (!replaced)
+            {
+                sb.Append(block);
+                replaced = true;
+            }
+            lastEnd = m.Index + m.Length;
+        }
+        sb.Append(existingContent, lastEnd, existingContent.Length - lastEnd);
+        return sb.ToString();
     }
 
     public static void AddUser(string username)

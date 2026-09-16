@@ -7,14 +7,23 @@ public static class KeyMaterial
     private const int MinimumKeyBytes = 32;
 
     /// <summary>The one definition of where dev-secrets live. `loom auth init` writes
-    /// here and, absent the env vars, this is also where the host looks - so setup and
-    /// lookup cannot disagree.</summary>
+    /// here. This is NOT where the host looks by default - see SystemDefaultDirectory.
+    /// Setup and lookup are connected by the environment variables, which `--persist`
+    /// sets; they never silently coincide.</summary>
     public static string DevSecretsDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Loom", "dev-secrets");
 
-    public static string DefaultKeyFile => Path.Combine(DevSecretsDirectory, "jwt.key");
+    /// <summary>Where the host looks when the env vars are unset - system-scoped, not
+    /// user-writable, so an ephemeral dev key cannot reach production as a silent
+    /// fallback. Do not use SpecialFolder.CommonApplicationData on Unix: .NET maps it to
+    /// /usr/share there, which is not a secrets location.</summary>
+    private static string SystemDefaultDirectory => OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Loom", "secrets")
+        : "/var/secrets/loom";
 
-    public static string DefaultUsersFile => Path.Combine(DevSecretsDirectory, "users");
+    public static string DefaultKeyFile => Path.Combine(SystemDefaultDirectory, "jwt.key");
+
+    public static string DefaultUsersFile => Path.Combine(SystemDefaultDirectory, "users");
 
     public static string ResolveKeyFile() =>
         Environment.GetEnvironmentVariable(KeyFileVariable) ?? DefaultKeyFile;

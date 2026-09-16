@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Text;
 using Loom.DevTools.Commands;
 using Loom.Security;
 using Xunit;
@@ -254,5 +256,51 @@ public class AuthCommandTests
         var result = AuthCommand.UpsertUnixPersistBlock(before + oldBlockA + middle + oldBlockB + after, newBlock);
 
         Assert.Equal(before + newBlock + middle + after, result);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlockBytes_NonAsciiPath_EncodesBlockAsUtf8NotLatin1()
+    {
+        var block = AuthCommand.RenderUnixPersistBlock("/bin/bash", "/home/andré/jwt.key", null);
+
+        var result = AuthCommand.UpsertUnixPersistBlockBytes([], "", block);
+
+        Assert.Equal(Encoding.UTF8.GetBytes(block), result);
+        Assert.NotEqual(Encoding.Latin1.GetBytes(block), result);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlockBytes_ExistingBytes_ArePreservedVerbatim()
+    {
+        // A byte that is not valid UTF-8 standing alone (0xE9, the Latin1 encoding of
+        // 'é' a hand-edited .bashrc might carry) must survive untouched - proving the
+        // splice never round-trips existingBytes through any encoding, only the new
+        // block.
+        var existingBytes = new byte[] { (byte)'#', (byte)' ', 0xE9, (byte)'\n' };
+        var existingLatin1 = Encoding.Latin1.GetString(existingBytes);
+        const string block = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n# <<< loom <<<\n";
+
+        var result = AuthCommand.UpsertUnixPersistBlockBytes(existingBytes, existingLatin1, block);
+
+        Assert.Equal(existingBytes, result[..4]);
+        Assert.Equal(Encoding.UTF8.GetBytes(block), result[4..]);
+    }
+
+    [Fact]
+    public void UpsertUnixPersistBlockBytes_ReplacesExistingBlockAndPreservesSurroundingBytesVerbatim()
+    {
+        var before = Encoding.Latin1.GetBytes("# before é\n");
+        var oldBlock = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE='/home/andré/old.key'\n# <<< loom <<<\n";
+        var oldBlockBytes = Encoding.UTF8.GetBytes(oldBlock);
+        var after = Encoding.Latin1.GetBytes("# after\n");
+        var existingBytes = before.Concat(oldBlockBytes).Concat(after).ToArray();
+        var existingLatin1 = Encoding.Latin1.GetString(existingBytes);
+
+        var newBlock = AuthCommand.RenderUnixPersistBlock("/bin/bash", "/home/andré/new.key", null);
+
+        var result = AuthCommand.UpsertUnixPersistBlockBytes(existingBytes, existingLatin1, newBlock);
+
+        var expected = before.Concat(Encoding.UTF8.GetBytes(newBlock)).Concat(after).ToArray();
+        Assert.Equal(expected, result);
     }
 }

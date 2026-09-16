@@ -233,8 +233,7 @@ public static class AuthCommand
             var effectiveUsersPath = usersPath ?? ExtractExistingUsersPath(existing);
             var block = RenderUnixPersistBlock(shellEnvValue, keyPath, effectiveUsersPath);
 
-            var updated = UpsertUnixPersistBlock(existing, block);
-            var updatedBytes = Encoding.Latin1.GetBytes(updated);
+            var updatedBytes = UpsertUnixPersistBlockBytes(existingBytes, existing, block);
 
             // Write-then-rename rather than truncate-in-place, so a crash mid-write
             // leaves either the old file or the new one intact, never a truncated shell
@@ -409,6 +408,51 @@ public static class AuthCommand
         }
         sb.Append(existingContent, lastEnd, existingContent.Length - lastEnd);
         return sb.ToString();
+    }
+
+    /// <summary>Byte-level counterpart of UpsertUnixPersistBlock, used for the actual
+    /// write. existingBytes are spliced verbatim - never round-tripped through any
+    /// encoding - and only the newly inserted block is encoded, as UTF-8. Re-encoding
+    /// the whole merged string with Latin1.GetBytes (the previous approach) would
+    /// mangle loom's OWN block whenever a path contains anything above ASCII:
+    /// Latin1.GetBytes emits one byte per UTF-16 code point, so 'é' (U+00E9 - UTF-8
+    /// 0xC3 0xA9 in a real path) comes back as the single byte 0xE9, and anything above
+    /// U+00FF (Cyrillic, CJK) silently becomes '?'. existingLatin1 - the Latin1 decoding
+    /// of existingBytes - is used only to locate the block via regex; that is safe
+    /// because Latin1 decode/encode is a 1:1 byte&lt;-&gt;codepoint mapping, so a match
+    /// index in that string is the identical byte offset in existingBytes.</summary>
+    public static byte[] UpsertUnixPersistBlockBytes(byte[] existingBytes, string existingLatin1, string block)
+    {
+        var pattern = new Regex(
+            Regex.Escape(UnixBlockStart) + @".*?" + Regex.Escape(UnixBlockEnd) + @"\r?\n?",
+            RegexOptions.Singleline);
+        var matches = pattern.Matches(existingLatin1);
+        var blockBytes = Encoding.UTF8.GetBytes(block);
+
+        using var result = new MemoryStream();
+        if (matches.Count == 0)
+        {
+            result.Write(existingBytes, 0, existingBytes.Length);
+            var needsSeparator = existingBytes.Length > 0 && existingBytes[^1] != (byte)'\n';
+            if (needsSeparator) result.WriteByte((byte)'\n');
+            result.Write(blockBytes, 0, blockBytes.Length);
+            return result.ToArray();
+        }
+
+        var lastEnd = 0;
+        var replaced = false;
+        foreach (Match m in matches)
+        {
+            result.Write(existingBytes, lastEnd, m.Index - lastEnd);
+            if (!replaced)
+            {
+                result.Write(blockBytes, 0, blockBytes.Length);
+                replaced = true;
+            }
+            lastEnd = m.Index + m.Length;
+        }
+        result.Write(existingBytes, lastEnd, existingBytes.Length - lastEnd);
+        return result.ToArray();
     }
 
     /// <summary>AddUser/Token-only resolution, deliberately more forgiving than

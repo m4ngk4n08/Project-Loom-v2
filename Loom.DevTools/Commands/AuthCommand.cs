@@ -398,12 +398,13 @@ public static class AuthCommand
         return assignment.Success ? ParseShellValue(blockMatch.Value, assignment.Index + assignment.Length) : null;
     }
 
-    /// <summary>Pure. Parses one shell value starting at valueStart: a POSIX
-    /// single-quoted value with '\''-escaping reversed to a literal quote, a
-    /// double-quoted value with \" and \\ unescaped, or - if valueStart is neither
-    /// quote character - a bare value running to end of line. Returns null on an
-    /// unterminated quote, which reads as "nothing to preserve" rather than a mangled
-    /// partial value.</summary>
+    /// <summary>Pure. Parses one shell value starting at valueStart: a single-quoted
+    /// value understanding BOTH quoting conventions this file writes - POSIX's
+    /// close-escape-reopen splice ('\'') from QuotePosixSingle, and fish's in-string
+    /// backslash escapes (\\ and \') from QuoteFishSingle - a double-quoted value with
+    /// \" and \\ unescaped, or - if valueStart is neither quote character - a bare
+    /// value running to end of line. Returns null on an unterminated quote, which reads
+    /// as "nothing to preserve" rather than a mangled partial value.</summary>
     private static string? ParseShellValue(string content, int valueStart)
     {
         if (valueStart >= content.Length) return null;
@@ -414,22 +415,34 @@ public static class AuthCommand
             var pos = valueStart + 1;
             while (true)
             {
-                var closeQuote = content.IndexOf('\'', pos);
-                if (closeQuote < 0) return null;
-                sb.Append(content, pos, closeQuote - pos);
+                if (pos >= content.Length) return null;
 
                 // '\'' - the standard POSIX splice for a literal quote: close (this
                 // quote), an escaped literal quote outside any quoting (\'), then
                 // reopen (a 4th quote char) - four characters total, not the value's
-                // end.
-                if (closeQuote + 3 < content.Length && content[closeQuote + 1] == '\\' && content[closeQuote + 2] == '\'' && content[closeQuote + 3] == '\'')
+                // end. Checked before treating '\'' as a fish escape, since this
+                // exact 4-char run is what QuotePosixSingle emits for an apostrophe.
+                if (content[pos] == '\'' && pos + 3 < content.Length && content[pos + 1] == '\\' && content[pos + 2] == '\'' && content[pos + 3] == '\'')
                 {
                     sb.Append('\'');
-                    pos = closeQuote + 4;
+                    pos += 4;
                     continue;
                 }
 
-                return sb.ToString();
+                if (content[pos] == '\'') return sb.ToString();
+
+                // \\ and \' - fish's in-string escapes (QuoteFishSingle): everything
+                // else, $ and backticks included, is literal inside fish's single
+                // quotes, so only these two backslash pairs unescape.
+                if (content[pos] == '\\' && pos + 1 < content.Length && (content[pos + 1] == '\\' || content[pos + 1] == '\''))
+                {
+                    sb.Append(content[pos + 1]);
+                    pos += 2;
+                    continue;
+                }
+
+                sb.Append(content[pos]);
+                pos++;
             }
         }
 

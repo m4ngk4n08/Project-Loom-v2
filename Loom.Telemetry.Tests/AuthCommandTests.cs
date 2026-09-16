@@ -324,6 +324,30 @@ public class AuthCommandTests
         Assert.Equal(before + newBlock + middle + after, result);
     }
 
+    // The fish counterpart of ExtractExistingUsersPath_RoundTripsPathContainingAnApostrophe:
+    // QuoteFishSingle writes \' for an embedded apostrophe, but ParseShellValue previously
+    // understood only the POSIX '\''-splice form, so this value was misread and truncated
+    // on the very next `loom auth init` run.
+    [Fact]
+    public void ExtractExistingUsersPath_Fish_RoundTripsValueWithApostropheDollarBacktickAndDoubleQuote()
+    {
+        const string weirdPath = "/home/u/a'b$c`d\"e/users";
+
+        var block = AuthCommand.RenderUnixPersistBlock("/usr/local/bin/fish", "/home/u/jwt.key", weirdPath);
+
+        Assert.Equal(weirdPath, AuthCommand.ExtractExistingUsersPath(block));
+    }
+
+    [Fact]
+    public void ExtractExistingUsersPath_Posix_RoundTripsValueWithApostropheDollarBacktickAndDoubleQuote()
+    {
+        const string weirdPath = "/home/u/a'b$c`d\"e/users";
+
+        var block = AuthCommand.RenderUnixPersistBlock("/bin/bash", "/home/u/jwt.key", weirdPath);
+
+        Assert.Equal(weirdPath, AuthCommand.ExtractExistingUsersPath(block));
+    }
+
     [Fact]
     public void UpsertUnixPersistBlockBytes_NonAsciiPath_EncodesBlockAsUtf8NotLatin1()
     {

@@ -1407,6 +1407,77 @@ the case it names; the status code reaching it is what is wrong.
 
 ---
 
+### 6.14 `ParseShellValue` Applies fish Escapes to bash/zsh Values 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs`, `ParseShellValue`, on branch
+`sonnet/auth-init-unix-persist` — **not yet on `main`**. It arrives when that branch merges.
+Line numbers below are from the branch at `9a1a6a8`.
+
+`loom auth init --persist` writes a marked block into the user's shell profile, and on re-run
+reads a value back out of it so an existing `LOOM_AUTH_USERS_FILE` can be carried forward.
+`ParseShellValue` (`:454`) handles single-quoted values for **both** shells in one branch, and
+unconditionally applies fish's in-string escapes — `\\` → `\` and `\'` → `'`.
+
+That is correct for fish, whose writer is `QuoteFishSingle`. It is **wrong for bash and zsh**:
+POSIX single quotes have **no** escapes at all, and their writer, `QuotePosixSingle`, emits a
+backslash literally. So on read-back:
+
+- a path containing `\\` (two backslashes) loses one — `'/a\\b'` parses as `/a\b`
+- a path containing `\'` is mangled — `a\'b` is written as `'a\'\''b'` and read back as `a''`
+
+The next `init --persist` then writes that wrong value back into the profile, and it survives
+every later re-run.
+
+**Why LOW:** it needs a backslash in a Unix path — legal, but rare in a dev-secrets location
+under `~/.local/share`. It does not affect the value written on a *first* run, only a
+carried-forward value on a re-run.
+
+**Fix shape:** pass the shell kind into `ParseShellValue` and apply only that shell's rules —
+fish's two escapes for fish; POSIX single quotes (and the `'\''` splice) for bash and zsh, with
+backslashes literal. Add round-trip tests per writer: `QuotePosixSingle` → `ParseShellValue`
+and `QuoteFishSingle` → `ParseShellValue`, each with a value containing `\\`, `\'`, `'`, `$` and a
+backtick. The existing round-trip tests would have caught this if they had covered a backslash.
+
+**Found by** `/code-review high` on round 4 of that branch. Filed rather than fixed: it was the
+fifth review round, the round had no High findings in the branch's own code, and this edge is
+narrow enough that another full cycle was not justified.
+
+---
+
+### 6.15 A Dangling Profile Symlink Is Replaced With a Regular File 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs`, the profile write in
+`PersistEnvironmentVariablesUnix`, on branch `sonnet/auth-init-unix-persist` — **not yet on
+`main`**. Line numbers from the branch at `9a1a6a8`.
+
+Many people's `~/.zshrc` is a symlink into a dotfiles repository (stow, chezmoi, a plain git
+repo). An earlier round of that branch made the profile write resolve the symlink first and
+write-then-rename at the *target*, specifically so a symlinked profile is updated in place rather
+than replaced — replacing it would silently detach the user's dotfiles.
+
+**That guard does not cover a dangling link.** The resolution is inside
+`if (File.Exists(profilePath))` (`:317`). `File.Exists` follows the link, so for a symlink whose
+target does not exist it returns **false**, `ResolveLinkTarget` is never called,
+`writeTargetPath` stays equal to `profilePath`, and `File.Move(..., overwrite: true)` (`:343`)
+replaces the symlink itself with a regular file.
+
+**When:** a dotfiles repo whose symlinks were created before the repo was cloned, or whose
+target was moved — exactly the situation the guard's own comment describes guarding against.
+
+**Why LOW:** it needs a *dangling* profile symlink at the moment `init --persist` runs, which is
+a transient state. The damage is real when it happens — the link is gone and the user's dotfiles
+repo no longer controls that file — but the precondition is uncommon.
+
+**Fix shape:** test for a link without following it — `new FileInfo(profilePath).LinkTarget is
+not null` — instead of `File.Exists`. Then decide deliberately what a dangling target should do:
+creating the target file through the link, or refusing with a message that names the missing
+target. **Do not** fall back to writing a regular file in the link's place.
+
+**Found by** `/code-review high` on round 4 of that branch, and filed for the same reason as
+§ 6.14.
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)

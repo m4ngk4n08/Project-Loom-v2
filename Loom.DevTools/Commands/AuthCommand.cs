@@ -408,9 +408,40 @@ public static class AuthCommand
         return sb.ToString();
     }
 
+    /// <summary>AddUser/Token-only resolution, deliberately more forgiving than
+    /// KeyMaterial.ResolveUsersFile(): env var, else the system default if that file
+    /// exists, else DevSecretsDirectory. Without this, `loom auth init` (no env var, no
+    /// --persist) writes to dev-secrets while the system default on Unix stays
+    /// /var/secrets/loom, so the very next `loom auth add-user` the tool just told the
+    /// user to run fails - a closed loop. This fallback must never reach
+    /// SecurityServiceExtensions: the CLI is a developer tool and can afford to guess
+    /// where your own notes live, the host is the security boundary and must not.</summary>
+    private static string ResolveUsersFileForCli()
+    {
+        var envValue = Environment.GetEnvironmentVariable(KeyMaterial.UsersFileVariable);
+        if (envValue is not null) return envValue;
+        if (File.Exists(KeyMaterial.DefaultUsersFile)) return KeyMaterial.DefaultUsersFile;
+
+        var devPath = Path.Combine(DevSecretsDirectory, "users");
+        Console.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
+        return devPath;
+    }
+
+    /// <summary>Token-only resolution mirroring ResolveUsersFileForCli - see its remarks.</summary>
+    private static string ResolveKeyFileForCli()
+    {
+        var envValue = Environment.GetEnvironmentVariable(KeyMaterial.KeyFileVariable);
+        if (envValue is not null) return envValue;
+        if (File.Exists(KeyMaterial.DefaultKeyFile)) return KeyMaterial.DefaultKeyFile;
+
+        var devPath = Path.Combine(DevSecretsDirectory, "jwt.key");
+        Console.WriteLine($"{KeyMaterial.KeyFileVariable} is not set and no key file exists at the system default - using {devPath}.");
+        return devPath;
+    }
+
     public static void AddUser(string username)
     {
-        var usersPath = KeyMaterial.ResolveUsersFile();
+        var usersPath = ResolveUsersFileForCli();
         if (!File.Exists(usersPath))
         {
             Console.WriteLine($"Users file not found at {usersPath}. Run 'loom auth init' first.");
@@ -426,7 +457,7 @@ public static class AuthCommand
 
     public static void Token(string subject, JwtScope scope, TimeSpan ttl)
     {
-        var key = KeyMaterial.LoadSigningKey(KeyMaterial.ResolveKeyFile());
+        var key = KeyMaterial.LoadSigningKey(ResolveKeyFileForCli());
         var issuer = new JwtIssuer(key, TimeProvider.System);
         Console.WriteLine(issuer.Issue(subject, ttl, scope));
     }

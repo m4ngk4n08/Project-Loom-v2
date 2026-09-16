@@ -68,15 +68,18 @@ public static class AuthCommand
     }
 
     /// <summary>The "set these before starting" line, in the syntax the terminal the user
-    /// is actually in will accept - PowerShell on Windows, fish's `set -gx` when $SHELL
-    /// says fish, POSIX `export` otherwise. Printing `$env:` syntax to a Linux or macOS
-    /// terminal is not just cosmetic: pasted verbatim, it is a syntax error there.</summary>
+    /// is actually in will accept - PowerShell on Windows, otherwise whatever
+    /// RenderUnixExportLine would put in the shell profile. Printing `$env:` syntax to a
+    /// Linux or macOS terminal is not just cosmetic: pasted verbatim, it is a syntax
+    /// error there. Routed through the same renderer as the persisted file rather than
+    /// its own always-double-quoted format, so a path containing `$` or a backtick can't
+    /// print one thing here and write another - copy this line verbatim and it is exactly
+    /// as safe as the file loom writes.</summary>
     private static string FormatSetVarLine(string variable, string value)
     {
         if (OperatingSystem.IsWindows()) return $"  $env:{variable} = \"{value}\"";
-        if (ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish")
-            return $"  set -gx {variable} \"{value}\"";
-        return $"  export {variable}=\"{value}\"";
+        var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
+        return "  " + RenderUnixExportLine(isFish, variable, value);
     }
 
     /// <summary>Creates dev-secrets at 700 on Unix. If it already exists (a re-run, or a

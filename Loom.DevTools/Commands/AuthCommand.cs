@@ -258,13 +258,6 @@ public static class AuthCommand
             var existingBytes = File.Exists(profilePath) ? File.ReadAllBytes(profilePath) : [];
             var existing = Encoding.Latin1.GetString(existingBytes);
 
-            foreach (var variable in FindVariablesAssignedOutsideBlock(existing))
-            {
-                Console.WriteLine(OutsideAssignmentWinsOverLoom(existing, variable)
-                    ? $"Warning: {profilePath} already assigns {variable} outside loom's block, later in the file - that existing line will take precedence over the block below."
-                    : $"Warning: {profilePath} already assigns {variable} outside loom's block - the block added below will take precedence.");
-            }
-
             // The re-run path (key exists, users file missing) calls here with
             // usersPath: null. RenderUnixPersistBlock then omits the users line
             // entirely, and UpsertUnixPersistBlock replaces the WHOLE block - so a
@@ -272,6 +265,20 @@ public static class AuthCommand
             // unless we carry it forward from whatever block is already there.
             effectiveUsersPath = usersPath ?? ExtractExistingUsersPath(existing);
             var block = RenderUnixPersistBlock(shellEnvValue, keyPath, effectiveUsersPath);
+
+            // Computed after effectiveUsersPath, and skips LOOM_AUTH_USERS_FILE when the
+            // block about to be written omits it entirely - warning about a variable the
+            // block does not assign is not just noise, the second wording below ("the
+            // block added below will take precedence") is flatly false when nothing below
+            // assigns it.
+            foreach (var variable in FindVariablesAssignedOutsideBlock(existing))
+            {
+                if (variable == KeyMaterial.UsersFileVariable && effectiveUsersPath is null) continue;
+
+                Console.WriteLine(OutsideAssignmentWinsOverLoom(existing, variable)
+                    ? $"Warning: {profilePath} already assigns {variable} outside loom's block, later in the file - that existing line will take precedence over the block below."
+                    : $"Warning: {profilePath} already assigns {variable} outside loom's block - the block added below will take precedence.");
+            }
 
             var updatedBytes = UpsertUnixPersistBlockBytes(existingBytes, existing, block);
 

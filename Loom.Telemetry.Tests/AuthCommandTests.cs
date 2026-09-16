@@ -102,6 +102,35 @@ public class AuthCommandTests
     }
 
     [Fact]
+    public void FindVariablesAssignedOutsideBlock_HandWrittenExportOutsideBlock_IsDetected()
+    {
+        const string content = "export LOOM_JWT_KEY_FILE=/my/own/key\n" +
+            "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n# <<< loom <<<\n";
+
+        var found = AuthCommand.FindVariablesAssignedOutsideBlock(content);
+
+        Assert.Contains("LOOM_JWT_KEY_FILE", found);
+    }
+
+    [Fact]
+    public void FindVariablesAssignedOutsideBlock_OnlyAssignedInsideBlock_IsNotDetected()
+    {
+        const string content = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n# <<< loom <<<\n";
+
+        var found = AuthCommand.FindVariablesAssignedOutsideBlock(content);
+
+        Assert.Empty(found);
+    }
+
+    [Fact]
+    public void FindVariablesAssignedOutsideBlock_NoAssignmentAnywhere_IsNotDetected()
+    {
+        var found = AuthCommand.FindVariablesAssignedOutsideBlock("# my custom profile\nexport EDITOR=vim\n");
+
+        Assert.Empty(found);
+    }
+
+    [Fact]
     public void UpsertUnixPersistBlock_NoExistingBlock_AppendsAndKeepsOriginalContent()
     {
         const string existing = "# my custom profile\nexport EDITOR=vim\n";

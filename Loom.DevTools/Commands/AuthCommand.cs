@@ -215,6 +215,9 @@ public static class AuthCommand
 
             var existing = File.Exists(profilePath) ? File.ReadAllText(profilePath) : string.Empty;
 
+            foreach (var variable in FindVariablesAssignedOutsideBlock(existing))
+                Console.WriteLine($"Warning: {profilePath} already assigns {variable} outside loom's block - the block added below will take precedence.");
+
             // The re-run path (key exists, users file missing) calls here with
             // usersPath: null. RenderUnixPersistBlock then omits the users line
             // entirely, and UpsertUnixPersistBlock replaces the WHOLE block - so a
@@ -309,6 +312,27 @@ public static class AuthCommand
         // still recognized.
         var lineMatch = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+['\"]([^'\"]*)['\"]");
         return lineMatch.Success ? lineMatch.Groups[1].Value : null;
+    }
+
+    /// <summary>Pure. Detects a hand-written assignment to either loom variable OUTSIDE
+    /// the marked block - e.g. `export LOOM_JWT_KEY_FILE=/my/own/key` earlier in the same
+    /// file - so it can be warned about rather than silently shadowed. Never edits
+    /// anything outside the block; this is read-only.</summary>
+    public static IReadOnlyList<string> FindVariablesAssignedOutsideBlock(string existingContent)
+    {
+        var blockPattern = new Regex(
+            Regex.Escape(UnixBlockStart) + @".*?" + Regex.Escape(UnixBlockEnd) + @"\r?\n?",
+            RegexOptions.Singleline);
+        var outside = blockPattern.Replace(existingContent, "");
+
+        var found = new List<string>();
+        foreach (var variable in new[] { KeyMaterial.KeyFileVariable, KeyMaterial.UsersFileVariable })
+        {
+            var assignmentPattern = @"(?m)^\s*(export\s+|set\s+(-gx|-x)\s+)?" + Regex.Escape(variable) + @"\b\s*[= ]";
+            if (Regex.IsMatch(outside, assignmentPattern))
+                found.Add(variable);
+        }
+        return found;
     }
 
     private static string ClassifyUnixShell(string? shellEnvValue)

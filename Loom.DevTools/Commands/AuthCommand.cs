@@ -226,7 +226,11 @@ public static class AuthCommand
             var existing = Encoding.Latin1.GetString(existingBytes);
 
             foreach (var variable in FindVariablesAssignedOutsideBlock(existing))
-                Console.WriteLine($"Warning: {profilePath} already assigns {variable} outside loom's block - the block added below will take precedence.");
+            {
+                Console.WriteLine(OutsideAssignmentWinsOverLoom(existing, variable)
+                    ? $"Warning: {profilePath} already assigns {variable} outside loom's block, later in the file - that existing line will take precedence over the block below."
+                    : $"Warning: {profilePath} already assigns {variable} outside loom's block - the block added below will take precedence.");
+            }
 
             // The re-run path (key exists, users file missing) calls here with
             // usersPath: null. RenderUnixPersistBlock then omits the users line
@@ -453,6 +457,38 @@ public static class AuthCommand
                 found.Add(variable);
         }
         return found;
+    }
+
+    /// <summary>Pure. True if a hand-written assignment to `variable` OUTSIDE the marked
+    /// block will win over loom's own block once PersistEnvironmentVariablesUnix writes
+    /// it - i.e. the shell executes it last. UpsertUnixPersistBlock replaces an EXISTING
+    /// block IN PLACE, at the position of the first occurrence, so any outside
+    /// assignment that ends up positioned after that wins. With no existing block, loom's
+    /// is appended at the very end of the file and always wins - nothing can come after
+    /// it.</summary>
+    public static bool OutsideAssignmentWinsOverLoom(string existingContent, string variable)
+    {
+        var blockPattern = new Regex(
+            Regex.Escape(UnixBlockStart) + @".*?" + Regex.Escape(UnixBlockEnd) + @"\r?\n?",
+            RegexOptions.Singleline);
+        var blockMatches = blockPattern.Matches(existingContent);
+        if (blockMatches.Count == 0) return false;
+
+        var loomBlockEnd = blockMatches[0].Index + blockMatches[0].Length;
+
+        var assignmentPattern = new Regex(@"(?m)^\s*(export\s+|set\s+(-gx|-x)\s+)?" + Regex.Escape(variable) + @"\b\s*[= ]");
+        foreach (Match m in assignmentPattern.Matches(existingContent))
+        {
+            if (m.Index < loomBlockEnd) continue;
+
+            var insideAnyBlock = false;
+            foreach (Match b in blockMatches)
+            {
+                if (m.Index >= b.Index && m.Index < b.Index + b.Length) { insideAnyBlock = true; break; }
+            }
+            if (!insideAnyBlock) return true;
+        }
+        return false;
     }
 
     private static string ClassifyUnixShell(string? shellEnvValue)

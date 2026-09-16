@@ -168,6 +168,35 @@ public class AuthCommandTests
     }
 
     [Fact]
+    public void OutsideAssignmentWinsOverLoom_HandWrittenLineAfterExistingBlock_ReturnsTrue()
+    {
+        const string content = "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n# <<< loom <<<\n" +
+            "export LOOM_JWT_KEY_FILE=/my/own/key\n";
+
+        Assert.True(AuthCommand.OutsideAssignmentWinsOverLoom(content, "LOOM_JWT_KEY_FILE"));
+    }
+
+    [Fact]
+    public void OutsideAssignmentWinsOverLoom_HandWrittenLineBeforeExistingBlock_ReturnsFalse()
+    {
+        const string content = "export LOOM_JWT_KEY_FILE=/my/own/key\n" +
+            "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n# <<< loom <<<\n";
+
+        Assert.False(AuthCommand.OutsideAssignmentWinsOverLoom(content, "LOOM_JWT_KEY_FILE"));
+    }
+
+    // No existing block means loom's is appended at the very end of the file, so
+    // nothing can come after it - the hand-written line always loses here regardless
+    // of where it sits.
+    [Fact]
+    public void OutsideAssignmentWinsOverLoom_NoExistingBlock_ReturnsFalse()
+    {
+        const string content = "export LOOM_JWT_KEY_FILE=/my/own/key\n";
+
+        Assert.False(AuthCommand.OutsideAssignmentWinsOverLoom(content, "LOOM_JWT_KEY_FILE"));
+    }
+
+    [Fact]
     public void UpsertUnixPersistBlock_NoExistingBlock_AppendsAndKeepsOriginalContent()
     {
         const string existing = "# my custom profile\nexport EDITOR=vim\n";

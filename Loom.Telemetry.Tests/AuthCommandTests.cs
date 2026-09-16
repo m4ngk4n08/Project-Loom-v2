@@ -8,6 +8,34 @@ namespace Loom.Telemetry.Tests;
 
 public class AuthCommandTests
 {
+    // The three-way decision behind ResolveUsersFileForCli/ResolveKeyFileForCli. This is
+    // the only way to exercise all three FileAccessState branches on Windows, where the
+    // system default and dev-secrets are the same folder and the real fallback never
+    // engages.
+    [Fact]
+    public void ResolveCliPath_EnvValueSet_WinsOutrightRegardlessOfState()
+    {
+        Assert.Equal("/env/path", AuthCommand.ResolveCliPath("/env/path", FileAccessState.Indeterminate, "/system/default", "/dev/secrets"));
+    }
+
+    [Fact]
+    public void ResolveCliPath_NoEnvValue_DefaultExists_UsesSystemDefault()
+    {
+        Assert.Equal("/system/default", AuthCommand.ResolveCliPath(null, FileAccessState.Exists, "/system/default", "/dev/secrets"));
+    }
+
+    [Fact]
+    public void ResolveCliPath_NoEnvValue_DefaultMissing_FallsBackToDevSecrets()
+    {
+        Assert.Equal("/dev/secrets", AuthCommand.ResolveCliPath(null, FileAccessState.Missing, "/system/default", "/dev/secrets"));
+    }
+
+    [Fact]
+    public void ResolveCliPath_NoEnvValue_DefaultIndeterminate_RefusesRatherThanGuessing()
+    {
+        Assert.Null(AuthCommand.ResolveCliPath(null, FileAccessState.Indeterminate, "/system/default", "/dev/secrets"));
+    }
+
     [Theory]
     [InlineData("﻿secret123", "secret123")]
     [InlineData("secret123", "secret123")]

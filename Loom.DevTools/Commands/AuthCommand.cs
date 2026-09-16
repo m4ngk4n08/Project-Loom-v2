@@ -709,35 +709,78 @@ public static class AuthCommand
         return result.ToArray();
     }
 
-    /// <summary>AddUser/Token-only resolution, deliberately more forgiving than
+    /// <summary>Pure. The decision behind ResolveUsersFileForCli/ResolveKeyFileForCli once
+    /// FileAccessCheck has answered for the system default: an explicit environment value
+    /// always wins outright. Otherwise Exists uses the system default (unchanged from
+    /// before this round), Missing falls back to dev-secrets (unchanged), and
+    /// Indeterminate returns null - this process cannot tell whether the system default
+    /// exists, so it must not guess. Silently falling back to dev-secrets there is exactly
+    /// the bug this round fixes: it would write to, or sign with, a file the host never
+    /// reads, while reporting success.</summary>
+    public static string? ResolveCliPath(string? envValue, FileAccessState systemDefaultState, string systemDefaultPath, string devSecretsPath) =>
+        envValue is not null
+            ? envValue
+            : systemDefaultState switch
+            {
+                FileAccessState.Exists => systemDefaultPath,
+                FileAccessState.Missing => devSecretsPath,
+                _ => null,
+            };
+
+    /// <summary>AddUser-only resolution, deliberately more forgiving than
     /// KeyMaterial.ResolveUsersFile(): env var, else the system default if that file
     /// exists, else DevSecretsDirectory. Without this, `loom auth init` (no env var, no
     /// --persist) writes to dev-secrets while the system default on Unix stays
     /// /var/secrets/loom, so the very next `loom auth add-user` the tool just told the
     /// user to run fails - a closed loop. This fallback must never reach
     /// SecurityServiceExtensions: the CLI is a developer tool and can afford to guess
-    /// where your own notes live, the host is the security boundary and must not.</summary>
-    private static string ResolveUsersFileForCli()
+    /// where your own notes live, the host is the security boundary and must not.
+    ///
+    /// Returns null when the system default's existence cannot be determined (e.g. inside
+    /// a directory this process cannot traverse) - printing a refusal to stderr rather than
+    /// silently falling back to dev-secrets, which previously let an operator without
+    /// access to /var/secrets/loom add a user to a file the host never reads while the
+    /// command reported success.</summary>
+    private static string? ResolveUsersFileForCli()
     {
         var envValue = Environment.GetEnvironmentVariable(KeyMaterial.UsersFileVariable);
-        if (envValue is not null) return envValue;
-        if (File.Exists(KeyMaterial.DefaultUsersFile)) return KeyMaterial.DefaultUsersFile;
-
         var devPath = Path.Combine(DevSecretsDirectory, "users");
-        Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
-        return devPath;
+        var state = envValue is null ? FileAccessCheck.Check(KeyMaterial.DefaultUsersFile) : FileAccessState.Exists;
+        var resolved = ResolveCliPath(envValue, state, KeyMaterial.DefaultUsersFile, devPath);
+
+        if (resolved is null)
+        {
+            Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set, and the system default at {KeyMaterial.DefaultUsersFile} exists or might exist but this process cannot access it.");
+            Console.Error.WriteLine("  Run with access to it, or pass --users-file explicitly.");
+            return null;
+        }
+
+        if (envValue is null && state == FileAccessState.Missing)
+            Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
+
+        return resolved;
     }
 
-    /// <summary>Token-only resolution mirroring ResolveUsersFileForCli - see its remarks.</summary>
-    private static string ResolveKeyFileForCli()
+    /// <summary>Token-only resolution mirroring ResolveUsersFileForCli - see its remarks,
+    /// including the null-on-Indeterminate refusal.</summary>
+    private static string? ResolveKeyFileForCli()
     {
         var envValue = Environment.GetEnvironmentVariable(KeyMaterial.KeyFileVariable);
-        if (envValue is not null) return envValue;
-        if (File.Exists(KeyMaterial.DefaultKeyFile)) return KeyMaterial.DefaultKeyFile;
-
         var devPath = Path.Combine(DevSecretsDirectory, "jwt.key");
-        Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set and no key file exists at the system default - using {devPath}.");
-        return devPath;
+        var state = envValue is null ? FileAccessCheck.Check(KeyMaterial.DefaultKeyFile) : FileAccessState.Exists;
+        var resolved = ResolveCliPath(envValue, state, KeyMaterial.DefaultKeyFile, devPath);
+
+        if (resolved is null)
+        {
+            Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set, and the system default at {KeyMaterial.DefaultKeyFile} exists or might exist but this process cannot access it.");
+            Console.Error.WriteLine("  Run with access to it, or pass --key-file explicitly.");
+            return null;
+        }
+
+        if (envValue is null && state == FileAccessState.Missing)
+            Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set and no key file exists at the system default - using {devPath}.");
+
+        return resolved;
     }
 
     /// <summary>usersFile, when given (--users-file), is used exactly as supplied - no
@@ -751,7 +794,11 @@ public static class AuthCommand
     /// someone supplied, so for an explicit path that advice sends them the wrong way.</summary>
     public static bool AddUser(string username, string? usersFile = null)
     {
+        // ResolveUsersFileForCli already printed a refusal to stderr when it returns null
+        // (the system default's existence could not be determined) - nothing further to
+        // say here.
         var usersPath = usersFile ?? ResolveUsersFileForCli();
+        if (usersPath is null) return false;
         if (!File.Exists(usersPath))
         {
             Console.Error.WriteLine(usersFile is not null
@@ -783,7 +830,11 @@ public static class AuthCommand
     /// the same catch, as the dashboard host's startup in Loom.Dashboard/Program.cs.</summary>
     public static bool Token(string subject, JwtScope scope, TimeSpan ttl, string? keyFile = null)
     {
+        // ResolveKeyFileForCli already printed a refusal to stderr when it returns null
+        // (the system default's existence could not be determined) - nothing further to
+        // say here.
         var keyPath = keyFile ?? ResolveKeyFileForCli();
+        if (keyPath is null) return false;
         if (keyFile is not null && !File.Exists(keyPath))
         {
             // Checked here rather than left to LoadSigningKey: its message advises

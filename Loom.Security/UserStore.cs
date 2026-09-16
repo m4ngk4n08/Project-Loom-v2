@@ -22,8 +22,14 @@ public sealed class UserStore
     /// closed.</summary>
     public static UserStore Load(string path)
     {
-        if (!File.Exists(path))
-            throw new InvalidOperationException($"Loom auth: users file not found at '{path}'. Run 'loom auth init'.");
+        switch (FileAccessCheck.Check(path))
+        {
+            case FileAccessState.Missing:
+                throw new InvalidOperationException($"Loom auth: users file not found at '{path}'. Run 'loom auth init'.");
+            case FileAccessState.Indeterminate:
+                throw new InvalidOperationException(
+                    $"Loom auth: cannot access '{path}' - this process cannot read it. Check permissions on the file and its directory.");
+        }
 
         string[] lines;
         try

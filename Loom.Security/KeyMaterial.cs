@@ -45,9 +45,15 @@ public static class KeyMaterial
     /// production by accident.</summary>
     public static byte[] LoadSigningKey(string path)
     {
-        if (!File.Exists(path))
-            throw new InvalidOperationException(
-                $"Loom auth: signing key not found at '{path}'. Set {KeyFileVariable} or run 'loom auth init'.");
+        switch (FileAccessCheck.Check(path))
+        {
+            case FileAccessState.Missing:
+                throw new InvalidOperationException(
+                    $"Loom auth: signing key not found at '{path}'. Set {KeyFileVariable} or run 'loom auth init'.");
+            case FileAccessState.Indeterminate:
+                throw new InvalidOperationException(
+                    $"Loom auth: cannot access '{path}' - this process cannot read it. Check permissions on the file and its directory.");
+        }
 
         string text;
         try

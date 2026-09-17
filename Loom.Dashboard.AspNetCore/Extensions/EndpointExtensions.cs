@@ -110,7 +110,7 @@ namespace Loom.Dashboard.Extensions
         {
             api.MapGet("/session", (IMetricStore store) =>
             {
-                var processName = Process.GetProcessById(targetPid)?.ProcessName ?? $"pid-{targetPid}";
+                var processName = ResolveProcessName(targetPid);
                 return Results.Json(new SessionInfoResponse
                 {
                     TargetProcessId = targetPid,
@@ -122,6 +122,28 @@ namespace Loom.Dashboard.Extensions
             });
 
             return api;
+        }
+
+        // Process.GetProcessById throws ArgumentException for a PID with no running
+        // process - it never returns null - so the old `?.ProcessName ?? ...` pattern
+        // never actually ran its fallback and instead 500'd /api/session once the
+        // target exited. InvalidOperationException is also caught: the process can exit
+        // between the successful lookup and reading ProcessName.
+        internal static string ResolveProcessName(int pid)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                return process.ProcessName;
+            }
+            catch (ArgumentException)
+            {
+                return $"pid-{pid} (exited)";
+            }
+            catch (InvalidOperationException)
+            {
+                return $"pid-{pid} (exited)";
+            }
         }
 
         private static RouteGroupBuilder MapMetricsEndpoints(this RouteGroupBuilder api, MetricsResponseBuilder metricsBuilder)
@@ -138,16 +160,39 @@ namespace Loom.Dashboard.Extensions
             return api;
         }
 
-        private static RouteGroupBuilder MapMetricIngestEndpoint(this RouteGroupBuilder api)
+        // internal rather than private so MetricIngestEndpointTests can map just this group
+        // onto a bare WebApplication, same rationale as MapAlertEndpoints/MapLogEndpoints.
+        internal static RouteGroupBuilder MapMetricIngestEndpoint(this RouteGroupBuilder api)
         {
             api.MapPost("/metrics/ingest", (MetricIngestRequest request, IMetricStore store) =>
             {
-                foreach (var metric in request.Metrics)
-                {
-                    var tags = metric.Tags?.Select(kvp => new MetricTag(kvp.Key, kvp.Value)).ToArray()
-                        ?? Array.Empty<MetricTag>();
+                if (request.Metrics is null)
+                    return Results.Json(
+                        new ErrorResponse { Error = "Metrics is required." },
+                        LoomJsonSerializerContext.Default.ErrorResponse,
+                        statusCode: 400);
 
-                    var timestamp = metric.Timestamp ?? DateTime.UtcNow;
+                // Pass 1: validate every metric and build the records to write. On the
+                // first invalid entry, return 400 with nothing written - a batch must not
+                // partially commit.
+                var records = new MetricRecord[request.Metrics.Length];
+                for (var i = 0; i < request.Metrics.Length; i++)
+                {
+                    var metric = request.Metrics[i];
+
+                    if (string.IsNullOrEmpty(metric.Name))
+                        return Results.Json(
+                            new ErrorResponse { Error = "Metric name is required." },
+                            LoomJsonSerializerContext.Default.ErrorResponse,
+                            statusCode: 400);
+
+                    // JSON `null` passes `required` validation, so metric.Type can be null
+                    // here even though the DTO declares it non-nullable.
+                    if (metric.Type is null)
+                        return Results.Json(
+                            new ErrorResponse { Error = "Metric type is required. Must be Counter, Gauge, or Histogram." },
+                            LoomJsonSerializerContext.Default.ErrorResponse,
+                            statusCode: 400);
 
                     var type = metric.Type.ToLowerInvariant() switch
                     {
@@ -163,13 +208,23 @@ namespace Loom.Dashboard.Extensions
                             LoomJsonSerializerContext.Default.ErrorResponse,
                             statusCode: 400);
 
-                    var record = new MetricRecord(
+                    var tags = metric.Tags?.Select(kvp => new MetricTag(kvp.Key, kvp.Value)).ToArray()
+                        ?? Array.Empty<MetricTag>();
+
+                    var timestamp = metric.Timestamp ?? DateTime.UtcNow;
+
+                    records[i] = new MetricRecord(
                         metric.Name,
                         type.Value,
                         metric.Value,
                         timestamp.Ticks,
                         tags.Length > 0 ? tags : null
                     );
+                }
+
+                // Pass 2: everything validated, write them all.
+                foreach (var record in records)
+                {
                     store.Write(in record);
                 }
 
@@ -346,7 +401,39 @@ namespace Loom.Dashboard.Extensions
                     if (payload is null)
                         return Results.BadRequest("A message template is required to explain an entry.");
 
-                    var result = await client.ExplainAsync(payload, context.RequestAborted);
+                    ExplainResult result;
+                    try
+                    {
+                        result = await client.ExplainAsync(payload, context.RequestAborted);
+                    }
+                    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+                    {
+                        // Client went away; nothing to answer.
+                        throw;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return Results.Json(
+                            new ErrorResponse { Error = "The explain provider timed out." },
+                            LoomJsonSerializerContext.Default.ErrorResponse,
+                            statusCode: 504);
+                    }
+                    catch (HttpRequestException)
+                    {
+                        // Never echo ex.Message here - it can carry host/URL detail.
+                        return Results.Json(
+                            new ErrorResponse { Error = "The explain provider could not be reached." },
+                            LoomJsonSerializerContext.Default.ErrorResponse,
+                            statusCode: 502);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        // Authored in AnthropicExplainClient; safe to show, never contains the key.
+                        return Results.Json(
+                            new ErrorResponse { Error = ex.Message },
+                            LoomJsonSerializerContext.Default.ErrorResponse,
+                            statusCode: 502);
+                    }
 
                     return Results.Json(new ExplainResponse
                     {
@@ -358,7 +445,9 @@ namespace Loom.Dashboard.Extensions
                     }, LoomJsonSerializerContext.Default.ExplainResponse);
                 })
                 .WithName("ExplainLogEntry")
-                .Produces<ExplainResponse>(200);
+                .Produces<ExplainResponse>(200)
+                .Produces(502)
+                .Produces(504);
             }
 
             return api;

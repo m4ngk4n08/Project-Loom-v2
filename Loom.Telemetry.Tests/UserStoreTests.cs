@@ -187,6 +187,30 @@ public class UserStoreTests
         }
     }
 
+    [Fact]
+    public void Contains_DefinedUser_ReturnsTrue()
+    {
+        var path = WriteUsersFile($"alice:{PasswordHasher.Hash("s3cret")}");
+        try
+        {
+            var store = UserStore.Load(path);
+            Assert.True(store.Contains("alice"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Contains_UndefinedUser_ReturnsFalse()
+    {
+        var path = WriteUsersFile($"alice:{PasswordHasher.Hash("s3cret")}");
+        try
+        {
+            var store = UserStore.Load(path);
+            Assert.False(store.Contains("bob"));
+        }
+        finally { File.Delete(path); }
+    }
+
     private static string WriteUsersFile(params string[] lines)
     {
         var path = Path.GetTempFileName();

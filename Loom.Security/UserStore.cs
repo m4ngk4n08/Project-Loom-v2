@@ -80,6 +80,11 @@ public sealed class UserStore
         return new UserStore(users.ToFrozenDictionary(StringComparer.Ordinal), dummy);
     }
 
+    /// <summary>Whether a user is defined. Not constant-time, so never call it with an
+    /// unauthenticated name - refresh calls it only with the subject of a token whose
+    /// signature has already been verified.</summary>
+    public bool Contains(string username) => _users.ContainsKey(username);
+
     /// <summary>Always performs exactly one key derivation, whether or not the user
     /// exists. Do not add an early return for the unknown-user case.</summary>
     public bool Verify(string username, string password)

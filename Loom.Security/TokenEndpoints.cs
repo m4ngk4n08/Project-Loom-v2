@@ -20,10 +20,18 @@ public static class TokenEndpoints
             HttpContext context,
             ILoggerFactory loggerFactory) =>
         {
+            if (request.Username is null || request.Password is null)
+            {
+                return Results.Json(
+                    new QueryErrorResponse { Error = "Username and password are required" },
+                    LoomJsonSerializerContext.Default.QueryErrorResponse,
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
             var client = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             var log = loggerFactory.CreateLogger("Loom.Security.Token");
 
-            if (throttle.IsBlocked(client, out var retryAfter))
+            if (!throttle.TryBeginAttempt(client, out var retryAfter))
             {
                 context.Response.Headers.RetryAfter = ((int)retryAfter.TotalSeconds).ToString();
                 return Results.StatusCode(StatusCodes.Status429TooManyRequests);
@@ -33,7 +41,6 @@ public static class TokenEndpoints
             // takes the same time in both cases - see its comment.
             if (!users.Verify(request.Username, request.Password))
             {
-                throttle.RecordFailure(client);
                 log.LogWarning("Failed login for {Username} from {Client}", request.Username, client);
                 return Results.Json(
                     new QueryErrorResponse { Error = "Invalid credentials" },
@@ -57,7 +64,8 @@ public static class TokenEndpoints
         app.MapPost("/api/token/refresh", (
             HttpContext context,
             JwtValidator validator,
-            JwtIssuer issuer) =>
+            JwtIssuer issuer,
+            UserStore users) =>
         {
             var header = context.Request.Headers.Authorization.ToString();
             if (!header.StartsWith("Bearer ", StringComparison.Ordinal))
@@ -69,6 +77,11 @@ public static class TokenEndpoints
             // A scoped service token must not be able to renew itself into a longer life.
             if (principal.Scope != JwtScope.Full)
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+            // The credential no longer identifies a valid principal - not 403, since this
+            // is not a scope problem.
+            if (!users.Contains(principal.Subject))
+                return Results.StatusCode(StatusCodes.Status401Unauthorized);
 
             var sessionStart = ReadIssuedAt(header.AsSpan(7));
             return Results.Json(

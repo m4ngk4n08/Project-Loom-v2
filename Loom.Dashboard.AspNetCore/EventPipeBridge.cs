@@ -98,7 +98,7 @@ public sealed class EventPipeBridge : BackgroundService
         };
 
         using var session = client.StartEventPipeSession(providers, requestRundown: false);
-        var source = new EventPipeEventSource(session.EventStream);
+        using var source = new EventPipeEventSource(session.EventStream);
 
         source.Dynamic.All += traceEvent =>
         {
@@ -239,7 +239,7 @@ public sealed class EventPipeBridge : BackgroundService
         await Task.Run(() =>
         {
             try { source.Process(); }
-            catch { }
+            catch (Exception) when (ct.IsCancellationRequested) { }
         }, ct);
     }
 

@@ -26,7 +26,7 @@ internal static class MetricsBridge
     private static readonly ObservableGauge<int> Up =
         Meter.CreateObservableGauge("loom.telemetry.up", () => 1);
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Counter<long>> Counters = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Counter<double>> Counters = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Histogram<double>> Histograms = new();
 
     // Dropped-record counts per metric-name buffer. Unlike PublishGauge, there is nothing
@@ -84,8 +84,8 @@ internal static class MetricsBridge
     // than relying on that observation staying true.
     private sealed record GaugeState(double Value, KeyValuePair<string, object?>[] Tags);
 
-    public static void PublishCounter(string name, long increment, ReadOnlySpan<MetricTag> tags = default) =>
-        Counters.GetOrAdd(name, n => Meter.CreateCounter<long>(n)).Add(increment, ConvertTags(tags));
+    public static void PublishCounter(string name, double increment, ReadOnlySpan<MetricTag> tags = default) =>
+        Counters.GetOrAdd(name, n => Meter.CreateCounter<double>(n)).Add(increment, ConvertTags(tags));
 
     public static void PublishHistogram(string name, double value, ReadOnlySpan<MetricTag> tags = default) =>
         Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value, ConvertTags(tags));

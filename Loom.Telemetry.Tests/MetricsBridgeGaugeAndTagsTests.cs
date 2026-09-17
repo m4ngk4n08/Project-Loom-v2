@@ -88,7 +88,7 @@ public sealed class MetricsBridgeGaugeAndTagsTests
             if (instrument.Meter.Name == "Loom.Telemetry" && instrument.Name == name)
                 l.EnableMeasurementEvents(instrument);
         };
-        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, state) =>
+        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, state) =>
         {
             found = true;
             observedTags = tags.ToArray();
@@ -102,6 +102,35 @@ public sealed class MetricsBridgeGaugeAndTagsTests
         Assert.True(found, $"Expected a measurement on counter instrument '{name}'.");
         Assert.Contains(observedTags!, t => t.Key == "route" && (string?)t.Value == "/api/health");
         Assert.Contains(observedTags!, t => t.Key == "method" && (string?)t.Value == "GET");
+    }
+
+    [Fact]
+    public void RecordCounter_WithFractionalValue_PublishesTheFraction()
+    {
+        var name = $"test.counter.fraction.{System.Guid.NewGuid():N}";
+
+        var found = false;
+        double? observedValue = null;
+
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == "Loom.Telemetry" && instrument.Name == name)
+                l.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, state) =>
+        {
+            found = true;
+            observedValue = measurement;
+        });
+        listener.Start();
+
+        LoomMetrics.RecordCounter(name, 0.5);
+
+        listener.Dispose();
+
+        Assert.True(found, $"Expected a measurement on counter instrument '{name}'.");
+        Assert.Equal(0.5, observedValue);
     }
 
     [Fact]

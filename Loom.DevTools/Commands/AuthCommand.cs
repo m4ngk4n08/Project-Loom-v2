@@ -95,6 +95,43 @@ public static class AuthCommand
             return directoryTightened && keyTightened && usersTightened && persisted;
         }
 
+        // FileAccessCheck, the same three-state way the key check above decides, rather
+        // than File.Exists - which would silently report Missing (and this process would
+        // then try to WriteSecretFile into a directory it cannot traverse) for the same
+        // "dev-secrets owned by someone else" case the key check above already guards.
+        var usersState = FileAccessCheck.Check(usersPath);
+        if (usersState == FileAccessState.Indeterminate)
+        {
+            Console.Error.WriteLine($"Cannot access {usersPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
+            Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
+            return false;
+        }
+
+        var usersFileAlreadyExisted = usersState == FileAccessState.Exists;
+        var usersFileTightened = true;
+        if (!usersFileAlreadyExisted)
+        {
+            // Same wrapping and the same reasoning as the key write below - this write was
+            // previously unguarded entirely, so either exception crashed `init`.
+            try
+            {
+                WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"Could not write {usersPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
+                Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
+                return false;
+            }
+            catch (IOException)
+            {
+                Console.Error.WriteLine($"Could not write {usersPath} - something is already there (possibly a dangling symlink), even though it could not be opened for reading a moment ago.");
+                Console.Error.WriteLine("Remove it deliberately, then re-run 'loom auth init'. Not following it automatically - that is how a planted symlink would steal the signing key.");
+                return false;
+            }
+        }
+        else usersFileTightened = TightenIfLoose(usersPath, SecretFileMode);
+
         // Backstop for the same failure class as the keyState check above: if dev-secrets
         // became inaccessible between that check and this write (or in any other path that
         // reaches here), fail closed with a message instead of an uncaught crash.
@@ -124,43 +161,6 @@ public static class AuthCommand
             Console.Error.WriteLine("Remove it deliberately, then re-run 'loom auth init'. Not following it automatically - that is how a planted symlink would steal the signing key.");
             return false;
         }
-
-        // FileAccessCheck, the same three-state way the key check above decides, rather
-        // than File.Exists - which would silently report Missing (and this process would
-        // then try to WriteSecretFile into a directory it cannot traverse) for the same
-        // "dev-secrets owned by someone else" case the key check above already guards.
-        var usersState = FileAccessCheck.Check(usersPath);
-        if (usersState == FileAccessState.Indeterminate)
-        {
-            Console.Error.WriteLine($"Cannot access {usersPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
-            Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
-            return false;
-        }
-
-        var usersFileAlreadyExisted = usersState == FileAccessState.Exists;
-        var usersFileTightened = true;
-        if (!usersFileAlreadyExisted)
-        {
-            // Same wrapping and the same reasoning as the key write above - this write was
-            // previously unguarded entirely, so either exception crashed `init`.
-            try
-            {
-                WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
-            }
-            catch (UnauthorizedAccessException)
-            {
-                Console.Error.WriteLine($"Could not write {usersPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
-                Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
-                return false;
-            }
-            catch (IOException)
-            {
-                Console.Error.WriteLine($"Could not write {usersPath} - something is already there (possibly a dangling symlink), even though it could not be opened for reading a moment ago.");
-                Console.Error.WriteLine("Remove it deliberately, then re-run 'loom auth init'. Not following it automatically - that is how a planted symlink would steal the signing key.");
-                return false;
-            }
-        }
-        else usersFileTightened = TightenIfLoose(usersPath, SecretFileMode);
 
         Console.WriteLine($"Wrote {keyPath}");
         // "Wrote {usersPath}" was previously printed unconditionally, including here

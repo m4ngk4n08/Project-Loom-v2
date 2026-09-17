@@ -1709,6 +1709,76 @@ fold this in if that round is still open.
 
 **Found by** `/code-review high Loom.Security` (pre-publish review #1).
 
+### 6.25 `LoginThrottle.IsBlocked` / `RecordFailure` Are Still Public 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Security/LoginThrottle.cs:18` and `:34`, at `b48b717`.
+
+Merge `8533966` made the login endpoint use `TryBeginAttempt`, which checks the lockout and counts the attempt
+under one lock. The old two-step pair is now called only by tests, but is still public API. A future login path
+that calls `IsBlocked` then `RecordFailure` reintroduces the race `8533966` closed (measured on `3d6f245`: 1
+failure then 50 concurrent wrong logins → 13 × 401 instead of 4).
+
+**Why LOW:** no caller today. It matters before `Loom.Security` is published, when the public surface becomes
+permanent.
+
+**Fix shape:** make both `internal` and add `InternalsVisibleTo("Loom.Telemetry.Tests")` to
+`Loom.Security.csproj` (none exists yet), or `[Obsolete]` pointing at `TryBeginAttempt`. Do it after the parallel
+review branches are merged — the csproj was off-limits while they were open.
+
+**Found by** `/code-review high` on `sonnet/security-login-fixes`.
+
+### 6.26 Refresh Rejects Full-Scope CLI Tokens Whose Subject Is Not a User 🟢 LOW (ACCEPTED — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Security/TokenEndpoints.cs` refresh handler (`users.Contains(principal.Subject)`),
+and `Loom.DevTools/Commands/AuthCommand.cs:1055-1056`, which mints a token for any `--sub` without consulting the
+users file. At `b48b717`.
+
+Since `8533966`, `loom auth token --sub ci-bot --scope full` produces a token that works on every endpoint but
+gets 401 from `/api/token/refresh`.
+
+**Why accepted:** full-scope tokens are capped at 12 hours from issue by `JwtValidator` and refresh preserves the
+original `iat`, so refresh could never extend such a token past that cap anyway. It fails closed. Recorded in the
+merge commit.
+
+**If revisited:** make `loom auth token --scope full` require a name present in the users file, so the two stay
+consistent.
+
+**Found by** `/code-review high` on `sonnet/security-login-fixes`.
+
+### 6.27 A Collector That Hangs Is Skipped Silently Forever 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Telemetry/LoomCollectors.cs:157`, at `b48b717`.
+
+Merge `b48b717` added a per-registration `IsCollecting` guard so two scheduler ticks never overlap one collector.
+The flag is released only in the `finally` after the run completes. A collector whose `CollectAsync` never
+returns keeps the flag set, so every later tick skips it — with no failure recorded and its last error
+unchanged. The dashboard shows a collector that simply stopped.
+
+**Why LOW:** needs a collector that never completes; the guard itself is correct and prevents real overlap.
+
+**Fix shape:** a per-run timeout (cancel the token and record a failure), or count a skipped tick as a failure
+once it has been skipped N times in a row.
+
+**Found by** `/code-review high` on `sonnet/telemetry-review-fixes` (reported by the reviewing session; code
+confirmed by Opus in this session).
+
+### 6.28 Loom Counters Are Now `Counter<double>` on the Meter 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Telemetry/MetricsBridge.cs:91-92` (`PublishCounter`), at `b48b717`.
+
+Merge `b48b717` changed the bridge's counters from `Counter<long>` to `Counter<double>`. Loom's own readers are
+unaffected. An external `MeterListener` that only registers `SetMeasurementEventCallback<long>` on the
+`Loom.Telemetry` meter stops receiving counter values, with no error.
+
+**Why LOW:** nothing has been published yet, so no external listener exists. It is exactly the kind of change
+that is free now and breaking later.
+
+**Fix shape:** none needed in code; record it in the first release notes as the counter instrument type, and do
+not change it again after publishing.
+
+**Found by** `/code-review high` on `sonnet/telemetry-review-fixes` (reported by the reviewing session; code
+confirmed by Opus in this session).
+
 ---
 
 ## 7. Priority Summary

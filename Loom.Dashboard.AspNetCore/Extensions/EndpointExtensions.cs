@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -599,10 +600,16 @@ namespace Loom.Dashboard.Extensions
             }
         }
 
-        private static WebApplication MapSpaFallback(this WebApplication app, IFileProvider? embeddedProvider)
+        internal static WebApplication MapSpaFallback(this WebApplication app, IFileProvider? embeddedProvider)
         {
             app.MapFallback(async context =>
             {
+                if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.StatusCode = 404;
+                    return;
+                }
+
                 if (embeddedProvider != null)
                 {
                     var file = embeddedProvider.GetFileInfo("index.html");

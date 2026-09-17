@@ -98,6 +98,16 @@ public static class AuthCommand
         // Backstop for the same failure class as the keyState check above: if dev-secrets
         // became inaccessible between that check and this write (or in any other path that
         // reaches here), fail closed with a message instead of an uncaught crash.
+        //
+        // IOException - not just UnauthorizedAccessException - is caught here because
+        // WriteSecretFile creates with FileMode.CreateNew, which throws IOException when
+        // anything already exists at keyPath: a dangling symlink (FileAccessCheck.Check
+        // correctly reports that as Missing a moment earlier, since File.OpenRead follows
+        // the link to a target that isn't there), or a second `init` racing this one.
+        // CreateNew refusing to write through that symlink is correct - following it would
+        // let another local user plant a symlink and have this process write the signing
+        // key wherever it points. Only the crash is wrong: report it and let the user
+        // remove whatever is there deliberately, never delete it automatically.
         try
         {
             WriteSecretFile(keyPath, Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
@@ -108,10 +118,48 @@ public static class AuthCommand
             Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
             return false;
         }
+        catch (IOException)
+        {
+            Console.Error.WriteLine($"Could not write {keyPath} - something is already there (possibly a dangling symlink), even though it could not be opened for reading a moment ago.");
+            Console.Error.WriteLine("Remove it deliberately, then re-run 'loom auth init'. Not following it automatically - that is how a planted symlink would steal the signing key.");
+            return false;
+        }
 
-        var usersFileAlreadyExisted = File.Exists(usersPath);
+        // FileAccessCheck, the same three-state way the key check above decides, rather
+        // than File.Exists - which would silently report Missing (and this process would
+        // then try to WriteSecretFile into a directory it cannot traverse) for the same
+        // "dev-secrets owned by someone else" case the key check above already guards.
+        var usersState = FileAccessCheck.Check(usersPath);
+        if (usersState == FileAccessState.Indeterminate)
+        {
+            Console.Error.WriteLine($"Cannot access {usersPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
+            Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
+            return false;
+        }
+
+        var usersFileAlreadyExisted = usersState == FileAccessState.Exists;
         var usersFileTightened = true;
-        if (!usersFileAlreadyExisted) WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
+        if (!usersFileAlreadyExisted)
+        {
+            // Same wrapping and the same reasoning as the key write above - this write was
+            // previously unguarded entirely, so either exception crashed `init`.
+            try
+            {
+                WriteSecretFile(usersPath, "# username:pbkdf2-sha256$...\n");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"Could not write {usersPath} - the dev-secrets directory ({DevSecretsDirectory}) may be owned by another user (e.g. a previous `sudo loom auth init`).");
+                Console.Error.WriteLine($"  Fix it manually:  chown -R \"$(whoami)\" {DevSecretsDirectory}");
+                return false;
+            }
+            catch (IOException)
+            {
+                Console.Error.WriteLine($"Could not write {usersPath} - something is already there (possibly a dangling symlink), even though it could not be opened for reading a moment ago.");
+                Console.Error.WriteLine("Remove it deliberately, then re-run 'loom auth init'. Not following it automatically - that is how a planted symlink would steal the signing key.");
+                return false;
+            }
+        }
         else usersFileTightened = TightenIfLoose(usersPath, SecretFileMode);
 
         Console.WriteLine($"Wrote {keyPath}");

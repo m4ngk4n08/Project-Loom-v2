@@ -2033,7 +2033,7 @@ needs a deliberate answer before deployment rather than a discovery during it.
 repository URL. The consumer-facing story today is "run the host" or "run the CLI"; there
 is no "reference the library" story despite the library surface already existing.
 
-**Target state.** Three tiers, plus a metapackage:
+**Target state.** Two libraries and two tools (the metapackage was dropped 2026-09-17):
 
 Package IDs settled 2026-09-02 — see § 11.7. They are `LoomDiagnostics.*`, which differs
 from the assembly names and namespaces (`Loom.*`), and that is deliberate.
@@ -2042,7 +2042,7 @@ from the assembly names and namespaces (`Loom.*`), and that is deliberate.
 |---|---|---|
 | `LoomDiagnostics.Telemetry` | attribute + generator + recording | `[LoomProfile]`, `AddLoomTelemetry()` |
 | `LoomDiagnostics.Dashboard.AspNetCore` | mountable dashboard | `AddLoomDashboard()` / `MapLoomDashboard()` |
-| `LoomDiagnostics` (metapackage) | no code; depends on the others | one-line "everything" install |
+| ~~`LoomDiagnostics` (metapackage)~~ | **dropped 2026-09-17** — see decision log | — |
 | `LoomDiagnostics.Dashboard` | CLI tool | command stays `loom-dashboard` |
 | `LoomDiagnostics.Cli` | CLI tool | command stays `loom` |
 
@@ -2349,7 +2349,7 @@ namespace do not have to match, and here they deliberately do not.**
 | `LoomDiagnostics.Telemetry` | `Loom.Telemetry` | — |
 | `LoomDiagnostics.Dashboard` | `Loom.Dashboard` | `loom-dashboard` |
 | `LoomDiagnostics.Cli` | `Loom.DevTools` | `loom` |
-| `LoomDiagnostics` | metapackage, not yet built | — |
+| ~~`LoomDiagnostics`~~ | ~~metapackage~~ — **dropped 2026-09-17**, see decision log | — |
 | `LoomDiagnostics.Dashboard.AspNetCore` | mountable library, § 11.1 item 3 | — |
 
 **Why not `Loom.*`.** Verified on nuget.org 2026-09-02 by registration-index probe and
@@ -2392,7 +2392,10 @@ request can succeed at all.
 
 ---
 
-### 11.8 Whether to Support .NET 8 As Well as .NET 10 🟡 MEDIUM (OPEN DECISION — filed 2026-09-09)
+### 11.8 Whether to Support .NET 8 As Well as .NET 10 🟡 MEDIUM (✅ DECIDED 2026-09-17 — .NET 10 only)
+
+**Decided: `net10.0` only.** .NET 8 leaves support on 2026-11-10. See the 2026-09-17 decision-log entry.
+The text below is the analysis the decision was made from.
 
 **Not a commitment to do it. Filed so the choice is made deliberately rather than made by
 default at the moment someone runs `dotnet nuget push`.**
@@ -2540,6 +2543,32 @@ field because it asserted mid-ramp.
 **Follow-ups filed rather than folded in:** § 6.11 (`SystemRuntimeCounters`' two cancelling
 bugs) and § 6.12 (the two ingest parsers are hand-synced duplicates, and only one of them
 has tests).
+
+### 2026-09-17: Two Tools, No Metapackage, .NET 10 Only
+
+**Decisions (the user's), made after the auth, assist and § 6.13 work merged:**
+
+1. **Keep `loom` and `loom-dashboard` as two tools.** Measured the same day by packing both at
+   `fa572d7`: `LoomDiagnostics.Cli` 5,359,980 B nupkg / 13.16 MB installed, `LoomDiagnostics.Dashboard`
+   5,593,388 B / 14.23 MB. Both already require `Microsoft.AspNetCore.App` (the CLI through
+   `Loom.Web.Contracts`), so merging would not add a runtime requirement — but it would put
+   `Loom.Telemetry.Assist` (the outbound LLM client) into every CLI install, against § 11.2; force one GC
+   mode on both (the dashboard sets `System.GC.Server: true`, the CLI does not); and rename
+   `loom-dashboard`. The original reason to merge — a dashboard-only install with no `loom auth init` — is
+   already answered by the dashboard's missing-key message, which names `dotnet tool install -g
+   LoomDiagnostics.Cli`.
+2. **Drop the `LoomDiagnostics` metapackage.** Under the current plan it would aggregate only
+   `LoomDiagnostics.Telemetry` and `LoomDiagnostics.Dashboard.AspNetCore`, so its one-line install would pull
+   ASP.NET Core into any non-web app that used it — § 11.2's first cost, delivered by the most tempting install
+   line. The saving was one `dotnet add package` line. **Unverified, check at prefix-reservation time:**
+   whether reserving the `LoomDiagnostics` prefix also protects the bare `LoomDiagnostics` ID.
+3. **Target .NET 10 only — closes § 11.8.** Per dotnet.microsoft.com (fetched 2026-09-17), .NET 8 and .NET 9
+   both leave support on **2026-11-10**; .NET 10 LTS is supported to **2028-11-14**. The user's reasoning:
+   companies are moving to .NET 10 anyway, and a second target now would promise support for a runtime
+   Microsoft stops patching within two months, at the cost of a doubled test matrix and unmeasured
+   interceptor/EventPipe behaviour on net8. Adding a target later remains non-breaking if demand appears.
+
+**Deferred by the user:** the package version number, until these were settled.
 
 ---
 

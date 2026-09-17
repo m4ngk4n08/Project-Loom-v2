@@ -331,7 +331,10 @@ namespace Loom.Dashboard.Extensions
 
             api.MapGet("/logs/tail", (long? after, int? count, ILogStore store) =>
             {
-                var afterSequence = after ?? 0;
+                var currentSequence = store.CurrentSequence;
+                // A cursor ahead of the buffer (kept across a dashboard restart) or negative
+                // must not be echoed back to the caller.
+                var afterSequence = Math.Clamp(after ?? 0, 0, currentSequence);
                 var clampedCount = Math.Clamp(count ?? 100, 1, 1000);
                 var result = store.ReadAfter(afterSequence);
 

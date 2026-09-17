@@ -904,7 +904,7 @@ public static class AuthCommand
         // host (an account with no profile folder makes DefaultUsersFile relative) - here
         // it must refuse rather than let FileAccessCheck/File.Exists resolve a relative
         // path against whatever the current working directory happens to be.
-        if (envValue is null && !KeyMaterial.IsUsableDefaultPath(KeyMaterial.DefaultUsersFile))
+        if (!KeyMaterial.IsEnvironmentValueSet(envValue) && !KeyMaterial.IsUsableDefaultPath(KeyMaterial.DefaultUsersFile))
         {
             Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set, and no per-user data folder could be determined for the default users-file location.");
             Console.Error.WriteLine($"  Set {KeyMaterial.UsersFileVariable} explicitly, or pass --users-file.");
@@ -912,7 +912,7 @@ public static class AuthCommand
         }
 
         var devPath = Path.Combine(DevSecretsDirectory, "users");
-        var state = envValue is null ? FileAccessCheck.Check(KeyMaterial.DefaultUsersFile) : FileAccessState.Exists;
+        var state = !KeyMaterial.IsEnvironmentValueSet(envValue) ? FileAccessCheck.Check(KeyMaterial.DefaultUsersFile) : FileAccessState.Exists;
         var resolved = ResolveCliPath(envValue, state, KeyMaterial.DefaultUsersFile, devPath);
 
         if (resolved is null)
@@ -922,7 +922,7 @@ public static class AuthCommand
             return null;
         }
 
-        if (envValue is null && state == FileAccessState.Missing)
+        if (!KeyMaterial.IsEnvironmentValueSet(envValue) && state == FileAccessState.Missing)
             Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
 
         return resolved;
@@ -934,7 +934,7 @@ public static class AuthCommand
     {
         var envValue = Environment.GetEnvironmentVariable(KeyMaterial.KeyFileVariable);
 
-        if (envValue is null && !KeyMaterial.IsUsableDefaultPath(KeyMaterial.DefaultKeyFile))
+        if (!KeyMaterial.IsEnvironmentValueSet(envValue) && !KeyMaterial.IsUsableDefaultPath(KeyMaterial.DefaultKeyFile))
         {
             Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set, and no per-user data folder could be determined for the default key location.");
             Console.Error.WriteLine($"  Set {KeyMaterial.KeyFileVariable} explicitly, or pass --key-file.");
@@ -942,7 +942,7 @@ public static class AuthCommand
         }
 
         var devPath = Path.Combine(DevSecretsDirectory, "jwt.key");
-        var state = envValue is null ? FileAccessCheck.Check(KeyMaterial.DefaultKeyFile) : FileAccessState.Exists;
+        var state = !KeyMaterial.IsEnvironmentValueSet(envValue) ? FileAccessCheck.Check(KeyMaterial.DefaultKeyFile) : FileAccessState.Exists;
         var resolved = ResolveCliPath(envValue, state, KeyMaterial.DefaultKeyFile, devPath);
 
         if (resolved is null)
@@ -952,7 +952,7 @@ public static class AuthCommand
             return null;
         }
 
-        if (envValue is null && state == FileAccessState.Missing)
+        if (!KeyMaterial.IsEnvironmentValueSet(envValue) && state == FileAccessState.Missing)
             Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set and no key file exists at the system default - using {devPath}.");
 
         return resolved;

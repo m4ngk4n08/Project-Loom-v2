@@ -149,9 +149,23 @@ public static class LoomCollectors
             activeCollectors = Collectors.Values.Where(r => r.IsEnabled).ToList();
         }
 
-        // Collect from all active collectors in parallel
-        var tasks = activeCollectors.Select(reg =>
-            Task.Run(async () => await CollectFromRegistrationAsync(reg, CancellationToken.None)));
+        // Collect from all active collectors in parallel, skipping any collector whose
+        // previous scheduled run hasn't finished yet - one CompareExchange per
+        // registration claims the "collecting" slot so two ticks never overlap the same
+        // collector. Manual CollectAsync(name) bypasses this gate entirely.
+        var tasks = activeCollectors
+            .Where(reg => Interlocked.CompareExchange(ref reg.IsCollecting, 1, 0) == 0)
+            .Select(reg => Task.Run(async () =>
+            {
+                try
+                {
+                    await CollectFromRegistrationAsync(reg, CancellationToken.None);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref reg.IsCollecting, 0);
+                }
+            }));
 
         // Fire and forget - don't block the timer callback
         Task.WhenAll(tasks).ContinueWith(t =>

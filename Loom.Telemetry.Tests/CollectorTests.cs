@@ -206,6 +206,24 @@ public sealed class CollectorTests : IDisposable
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             LoomCollectors.SetCollectionInterval(TimeSpan.FromMilliseconds(500)));
     }
+
+    [Fact]
+    public async Task Scheduler_DoesNotOverlapCollectionsOfTheSameCollector()
+    {
+        // Arrange - each tick takes ~2.5s but ticks every 1s, so without gating the
+        // scheduler will start a second (overlapping) run of the same collector while
+        // the first is still in flight.
+        var collector = new ConcurrencyTrackingCollector(TimeSpan.FromMilliseconds(2500));
+        LoomCollectors.Register(collector);
+        LoomCollectors.SetCollectionInterval(TimeSpan.FromSeconds(1));
+
+        // Act
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        LoomCollectors.Shutdown();
+
+        // Assert
+        Assert.Equal(1, Volatile.Read(ref collector.MaxConcurrency));
+    }
 }
 
 /// <summary>
@@ -259,5 +277,52 @@ internal sealed class FailedSnapshotCollector : ILoomCollector
     public Task<CollectorSnapshot> CollectAsync(CancellationToken cancellationToken)
     {
         return Task.FromResult(CollectorSnapshot.Failed(Name, "Simulated non-throwing failure"));
+    }
+}
+
+/// <summary>
+/// Collector that tracks how many concurrent CollectAsync calls are in flight at once
+/// (and the high-water mark), and holds each call open for a fixed delay to make overlap
+/// observable.
+/// </summary>
+internal sealed class ConcurrencyTrackingCollector : ILoomCollector
+{
+    private readonly TimeSpan _delay;
+    private int _current;
+
+    public int MaxConcurrency;
+
+    public ConcurrencyTrackingCollector(TimeSpan delay)
+    {
+        _delay = delay;
+    }
+
+    public string Name => "ConcurrencyTrackingCollector";
+
+    public async Task<CollectorSnapshot> CollectAsync(CancellationToken cancellationToken)
+    {
+        var current = Interlocked.Increment(ref _current);
+        InterlockedMax(ref MaxConcurrency, current);
+        try
+        {
+            await Task.Delay(_delay, cancellationToken);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _current);
+        }
+
+        return new CollectorSnapshot(Name, Array.Empty<MetricRecord>());
+    }
+
+    private static void InterlockedMax(ref int location, int value)
+    {
+        int initial;
+        do
+        {
+            initial = Volatile.Read(ref location);
+            if (value <= initial)
+                return;
+        } while (Interlocked.CompareExchange(ref location, value, initial) != initial);
     }
 }

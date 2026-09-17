@@ -139,4 +139,75 @@ public sealed class MetricIngestEndpointTests
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         Assert.Equal(2, api.Store.GetMetricNames().Count);
     }
+
+    [Fact]
+    public async Task NullMetricElement_Returns400_AndWritesNothing()
+    {
+        await using var api = await StartAsync();
+
+        var body = RawJson("""
+            {
+              "metrics": [
+                { "name": "requests", "type": "Counter", "value": 1 },
+                null
+              ]
+            }
+            """);
+
+        var response = await api.Client.PostAsync("/api/metrics/ingest", body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(api.Store.GetMetricNames());
+    }
+
+    [Fact]
+    public async Task NullTagValue_Returns400_AndWritesNothing()
+    {
+        await using var api = await StartAsync();
+
+        var body = RawJson("""
+            {
+              "metrics": [
+                { "name": "requests", "type": "Counter", "value": 1 },
+                { "name": "bad", "type": "Gauge", "value": 1, "tags": { "region": null } }
+              ]
+            }
+            """);
+
+        var response = await api.Client.PostAsync("/api/metrics/ingest", body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(api.Store.GetMetricNames());
+    }
+
+    [Fact]
+    public async Task ValidTags_Returns202_AndWritesTaggedRecord()
+    {
+        await using var api = await StartAsync();
+
+        var body = RawJson("""
+            {
+              "metrics": [
+                { "name": "requests", "type": "Counter", "value": 1, "tags": { "region": "eu" } }
+              ]
+            }
+            """);
+
+        var response = await api.Client.PostAsync("/api/metrics/ingest", body);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Contains("requests", api.Store.GetMetricNames());
+    }
+
+    [Fact]
+    public async Task NullBody_Returns400()
+    {
+        await using var api = await StartAsync();
+
+        var body = RawJson("null");
+
+        var response = await api.Client.PostAsync("/api/metrics/ingest", body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

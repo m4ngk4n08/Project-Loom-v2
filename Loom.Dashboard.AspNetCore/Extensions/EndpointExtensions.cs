@@ -180,6 +180,12 @@ namespace Loom.Dashboard.Extensions
                 {
                     var metric = request.Metrics[i];
 
+                    if (metric is null)
+                        return Results.Json(
+                            new ErrorResponse { Error = $"Metric at index {i} is null." },
+                            LoomJsonSerializerContext.Default.ErrorResponse,
+                            statusCode: 400);
+
                     if (string.IsNullOrEmpty(metric.Name))
                         return Results.Json(
                             new ErrorResponse { Error = "Metric name is required." },
@@ -208,8 +214,26 @@ namespace Loom.Dashboard.Extensions
                             LoomJsonSerializerContext.Default.ErrorResponse,
                             statusCode: 400);
 
-                    var tags = metric.Tags?.Select(kvp => new MetricTag(kvp.Key, kvp.Value)).ToArray()
-                        ?? Array.Empty<MetricTag>();
+                    MetricTag[] tags;
+                    if (metric.Tags is null)
+                    {
+                        tags = Array.Empty<MetricTag>();
+                    }
+                    else
+                    {
+                        tags = new MetricTag[metric.Tags.Count];
+                        var tagIndex = 0;
+                        foreach (var kvp in metric.Tags)
+                        {
+                            if (kvp.Value is null)
+                                return Results.Json(
+                                    new ErrorResponse { Error = $"Tag '{kvp.Key}' on metric '{metric.Name}' has a null value." },
+                                    LoomJsonSerializerContext.Default.ErrorResponse,
+                                    statusCode: 400);
+
+                            tags[tagIndex++] = new MetricTag(kvp.Key, kvp.Value);
+                        }
+                    }
 
                     var timestamp = metric.Timestamp ?? DateTime.UtcNow;
 

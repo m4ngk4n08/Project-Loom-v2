@@ -74,7 +74,7 @@ switch (args)
             }
             if (bad)
             {
-                Console.WriteLine("Usage: loom auth add-user <name> [--users-file <path>]");
+                Console.Error.WriteLine("Usage: loom auth add-user <name> [--users-file <path>]");
                 Environment.Exit(1);
             }
             else if (!AuthCommand.AddUser(newUser, usersFile))
@@ -110,7 +110,7 @@ switch (args)
             }
             if (bad || string.IsNullOrEmpty(sub))
             {
-                Console.WriteLine("Usage: loom auth token --sub <name> [--scope metrics|full] [--ttl 90d] [--key-file <path>]");
+                Console.Error.WriteLine("Usage: loom auth token --sub <name> [--scope metrics|full] [--ttl 90d] [--key-file <path>]");
                 Environment.Exit(1);
             }
             else if (!AuthCommand.Token(sub, scope, ttl, keyFile))

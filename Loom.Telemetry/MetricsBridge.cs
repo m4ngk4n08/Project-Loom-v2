@@ -40,10 +40,14 @@ internal static class MetricsBridge
     private static readonly ObservableGauge<long> BufferDropped =
         Meter.CreateObservableGauge<long>("loom.telemetry.buffer.dropped", () =>
         {
-            var measurements = new Measurement<long>[BufferDroppedProviders.Count];
-            var i = 0;
+            // Capacity hint only - a List, not an array, because BufferDroppedProviders
+            // can grow between the .Count read and the enumeration below (a concurrent
+            // first-time RecordCounter/RecordGauge/RecordHistogram for a new metric name
+            // registers a new provider). An array sized from the stale Count would
+            // overrun; a per-poll List allocation is fine off the hot path.
+            var measurements = new List<Measurement<long>>(BufferDroppedProviders.Count);
             foreach (var kvp in BufferDroppedProviders)
-                measurements[i++] = new Measurement<long>(kvp.Value(), new KeyValuePair<string, object?>("metric.name", kvp.Key));
+                measurements.Add(new Measurement<long>(kvp.Value(), new KeyValuePair<string, object?>("metric.name", kvp.Key)));
             return measurements;
         });
 
@@ -101,10 +105,11 @@ internal static class MetricsBridge
         GaugeInstruments.GetOrAdd(name, n => Meter.CreateObservableGauge<double>(n, () =>
         {
             var combinations = Gauges[n];
-            var measurements = new Measurement<double>[combinations.Count];
-            var i = 0;
+            // List, not an array sized from .Count: a concurrent PublishGauge call can add
+            // a new tag combination between the Count read and the enumeration finishing.
+            var measurements = new List<Measurement<double>>(combinations.Count);
             foreach (var state in combinations.Values)
-                measurements[i++] = new Measurement<double>(state.Value, state.Tags);
+                measurements.Add(new Measurement<double>(state.Value, state.Tags));
             return measurements;
         }));
     }

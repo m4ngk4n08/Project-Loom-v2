@@ -1651,6 +1651,64 @@ already exists with a mode no looser than the target's.
 
 **Found by** `/code-review medium` on round 9 of that branch.
 
+### 6.22 A Username Over ~400 Bytes Logs In but Every Request 401s 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Security/JwtValidator.cs:87` (`stackalloc byte[512]` for the claims), line
+numbers at `5e8d545`. `JwtIssuer.IssueWithSessionStart` and `UserStore.Load` accept a username of any length.
+
+The issuer signs whatever it is given, but the validator decodes the claims into a fixed 512-byte buffer and
+returns `Malformed` when they do not fit. Login succeeds; every authenticated request with that token is a 401
+`invalid_token` with nothing saying why.
+
+**Reproduced by Opus 2026-09-17** on a live dashboard with scratch key/users: a 450-character username → login
+200, `GET /api/metrics/cpu` 200; a **600-character** username → login 200, `GET /api/metrics/cpu` **401**.
+
+**Why LOW:** fails closed, and only an operator can create such a user — no one sets out to have a 600-character
+username.
+
+**Fix shape:** reject usernames over a fixed cap (e.g. 128 bytes UTF-8) in `UserStore.Load` with a line-numbered
+startup error and in `loom auth add-user`, so the limit is enforced where users are created rather than
+discovered at request time. Alternatively decode oversized claims into an `ArrayPool` buffer.
+
+**Found by** `/code-review high Loom.Security` (pre-publish review #1).
+
+### 6.23 The `Bearer` Scheme Match Is Case-Sensitive 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Security/AuthenticationMiddleware.cs:82` and `Loom.Security/TokenEndpoints.cs:63`,
+both `StartsWith("Bearer ", StringComparison.Ordinal)`. Line numbers at `5e8d545`.
+
+RFC 9110 § 11.1 makes auth-scheme names case-insensitive. A client that sends `bearer <token>` is refused.
+
+**Reproduced by Opus 2026-09-17:** same valid token, `Authorization: Bearer …` → 200, `Authorization: bearer …`
+→ **401**.
+
+**Why LOW:** fails closed; every client Loom ships sends `Bearer`. Matters once third-party scrapers or
+proxies that normalise header values are pointed at it.
+
+**Fix shape:** `StringComparison.OrdinalIgnoreCase` at both sites; one middleware test with `bearer`.
+
+**Found by** `/code-review high Loom.Security` (pre-publish review #1).
+
+### 6.24 `Retry-After: 0` in the Last Second of a Login Lockout 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Security/TokenEndpoints.cs:28`, `((int)retryAfter.TotalSeconds).ToString()`.
+Line number at `5e8d545`.
+
+The cast truncates, so with under a second left the 429 carries `Retry-After: 0` and a client that honours it
+retries at once — into another 429.
+
+**Reproduced by Opus 2026-09-17** with `dotnet fsi` against `Loom.Security.dll` and a fake `TimeProvider`: 5
+failures, clock advanced to 400 ms before the window ends → `IsBlocked` true, `retryAfter` 0.4 s, header value
+**0**.
+
+**Why LOW:** at worst one wasted request per lockout.
+
+**Fix shape:** `Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))`. Note the same line moves if the
+check-then-act race in that block (review #1 F1, Sonnet round `sonnet/security-login-fixes`) is fixed first —
+fold this in if that round is still open.
+
+**Found by** `/code-review high Loom.Security` (pre-publish review #1).
+
 ---
 
 ## 7. Priority Summary

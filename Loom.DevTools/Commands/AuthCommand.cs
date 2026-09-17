@@ -309,6 +309,50 @@ public static class AuthCommand
     private const string UnixBlockStart = "# >>> loom >>>";
     private const string UnixBlockEnd = "# <<< loom <<<";
 
+    /// <summary>Pure. Scans the whole file for every occurrence of UnixBlockStart and
+    /// UnixBlockEnd - located exactly the way ExtractExistingUsersPath, FindVariablesAssignedOutsideBlock,
+    /// OutsideAssignmentWinsOverLoom, UpsertUnixPersistBlock, and UpsertUnixPersistBlockBytes
+    /// already find them (a plain literal search anywhere in the text, which is exactly
+    /// what Regex.Escape(marker) against Singleline content amounts to) - and asserts the
+    /// sequence, in file order, strictly alternates opening, closing, opening, closing,
+    /// starting with an opening marker and ending with a closing one. Every one of those
+    /// five functions pairs the FIRST opening marker it meets with the NEXT closing marker
+    /// via a lazy `.*?`, with nothing stopping that closing marker from belonging to a
+    /// different, later block - so a hand-deleted closing marker (an orphaned opener) lets
+    /// the match run from that opener all the way to some unrelated block's closer,
+    /// swallowing everything a user wrote in between. Calling this first, before any of
+    /// those five ever run, is the only fix that does not risk guessing which marker is
+    /// the stray one.</summary>
+    public static bool UnixPersistMarkersArePaired(string content)
+    {
+        var positions = new List<(int Index, bool IsStart)>();
+        CollectMarkerOccurrences(content, UnixBlockStart, isStart: true, positions);
+        CollectMarkerOccurrences(content, UnixBlockEnd, isStart: false, positions);
+        positions.Sort((a, b) => a.Index.CompareTo(b.Index));
+
+        if (positions.Count == 0) return true; // no markers at all - nothing to pair
+        if (positions.Count % 2 != 0) return false;
+
+        for (var i = 0; i < positions.Count; i++)
+        {
+            var expectStart = i % 2 == 0;
+            if (positions[i].IsStart != expectStart) return false;
+        }
+        return true;
+    }
+
+    private static void CollectMarkerOccurrences(string content, string marker, bool isStart, List<(int Index, bool IsStart)> results)
+    {
+        var searchFrom = 0;
+        while (true)
+        {
+            var index = content.IndexOf(marker, searchFrom, StringComparison.Ordinal);
+            if (index < 0) break;
+            results.Add((index, isStart));
+            searchFrom = index + marker.Length;
+        }
+    }
+
     /// <summary>Unix has no per-user environment store for .NET to write to -
     /// EnvironmentVariableTarget.User is a Windows/registry concept. The only durable
     /// place is a shell startup file, chosen from $SHELL's basename so it matches the
@@ -346,6 +390,20 @@ public static class AuthCommand
             // understand. Our own block text is pure ASCII, so this is transparent to it.
             var existingBytes = File.Exists(profilePath) ? File.ReadAllBytes(profilePath) : [];
             var existing = Encoding.Latin1.GetString(existingBytes);
+
+            // Called before anything below is extracted, scanned, or written. An orphaned
+            // marker (a hand-deleted opening or closing line) makes every regex below match
+            // across block boundaries - see UnixPersistMarkersArePaired's remarks. Refusing
+            // here, rather than guessing which marker is the stray one, is the only way to
+            // avoid repeating the data loss this round exists to fix.
+            if (!UnixPersistMarkersArePaired(existing))
+            {
+                Console.Error.WriteLine($"{profilePath} has unpaired loom markers ('{UnixBlockStart}' or '{UnixBlockEnd}' appears without its match) - refusing to modify it.");
+                Console.Error.WriteLine("Fix the markers by hand, then re-run --persist.");
+                Console.WriteLine("Add the exports above to your shell profile manually.");
+                succeeded = false;
+                return null;
+            }
 
             // The re-run path (key exists, users file missing) calls here with
             // usersPath: null. RenderUnixPersistBlock then omits the users line

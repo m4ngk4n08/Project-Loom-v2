@@ -427,6 +427,77 @@ public class AuthCommandTests
     }
 
     [Fact]
+    public void UnixPersistMarkersArePaired_NoMarkers_ReturnsTrue()
+    {
+        Assert.True(AuthCommand.UnixPersistMarkersArePaired("export EDITOR=vim\n"));
+    }
+
+    [Fact]
+    public void UnixPersistMarkersArePaired_WellFormedSingleBlock_ReturnsTrue()
+    {
+        const string content = "# before\n# >>> loom >>>\nexport LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n# <<< loom <<<\n# after\n";
+
+        Assert.True(AuthCommand.UnixPersistMarkersArePaired(content));
+    }
+
+    [Fact]
+    public void UnixPersistMarkersArePaired_WellFormedMultipleBlocks_ReturnsTrue()
+    {
+        const string content =
+            "# before\n" +
+            "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"a\"\n# <<< loom <<<\n" +
+            "# middle\n" +
+            "# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"b\"\n# <<< loom <<<\n" +
+            "# after\n";
+
+        Assert.True(AuthCommand.UnixPersistMarkersArePaired(content));
+    }
+
+    [Fact]
+    public void UnixPersistMarkersArePaired_OrphanedOpeningMarker_ReturnsFalse()
+    {
+        const string content = "# >>> loom >>>\nalias ll='ls -l'\nexport PATH=/usr/local/bin:$PATH\n";
+
+        Assert.False(AuthCommand.UnixPersistMarkersArePaired(content));
+    }
+
+    [Fact]
+    public void UnixPersistMarkersArePaired_OrphanedClosingMarker_ReturnsFalse()
+    {
+        const string content = "alias ll='ls -l'\n# <<< loom <<<\n";
+
+        Assert.False(AuthCommand.UnixPersistMarkersArePaired(content));
+    }
+
+    [Fact]
+    public void UnixPersistMarkersArePaired_TwoOpeningsThenOneClosing_ReturnsFalse()
+    {
+        const string content = "# >>> loom >>>\n# >>> loom >>>\nexport LOOM_JWT_KEY_FILE=\"a\"\n# <<< loom <<<\n";
+
+        Assert.False(AuthCommand.UnixPersistMarkersArePaired(content));
+    }
+
+    // The exact 172-character scenario from PROMPT-auth-persist-round7.md: an orphaned
+    // opening marker (the closing marker hand-deleted), then a user's alias and PATH
+    // lines, then a complete, well-formed block. Before this validator, every one of the
+    // five block-matching functions would match from the orphaned opener all the way to
+    // the complete block's closer, swallowing the alias and PATH lines. Asserting the
+    // validator rejects this is what keeps that from ever being reachable again.
+    [Fact]
+    public void UnixPersistMarkersArePaired_OrphanedOpenerFollowedByCompleteBlock_ReturnsFalse()
+    {
+        const string content =
+            "# >>> loom >>>\n" +
+            "alias ll='ls -l'\n" +
+            "export PATH=/usr/local/bin:$PATH\n" +
+            "# >>> loom >>>\n" +
+            "export LOOM_JWT_KEY_FILE='/home/u/jwt.key'\n" +
+            "# <<< loom <<<\n";
+
+        Assert.False(AuthCommand.UnixPersistMarkersArePaired(content));
+    }
+
+    [Fact]
     public void UpsertUnixPersistBlockBytes_ReplacesExistingBlockAndPreservesSurroundingBytesVerbatim()
     {
         var before = Encoding.Latin1.GetBytes("# before é\n");

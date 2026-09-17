@@ -175,8 +175,16 @@ public static class LoomCollectors
             // Update registration metadata
             lock (Lock)
             {
-                registration.LastCollectionUtc = DateTime.UtcNow;
-                registration.SuccessCount++;
+                if (snapshot.IsSuccess)
+                {
+                    registration.LastCollectionUtc = DateTime.UtcNow;
+                    registration.SuccessCount++;
+                }
+                else
+                {
+                    registration.FailureCount++;
+                }
+
                 registration.LastError = snapshot.ErrorMessage;
             }
 

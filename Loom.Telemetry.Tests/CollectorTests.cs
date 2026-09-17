@@ -135,6 +135,32 @@ public sealed class CollectorTests : IDisposable
     }
 
     [Fact]
+    public async Task CollectAsync_WithSnapshotThatReturnsFailed_CountsAsAFailureNotASuccess()
+    {
+        // Arrange
+        var collector = new FailedSnapshotCollector();
+        LoomCollectors.Register(collector);
+
+        // Disable automatic collection to avoid race conditions
+        LoomCollectors.SetEnabled("FailedSnapshotCollector", false);
+        await Task.Delay(100); // Wait for any in-flight collections
+
+        // Re-enable and collect manually
+        LoomCollectors.SetEnabled("FailedSnapshotCollector", true);
+
+        // Act - CollectAsync returns a failed snapshot without throwing
+        var snapshot = await LoomCollectors.CollectAsync("FailedSnapshotCollector");
+
+        // Assert
+        Assert.NotNull(snapshot);
+        Assert.False(snapshot.IsSuccess);
+
+        var registration = LoomCollectors.GetRegistration("FailedSnapshotCollector");
+        Assert.Equal(0, registration!.SuccessCount);
+        Assert.True(registration.FailureCount >= 1);
+    }
+
+    [Fact]
     public void SetEnabled_DisablesCollector()
     {
         // Arrange
@@ -218,5 +244,20 @@ internal sealed class FailingCollector : ILoomCollector
     public Task<CollectorSnapshot> CollectAsync(CancellationToken cancellationToken)
     {
         throw new InvalidOperationException("Simulated collector failure");
+    }
+}
+
+/// <summary>
+/// Collector that reports failure by RETURNING CollectorSnapshot.Failed(...) rather than
+/// throwing - exercises the non-exceptional failure path in
+/// LoomCollectors.CollectFromRegistrationAsync.
+/// </summary>
+internal sealed class FailedSnapshotCollector : ILoomCollector
+{
+    public string Name => "FailedSnapshotCollector";
+
+    public Task<CollectorSnapshot> CollectAsync(CancellationToken cancellationToken)
+    {
+        return Task.FromResult(CollectorSnapshot.Failed(Name, "Simulated non-throwing failure"));
     }
 }

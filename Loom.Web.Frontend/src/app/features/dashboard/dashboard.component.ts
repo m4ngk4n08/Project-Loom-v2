@@ -8,6 +8,7 @@ import { MemoryMetricsComponent } from "../memory-metrics/memory-metrics.compone
 import { ThreadMetricsComponent } from "../thread-metrics/thread-metrics.component";
 import { TimelineBrushComponent } from "../timeline-brush/timeline-brush.component";
 import { TopOffendersComponent } from "../top-offenders/top-offenders.component";
+import { memoryUsageRatio } from "./memory-usage";
 
 
 @Component({
@@ -40,7 +41,16 @@ export class DashboardComponent {
 
     memoryUsage = computed(() => {
         const data = this.stateService.memoryData();
-        return data ? ((data.usedMemoryMb / data.totalMemoryMb) * 100).toFixed(1) : '-';
+        if (!data) return '-';
+        const ratio = memoryUsageRatio(data.usedMemoryMb, data.totalMemoryMb);
+        return ratio === null ? '-' : (ratio * 100).toFixed(1);
+    });
+
+    memoryTrend = computed(() => {
+        const data = this.stateService.memoryData();
+        if (!data) return 'neutral';
+        const ratio = memoryUsageRatio(data.usedMemoryMb, data.totalMemoryMb);
+        return ratio !== null && ratio > 0.8 ? 'up' : 'neutral';
     });
 
     threadCount = computed(() => {

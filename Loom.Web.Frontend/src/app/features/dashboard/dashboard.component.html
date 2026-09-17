@@ -34,7 +34,7 @@
       label="Memory Usage"
       [value]="memoryUsage()"
       unit="%"
-      [trend]="stateService.memoryData() && (stateService.memoryData()!.usedMemoryMb / stateService.memoryData()!.totalMemoryMb) > 0.8 ? 'up' : 'neutral'"
+      [trend]="memoryTrend()"
     />
 
     <app-stat-tile

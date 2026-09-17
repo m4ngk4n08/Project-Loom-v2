@@ -36,7 +36,7 @@ namespace Loom.Dashboard.Extensions
             // the box.
             services.AddLoomAlerting(registry => registry
                 .AddAlert("HighCpuUsage", alert => alert
-                    .When("cpu-usage", agg => agg.Average > 0.8)
+                    .When("cpu-usage", agg => agg.Average > 80)
                     .InWindow(TimeSpan.FromMinutes(1))
                     .Notify<ConsoleAlertTarget>()
                     .Notify<WebhookAlertTarget>())

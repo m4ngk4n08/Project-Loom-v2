@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Loom.Storage;
+using Loom.Telemetry;
 using Loom.Web.Contracts.Dtos;
 
 namespace Loom.Dashboard;
@@ -12,14 +12,18 @@ namespace Loom.Dashboard;
 /// </summary>
 public sealed class MetricsResponseBuilder
 {
+    private readonly Lock _peakLock = new();
     private double _peakWorkingSetMb;
 
     public CpuMetricResponse BuildCpuResponse(IMetricStore store)
     {
-        // Target process CPU usage from System.Runtime EventCounters (0-1 fraction).
+        // Target process CPU usage from System.Runtime EventCounters (0-100 percent,
+        // NOT a 0-1 fraction: measured via dotnet-counters against a single pinned
+        // thread on a 12-core box, which read ~8.5, matching 100/12 - see
+        // PROMPT-dashboard-review-fixes.md Step 0).
         // Average the last few 1s samples: a single sample can read 0 between work bursts.
         var cpuUsage = AverageRecent(store, "cpu-usage", 5);
-        var cpuPercent = cpuUsage is { } cpu ? cpu * 100 : 0;
+        var cpuPercent = cpuUsage ?? 0;
 
         // CPU hotpaths: instrumented method execution metrics (latency/duration/elapsed
         // histograms recording ms). Each path's share of total observed time is its
@@ -60,28 +64,67 @@ public sealed class MetricsResponseBuilder
     public MemoryMetricResponse BuildMemoryResponse(IMetricStore store)
     {
         // Target process memory from System.Runtime EventCounters (working-set in MB).
-        var workingSetMb = LatestValue(store, "working-set") ?? Process.GetCurrentProcess().WorkingSet64 / 1_048_576.0;
+        // No fallback to the DASHBOARD's own process memory: that value belongs to a
+        // different process and would silently poison both the current reading and the
+        // tracked peak below. With no sample yet, used memory reads 0 and the peak is
+        // left untouched.
+        var workingSetMb = LatestValue(store, "working-set") ?? 0;
         var gcHeapMb = LatestValue(store, "gc-heap-size");
 
         // Track peak so the frontend's "used / total" bar stays meaningful without
         // a target memory budget (System.Runtime exposes no total-available counter).
-        _peakWorkingSetMb = Math.Max(_peakWorkingSetMb, workingSetMb);
+        // The builder is a singleton hit concurrently by HTTP requests and the WebSocket
+        // stream, so the read-modify-write on _peakWorkingSetMb must be locked.
+        double peakWorkingSetMb;
+        lock (_peakLock)
+        {
+            if (workingSetMb > 0)
+            {
+                _peakWorkingSetMb = Math.Max(_peakWorkingSetMb, workingSetMb);
+            }
+            peakWorkingSetMb = _peakWorkingSetMb;
+        }
 
-        // GC collection counters from the target.
-        var gen0 = LatestValue(store, "gen-0-collection-count") ?? 0;
-        var gen1 = LatestValue(store, "gen-1-collection-count") ?? 0;
-        var gen2 = LatestValue(store, "gen-2-collection-count") ?? 0;
+        // GC collection counters since the bridge attached to the target. gen-N-gc-count
+        // is a Counter (per-interval delta accumulated into a running total by the
+        // store) - "gen-N-collection-count" is never published by the runtime.
+        // gen-N-gc-count and total-pause-time-by-gc are Counters: InMemoryMetricStore
+        // accumulates their per-interval deltas into a running total in
+        // GetCounterTotals(), which survives ring-buffer wrap - if the store has no
+        // total for a name yet (IMetricStore.cs allows an empty collection), report 0
+        // rather than guess. Scanned once here rather than once per field.
+        double gen0 = 0, gen1 = 0, gen2 = 0, gcPauseMs = 0;
+        foreach (var total in store.GetCounterTotals())
+        {
+            if (total.Tags.Length != 0) continue;
+
+            switch (total.MetricName)
+            {
+                case "gen-0-gc-count":
+                    gen0 = total.Total;
+                    break;
+                case "gen-1-gc-count":
+                    gen1 = total.Total;
+                    break;
+                case "gen-2-gc-count":
+                    gen2 = total.Total;
+                    break;
+                case "total-pause-time-by-gc":
+                    gcPauseMs = total.Total;
+                    break;
+            }
+        }
 
         return new MemoryMetricResponse
         {
-            TotalMemoryMb = _peakWorkingSetMb,
+            TotalMemoryMb = peakWorkingSetMb,
             UsedMemoryMb = workingSetMb,
             GcStats = new GarbageCollectionStats
             {
                 Gen0Collections = (int)gen0,
                 Gen1Collections = (int)gen1,
                 Gen2Collections = (int)gen2,
-                TotalGcTimeMs = LatestValue(store, "time-in-gc") ?? 0
+                TotalGcTimeMs = gcPauseMs
             },
             TopAllocations = Array.Empty<MemoryAllocation>(),
             Timestamp = DateTime.UtcNow

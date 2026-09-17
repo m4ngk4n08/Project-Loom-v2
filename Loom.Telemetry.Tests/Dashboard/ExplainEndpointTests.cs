@@ -44,6 +44,18 @@ public sealed class ExplainEndpointTests
                 OutputTokens: 34));
     }
 
+    // Covers PROMPT-dashboard-review-fixes.md item 7: every client failure used to become
+    // a bare 500. ThrowingExplainClient lets each test pick the exception ExplainAsync
+    // throws and asserts the resulting status code / body shape.
+    private sealed class ThrowingExplainClient : IExplainClient
+    {
+        private readonly Func<Exception> _factory;
+        public ThrowingExplainClient(Func<Exception> factory) => _factory = factory;
+
+        public Task<ExplainResult> ExplainAsync(ExplainPayload payload, CancellationToken ct) =>
+            throw _factory();
+    }
+
     private sealed class ExplainApi : IAsyncDisposable
     {
         public required WebApplication App { get; init; }
@@ -147,5 +159,69 @@ public sealed class ExplainEndpointTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(1, CountingExplainClient.Constructed);
+    }
+
+    [Fact]
+    public async Task ClientThrowsInvalidOperationException_Returns502_WithClientsMessage()
+    {
+        const string message = "The model declined to generate an explanation.";
+        await using var api = await StartAsync(new ThrowingExplainClient(() => new InvalidOperationException(message)));
+
+        var response = await api.Client.PostAsync("/api/logs/explain", ExplainRequestBody());
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var body = JsonSerializer.Deserialize(
+            await response.Content.ReadAsStringAsync(),
+            LoomJsonSerializerContext.Default.ErrorResponse);
+        Assert.NotNull(body);
+        Assert.Equal(message, body.Error);
+    }
+
+    [Fact]
+    public async Task ClientThrowsHttpRequestException_Returns502_WithoutTheExceptionMessage()
+    {
+        const string secretDetail = "http://internal-host:9999/v1/messages unreachable";
+        await using var api = await StartAsync(new ThrowingExplainClient(() => new HttpRequestException(secretDetail)));
+
+        var response = await api.Client.PostAsync("/api/logs/explain", ExplainRequestBody());
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(secretDetail, text);
+    }
+
+    [Fact]
+    public async Task ThrowingJsonException_Returns502_WithoutEchoingMessage()
+    {
+        const string secretBody = "<html>secret-body</html>";
+        await using var api = await StartAsync(new ThrowingExplainClient(() => new JsonException(secretBody)));
+
+        var response = await api.Client.PostAsync("/api/logs/explain", ExplainRequestBody());
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(secretBody, text);
+
+        var body = JsonSerializer.Deserialize(text, LoomJsonSerializerContext.Default.ErrorResponse);
+        Assert.NotNull(body);
+        Assert.Equal("The explain provider returned an unreadable response.", body.Error);
+    }
+
+    [Fact]
+    public async Task ClientThrowsTaskCanceledException_Returns504()
+    {
+        await using var api = await StartAsync(new ThrowingExplainClient(() => new TaskCanceledException()));
+
+        var response = await api.Client.PostAsync("/api/logs/explain", ExplainRequestBody());
+
+        Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
+    }
+
+    [Fact]
+    public void ResolveProcessName_NoSuchPid_ReturnsExitedMarker_DoesNotThrow()
+    {
+        var name = EndpointExtensions.ResolveProcessName(int.MaxValue);
+
+        Assert.Equal("pid-2147483647 (exited)", name);
     }
 }

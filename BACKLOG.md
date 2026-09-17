@@ -1598,6 +1598,51 @@ directory.
 **Fix shape:** in both resolvers, refuse when the dev-secrets fallback would be chosen and
 `DevSecretsDirectory` is not rooted — the same check `init` makes.
 
+### 6.20 `init` Crashes When the Data Folder Is Not Writable 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs`, `EnsureDevSecretsDirectory`. Line
+number from branch `sonnet/auth-init-unix-persist` at `14bf21a` (`:242`); **`main` has the same
+unguarded call** in its simpler form, so this is pre-existing, not introduced by that branch.
+
+`Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode)` has no error handling. When a parent —
+`~/.local/share`, or `~/.local/share/Loom` left behind by an earlier `sudo -E loom auth init` — is not
+writable by the current user, `init` dies with an unhandled `UnauthorizedAccessException` and a stack
+trace instead of the "owned by another user … chown" message the key and users writes already print.
+
+**Reproduced by Opus in WSL 2026-09-17** at `14bf21a`: `XDG_DATA_HOME` at mode 555 → `Unhandled
+exception. System.UnauthorizedAccessException: Access to the path '.../data/Loom' is denied.`, **exit
+134**.
+
+**Why LOW:** CLI only, writes nothing, and a non-zero exit — it fails closed. The cost is an unreadable
+error for the exact "sudo left a root-owned folder" case the branch fixed one level down.
+
+**Fix shape:** catch `UnauthorizedAccessException` and `IOException` around the create in
+`EnsureDevSecretsDirectory`, print the same chown guidance naming the parent, and have `init` return
+false before any `FileAccessCheck`.
+
+**Found by** `/code-review medium` on round 9 of that branch.
+
+### 6.21 `--persist` Drops Permission Bits From a Profile It Rewrites 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
+`sonnet/auth-init-unix-persist` — **not yet on `main`**. Line numbers from the branch at `14bf21a`.
+
+The profile rewrite creates its temp file with `UnixCreateMode = existingMode` (`:518-525`) and renames
+it over the target. The OS applies the process umask to a create mode, and nothing re-applies the saved
+mode afterwards, so any bit the umask masks is lost.
+
+**Reproduced by Opus in WSL 2026-09-17:** umask 022, `.bashrc` at **664** → after `init --persist`,
+**644**.
+
+**Why LOW:** it only ever removes bits, never adds them — a profile can become stricter, not looser. The
+visible effect is a group losing write access to a shared profile.
+
+**Fix shape:** after the create and before the rename, `File.SetUnixFileMode(tempPath,
+existingMode.Value)`. This does not reopen the window the create-with-mode approach closed: the file
+already exists with a mode no looser than the target's.
+
+**Found by** `/code-review medium` on round 9 of that branch.
+
 ---
 
 ## 7. Priority Summary

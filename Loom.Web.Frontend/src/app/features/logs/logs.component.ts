@@ -172,13 +172,14 @@ export function hasNoPlaceholders(template: string | undefined): boolean {
   return !/\{[^{}]+\}/.test(template.replace(/\{\{|\}\}/g, ''));
 }
 
-// A deployment with no LOOM_LLM_API_KEY never maps the route, so an unconfigured Loom
-// answers 404. That is a configuration state, not a failure, and must not be worded as
-// one - "it broke" sends someone debugging; "it is not turned on" sends them to the
-// env var.
+// The route is unmapped when the host has not registered an IExplainClient, so an
+// unconfigured dashboard answers 404. That is a configuration state, not a failure, and
+// must not be worded as one - "it broke" sends someone debugging; "it is not turned on"
+// sends them to the env var. LOOM_LLM_API_KEY is how loom-dashboard registers a client;
+// a host embedding the dashboard library registers its own instead.
 export function explainErrorMessage(status: number): string {
   if (status === 404) {
-    return 'The explain feature is not configured. Set LOOM_LLM_API_KEY to turn it on.';
+    return 'The explain feature is not configured on this dashboard. With loom-dashboard, set LOOM_LLM_API_KEY to turn it on.';
   }
   if (status === 400) {
     return 'This entry has no message template to explain.';

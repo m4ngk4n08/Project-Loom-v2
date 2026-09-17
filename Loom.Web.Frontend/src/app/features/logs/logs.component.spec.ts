@@ -435,6 +435,10 @@ describe('explainErrorMessage', () => {
     expect(message).not.toContain('error');
   });
 
+  it('names loom-dashboard for a 404', () => {
+    expect(explainErrorMessage(404)).toContain('loom-dashboard');
+  });
+
   it('mentions "template" for a 400', () => {
     expect(explainErrorMessage(400)).toContain('template');
   });

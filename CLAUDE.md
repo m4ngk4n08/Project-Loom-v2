@@ -334,9 +334,9 @@ dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAna
 dotnet publish Loom.AotProbe/Loom.AotProbe.csproj -c Release -r win-x64
 Get-ChildItem Loom.AotProbe/bin/Release/net10.0/win-x64/publish/ | Select-Object Name, Length
 
-# 4. Baselines: 801 passing / 0 skipped backend (measured 2026-09-17 on main b48b717,
+# 4. Baselines: 820 passing / 0 skipped backend (measured 2026-09-17 on main 02522c7,
 #    Windows and Linux; re-verify before trusting it — it has drifted before, and every
-#    merged branch moves it). Frontend last verified 2026-09-17: 3 files / 98 passing.
+#    merged branch moves it). Frontend last verified 2026-09-17: 4 files / 102 passing.
 #    Before any push, also run the backend suite on Linux (WSL): path- and OS-dependent
 #    tests have failed only there.
 dotnet test Loom.slnx -c Debug

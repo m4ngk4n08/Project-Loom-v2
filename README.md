@@ -353,10 +353,10 @@ dotnet publish Loom.AotProbe/Loom.AotProbe.csproj -c Release -r linux-x64
 #    a product metric - see BACKLOG.md § 11.4)
 ls -l Loom.AotProbe/bin/Release/net10.0/linux-x64/publish/
 
-# 4. Backend tests - 801 passing, 0 skipped (measured 2026-09-17, Windows and Linux)
+# 4. Backend tests - 820 passing, 0 skipped (measured 2026-09-17, Windows and Linux)
 dotnet test Loom.slnx --configuration Debug
 
-# 5. Frontend - 3 files, 98 passing (last measured 2026-09-17)
+# 5. Frontend - 4 files, 102 passing (last measured 2026-09-17)
 cd Loom.Web.Frontend && npx ng test
 
 # 6. Allocation and GC behaviour of a running dashboard

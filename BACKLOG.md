@@ -1551,6 +1551,53 @@ add cases to its existing table test.
 **Found by** `/code-review high` on round 6 of that branch. Filed rather than fixed, for the same
 reason as § 6.16: a narrow precondition and a loud, fail-closed outcome.
 
+### 6.18 A Relative `XDG_CONFIG_HOME` Puts `config.fish` Under the Current Directory 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
+`sonnet/auth-init-unix-persist` — **not yet on `main`**. Line numbers from the branch at `8c6e298`.
+
+`ResolveConfigHome` (`:578-579`) uses `XDG_CONFIG_HOME` whenever it is non-empty, rooted or not. With
+`XDG_CONFIG_HOME=cfg`, fish's profile resolves to `cfg/fish/config.fish`; `--persist` creates that
+directory under the current working directory, writes the block, and prints `Wrote to
+cfg/fish/config.fish`. fish never reads it. The XDG Base Directory spec says a relative value must be
+ignored.
+
+**Same class as § 6.17** — a profile path the shell never reads, reported as success.
+
+**Why LOW:** a relative `XDG_CONFIG_HOME` is already invalid per the spec and rare. The failure is a
+missing variable, which fails closed at dashboard startup.
+
+**Fix shape:** fall back to `{home}/.config` unless `Path.IsPathRooted(xdgConfigHome)`. The function is
+pure; add a relative-value case to the existing `ResolveUnixProfilePath` table test.
+
+**Found by** `/code-review medium` on round 8 of that branch; confirmed by reading.
+
+### 6.19 The CLI Falls Back to a Relative dev-secrets Path When the Data Folder Is Unknown 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
+`sonnet/auth-init-unix-persist`, `ResolveUsersFileForCli` (`:899-929`) and `ResolveKeyFileForCli`
+(`:933-959`), at `8c6e298`.
+
+Both guard with `KeyMaterial.IsUsableDefaultPath(DefaultUsersFile / DefaultKeyFile)`. On Unix those
+defaults are `/var/secrets/loom/...` — always rooted — so the guard never fires there. When
+`Environment.SpecialFolder.LocalApplicationData` resolves to `""`, the dev-secrets fallback becomes the
+**relative** `Loom/dev-secrets/users` (or `jwt.key`), resolved against the current directory.
+
+**Reproduced by Opus in WSL 2026-09-17** with the branch's build: `XDG_DATA_HOME` set to a directory
+that did not exist (.NET's `GetFolderPath` returns `""` for a folder that does not exist), then
+`loom auth add-user` printed `... - using Loom/dev-secrets/users.` `init` already refuses this case
+(`AuthCommand.cs:32-38`); the two CLI resolvers do not.
+
+**Consequence:** if the current directory happens to contain `Loom/dev-secrets/users`, `add-user`
+appends a password hash to it; `token` would sign with a `Loom/dev-secrets/jwt.key` found there.
+Neither reaches the real host's key material.
+
+**Why LOW:** needs both an undeterminable data folder and a matching relative tree in the working
+directory.
+
+**Fix shape:** in both resolvers, refuse when the dev-secrets fallback would be chosen and
+`DevSecretsDirectory` is not rooted — the same check `init` makes.
+
 ---
 
 ## 7. Priority Summary

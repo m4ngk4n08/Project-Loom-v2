@@ -114,8 +114,18 @@ catch (InvalidOperationException ex)
     Console.Error.WriteLine(ex.Message);
     Console.Error.WriteLine();
     Console.Error.WriteLine("Loom fails closed: there is no generated-on-the-fly key in any environment.");
-    Console.Error.WriteLine("  Windows dev setup:  loom auth init");
-    Console.Error.WriteLine($"  Then set {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable}.");
+    Console.Error.WriteLine("  No 'loom' command? Install it:  dotnet tool install -g LoomDiagnostics.Cli");
+    Console.Error.WriteLine("  Dev setup:  loom auth init --persist");
+    Console.Error.WriteLine("              loom auth add-user <name>");
+    // "Only needed to override the default location" is true on Windows, where
+    // `loom auth init` writes to the same dev-secrets folder this host defaults to.
+    // It is false on Unix, where init writes dev-secrets but the host's default is
+    // /var/secrets/loom - so on Unix, the dev flow needs these set, and this is the
+    // one line a stuck operator will act on.
+    if (OperatingSystem.IsWindows())
+        Console.Error.WriteLine($"  {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable} are only needed to override the default location.");
+    else
+        Console.Error.WriteLine($"  {KeyMaterial.KeyFileVariable} and {KeyMaterial.UsersFileVariable} are required here - 'loom auth init' writes to dev-secrets, not this host's default.");
     return 1;
 }
 

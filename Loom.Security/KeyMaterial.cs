@@ -4,29 +4,116 @@ public static class KeyMaterial
 {
     public const string KeyFileVariable = "LOOM_JWT_KEY_FILE";
     public const string UsersFileVariable = "LOOM_AUTH_USERS_FILE";
-    public const string DefaultKeyFile = "/var/secrets/loom/jwt.key";
-    public const string DefaultUsersFile = "/var/secrets/loom/users";
     private const int MinimumKeyBytes = 32;
 
-    public static string ResolveKeyFile() =>
-        Environment.GetEnvironmentVariable(KeyFileVariable) ?? DefaultKeyFile;
+    /// <summary>The one definition of where dev-secrets live. `loom auth init` writes
+    /// here. On Unix this is NOT where the host looks by default - see
+    /// SystemDefaultDirectory; setup and lookup there are connected only by the
+    /// environment variables, which `--persist` sets, and never silently coincide. On
+    /// Windows this folder IS the host's default (see SystemDefaultDirectory) because
+    /// there is no separate production deployment to protect from it.</summary>
+    public static string DevSecretsDirectory =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Loom", "dev-secrets");
 
-    public static string ResolveUsersFile() =>
-        Environment.GetEnvironmentVariable(UsersFileVariable) ?? DefaultUsersFile;
+    /// <summary>Where the host looks when the env vars are unset. On Unix this is
+    /// system-scoped and not user-writable, so an ephemeral dev key cannot reach
+    /// production as a silent fallback - Loom has a documented Linux production
+    /// deployment (systemd unit, `loomd` service user, this path at mode 400). On
+    /// Windows there is no production deployment at all - no service unit, no
+    /// installer, no hardening guide - so the default is deliberately the developer's
+    /// own per-user folder. %ProgramData% was considered and rejected: `icacls
+    /// C:\ProgramData` grants BUILTIN\Users (WD,AD) - any standard user can create and
+    /// own a subdirectory there, including one named to match this path, before Loom
+    /// ever runs. LoadSigningKey validates only base64 and length, never ownership, so
+    /// that would let an unprivileged user plant the signing key a real deployment
+    /// trusts by default - worse than the per-user default it would replace.</summary>
+    private static string SystemDefaultDirectory =>
+        OperatingSystem.IsWindows() ? DevSecretsDirectory : "/var/secrets/loom";
+
+    public static string DefaultKeyFile => Path.Combine(SystemDefaultDirectory, "jwt.key");
+
+    public static string DefaultUsersFile => Path.Combine(SystemDefaultDirectory, "users");
+
+    /// <summary>Pure. Extracted so the rooted-default decision below can be unit-tested
+    /// with an injected path - GetFolderPath(LocalApplicationData) cannot be made to
+    /// return "" on this machine to exercise the real case (an account with no profile
+    /// folder, e.g. a service or virtual account) at runtime.</summary>
+    public static bool IsUsableDefaultPath(string defaultPath) => Path.IsPathRooted(defaultPath);
+
+    /// <summary>Pure. The one place that decides whether an environment value counts as
+    /// "set". Null, empty, and whitespace-only all count as unset - not for convenience,
+    /// but for cross-platform consistency: Windows cannot represent an empty environment
+    /// variable at all (setting one to "" deletes it), so `LOOM_JWT_KEY_FILE=` in a
+    /// systemd unit or .env file on Linux/macOS - which GetEnvironmentVariable returns as
+    /// "", not null - must fall back to the default the same way an unset variable does
+    /// on Windows, rather than being handed to FileAccessCheck/LoadSigningKey as a
+    /// malformed path. Used by ResolveKeyFile, ResolveUsersFile, and the CLI's
+    /// ResolveCliPath.</summary>
+    public static bool IsEnvironmentValueSet(string? value) => !string.IsNullOrWhiteSpace(value);
+
+    /// <summary>Fails closed when no explicit value is set and the default is not rooted -
+    /// which happens on Windows for an account with no profile folder, where
+    /// GetFolderPath(LocalApplicationData) returns "" and Path.Combine yields the RELATIVE
+    /// "Loom\dev-secrets\jwt.key". Without this check the host would load its signing key
+    /// from whatever its working directory happens to be - this is the security boundary,
+    /// and a quietly-relative default here is worse than the same failure in the CLI. A
+    /// relative path set explicitly via the environment variable is a deliberate operator
+    /// choice and is left working untouched.</summary>
+    public static string ResolveKeyFile()
+    {
+        var envValue = Environment.GetEnvironmentVariable(KeyFileVariable);
+        if (IsEnvironmentValueSet(envValue)) return envValue!;
+
+        if (!IsUsableDefaultPath(DefaultKeyFile))
+            throw new InvalidOperationException(
+                $"Loom auth: could not determine a per-user data folder, so the default signing-key location is not usable. Set {KeyFileVariable} explicitly.");
+
+        return DefaultKeyFile;
+    }
+
+    /// <summary>Same reasoning as ResolveKeyFile - see its remarks.</summary>
+    public static string ResolveUsersFile()
+    {
+        var envValue = Environment.GetEnvironmentVariable(UsersFileVariable);
+        if (IsEnvironmentValueSet(envValue)) return envValue!;
+
+        if (!IsUsableDefaultPath(DefaultUsersFile))
+            throw new InvalidOperationException(
+                $"Loom auth: could not determine a per-user data folder, so the default users-file location is not usable. Set {UsersFileVariable} explicitly.");
+
+        return DefaultUsersFile;
+    }
 
     /// <summary>Fail closed. There is no generated-on-the-fly fallback in any
     /// environment - an ephemeral dev key is precisely the convenience that reaches
     /// production by accident.</summary>
     public static byte[] LoadSigningKey(string path)
     {
-        if (!File.Exists(path))
+        switch (FileAccessCheck.Check(path))
+        {
+            case FileAccessState.Missing:
+                throw new InvalidOperationException(
+                    $"Loom auth: signing key not found at '{path}'. Set {KeyFileVariable} or run 'loom auth init'.");
+            case FileAccessState.Indeterminate:
+                throw new InvalidOperationException(
+                    $"Loom auth: cannot access '{path}' - this process cannot read it. Check permissions on the file and its directory.");
+        }
+
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
             throw new InvalidOperationException(
-                $"Loom auth: signing key not found at '{path}'. Set {KeyFileVariable} or run 'loom auth init'.");
+                $"Loom auth: '{path}' exists but this process cannot read it. Check its ownership and permissions.");
+        }
 
         byte[] key;
         try
         {
-            key = Convert.FromBase64String(File.ReadAllText(path).Trim());
+            key = Convert.FromBase64String(text.Trim());
         }
         catch (FormatException)
         {

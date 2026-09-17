@@ -974,7 +974,13 @@ public static class AuthCommand
         // say here.
         var usersPath = usersFile ?? ResolveUsersFileForCli();
         if (usersPath is null) return false;
-        if (!File.Exists(usersPath))
+        var usersAccessState = FileAccessCheck.Check(usersPath);
+        if (usersAccessState == FileAccessState.Indeterminate)
+        {
+            Console.Error.WriteLine($"Cannot access {usersPath} - it may exist but this process cannot read it.");
+            return false;
+        }
+        if (usersAccessState == FileAccessState.Missing)
         {
             Console.Error.WriteLine(usersFile is not null
                 ? $"Users file not found at {usersPath}."
@@ -1018,12 +1024,21 @@ public static class AuthCommand
         // say here.
         var keyPath = keyFile ?? ResolveKeyFileForCli();
         if (keyPath is null) return false;
-        if (keyFile is not null && !File.Exists(keyPath))
+        if (keyFile is not null)
         {
-            // Checked here rather than left to LoadSigningKey: its message advises
-            // "run 'loom auth init'", which is wrong for a path the caller supplied.
-            Console.Error.WriteLine($"Key file not found at {keyPath}.");
-            return false;
+            var keyAccessState = FileAccessCheck.Check(keyPath);
+            if (keyAccessState == FileAccessState.Indeterminate)
+            {
+                Console.Error.WriteLine($"Cannot access {keyPath} - it may exist but this process cannot read it.");
+                return false;
+            }
+            if (keyAccessState == FileAccessState.Missing)
+            {
+                // Checked here rather than left to LoadSigningKey: its message advises
+                // "run 'loom auth init'", which is wrong for a path the caller supplied.
+                Console.Error.WriteLine($"Key file not found at {keyPath}.");
+                return false;
+            }
         }
 
         byte[] key;

@@ -2106,6 +2106,20 @@ from the assembly names and namespaces (`Loom.*`), and that is deliberate.
    `Loom.Web.Api` never applied here), the Kestrel loopback bind, the
    security bootstrap, and a `return 1` on misconfiguration. A library cannot terminate
    its host's process.
+
+   **Extraction DONE; packaging NOT done (status checked 2026-09-17 at `b66effd`).** The library exists as
+   `Loom.Dashboard.AspNetCore` (`19df304`), exposing `AddLoomDashboard()`
+   (`Extensions/ServiceExtensions.cs:96`), `UseLoomDashboard()` and `MapLoomDashboard()`
+   (`Extensions/EndpointExtensions.cs:59`, `:70`); `MapLoomDashboard` refuses to run without
+   `UseLoomDashboard` (`00332cc`). `Loom.Dashboard/Program.cs` is already a host over that API (`:109`, `:220`,
+   `:222`), keeping the Kestrel bind, the process check and the `return 1`. Assist is no longer a dependency
+   (`5dbe37e`) and § 6.13 is closed (`c362021`). **Remaining:** (a) the project is still `IsPackable=false` with
+   no `PackageId`; (b) it depends on seven unpublished projects — Security, Storage, Query, Alerting,
+   Exporters, Contracts, RealTime — which must be either published under their own IDs or bundled inside
+   the package; (c) the Angular UI is embedded in the `Loom.Dashboard` tool, not in the library, so a library
+   consumer currently gets the API but "Dashboard assets not found" for the page; (d) no consumer gate
+   exists for it yet (the § 11.3 equivalent). **Before (a)–(d): review the library's public API** — see
+   `handoff.md`, "Pre-publish review plan".
 4. ~~Add a consumer-AOT CI gate (see § 11.3).~~ **DONE 2026-09-02 — see § 11.3.** The
    `consumer-aot-gate` job packs `Loom.Telemetry`, restores it into a throwaway consumer
    from a folder feed, AOT-publishes, and runs the result.

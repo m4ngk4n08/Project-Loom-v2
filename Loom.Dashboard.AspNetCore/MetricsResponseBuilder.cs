@@ -88,9 +88,32 @@ public sealed class MetricsResponseBuilder
         // GC collection counters since the bridge attached to the target. gen-N-gc-count
         // is a Counter (per-interval delta accumulated into a running total by the
         // store) - "gen-N-collection-count" is never published by the runtime.
-        var gen0 = CounterTotalOrZero(store, "gen-0-gc-count");
-        var gen1 = CounterTotalOrZero(store, "gen-1-gc-count");
-        var gen2 = CounterTotalOrZero(store, "gen-2-gc-count");
+        // gen-N-gc-count and total-pause-time-by-gc are Counters: InMemoryMetricStore
+        // accumulates their per-interval deltas into a running total in
+        // GetCounterTotals(), which survives ring-buffer wrap - if the store has no
+        // total for a name yet (IMetricStore.cs allows an empty collection), report 0
+        // rather than guess. Scanned once here rather than once per field.
+        double gen0 = 0, gen1 = 0, gen2 = 0, gcPauseMs = 0;
+        foreach (var total in store.GetCounterTotals())
+        {
+            if (total.Tags.Length != 0) continue;
+
+            switch (total.MetricName)
+            {
+                case "gen-0-gc-count":
+                    gen0 = total.Total;
+                    break;
+                case "gen-1-gc-count":
+                    gen1 = total.Total;
+                    break;
+                case "gen-2-gc-count":
+                    gen2 = total.Total;
+                    break;
+                case "total-pause-time-by-gc":
+                    gcPauseMs = total.Total;
+                    break;
+            }
+        }
 
         return new MemoryMetricResponse
         {
@@ -101,27 +124,11 @@ public sealed class MetricsResponseBuilder
                 Gen0Collections = (int)gen0,
                 Gen1Collections = (int)gen1,
                 Gen2Collections = (int)gen2,
-                TotalGcTimeMs = CounterTotalOrZero(store, "total-pause-time-by-gc")
+                TotalGcTimeMs = gcPauseMs
             },
             TopAllocations = Array.Empty<MemoryAllocation>(),
             Timestamp = DateTime.UtcNow
         };
-    }
-
-    // gen-N-gc-count and total-pause-time-by-gc are Counters: InMemoryMetricStore
-    // accumulates their per-interval deltas into a running total in GetCounterTotals(),
-    // which survives ring-buffer wrap. ReadRecent would only return the latest delta
-    // (or silently undercount after wrap), so it is not an acceptable fallback here -
-    // if the store has no total for this name yet (IMetricStore.cs allows an empty
-    // collection), report 0 rather than guess.
-    private static double CounterTotalOrZero(IMetricStore store, string name)
-    {
-        foreach (var total in store.GetCounterTotals())
-        {
-            if (total.MetricName == name && total.Tags.Length == 0)
-                return total.Total;
-        }
-        return 0;
     }
 
     public static ThreadMetricResponse BuildThreadResponse(IMetricStore store)

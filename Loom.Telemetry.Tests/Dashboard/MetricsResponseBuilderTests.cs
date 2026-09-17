@@ -73,6 +73,20 @@ public sealed class MetricsResponseBuilderTests
     }
 
     [Fact]
+    public void TaggedGcCountSeries_IsIgnored()
+    {
+        var store = NewStore();
+        store.Write(new MetricRecord(
+            "gen-0-gc-count", MetricType.Counter, 7, DateTime.UtcNow.Ticks,
+            new[] { new MetricTag("target", "child") }));
+        WriteCounter(store, "gen-0-gc-count", 3);
+
+        var response = new MetricsResponseBuilder().BuildMemoryResponse(store);
+
+        Assert.Equal(3, response.GcStats.Gen0Collections);
+    }
+
+    [Fact]
     public void NoWorkingSetSample_UsedMemoryIsZero_AndPeakIsNotPoisoned()
     {
         var store = NewStore();

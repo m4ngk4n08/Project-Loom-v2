@@ -39,11 +39,33 @@ public static class LoomRuntime
         if (!LoomSampling.ShouldRecord(metricName, null, null))
             return;
 
-        // Record property changes as gauges
+        // Record property changes as gauges. Only convert TypeCodes Convert.ToDouble can
+        // actually handle numerically - string/char/DateTime implement IConvertible but
+        // throw (FormatException/InvalidCastException) out of ToDouble, so they are
+        // skipped rather than parsed. Enums report their underlying numeric type's code.
         if (value is IConvertible convertible)
         {
-            var numericValue = Convert.ToDouble(convertible);
-            LoomMetrics.RecordGauge(metricName, numericValue);
+            switch (convertible.GetTypeCode())
+            {
+                case TypeCode.Boolean:
+                case TypeCode.SByte:
+                case TypeCode.Byte:
+                case TypeCode.Int16:
+                case TypeCode.UInt16:
+                case TypeCode.Int32:
+                case TypeCode.UInt32:
+                case TypeCode.Int64:
+                case TypeCode.UInt64:
+                case TypeCode.Single:
+                case TypeCode.Double:
+                case TypeCode.Decimal:
+                    var numericValue = Convert.ToDouble(convertible);
+                    LoomMetrics.RecordGauge(metricName, numericValue);
+                    break;
+                default:
+                    // string, char, DateTime, DBNull, Object, Empty - not numeric, skip.
+                    break;
+            }
         }
     }
 

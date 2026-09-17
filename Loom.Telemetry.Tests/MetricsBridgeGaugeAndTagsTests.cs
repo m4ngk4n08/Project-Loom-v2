@@ -222,4 +222,37 @@ public sealed class MetricsBridgeGaugeAndTagsTests
         Assert.Contains(observed, o => o.Queue == "inbound" && o.Value == 5);
         Assert.Contains(observed, o => o.Queue == "outbound" && o.Value == 12);
     }
+
+    [Fact]
+    public void RecordGauge_WithTagsThatWouldCollideUnderPlainSeparatorJoining_ReportsBothSeparately()
+    {
+        var name = $"test.gauge.tagcollision.{System.Guid.NewGuid():N}";
+
+        // {a="1;b=2"} and {a="1", b="2"} both join to "a=1;b=2" under a plain
+        // key=value;key=value scheme - two distinct series that must not collapse
+        // into one gauge state.
+        LoomMetrics.RecordGauge(name, 100, new MetricTag("a", "1;b=2"));
+        LoomMetrics.RecordGauge(name, 200, new MetricTag("a", "1"), new MetricTag("b", "2"));
+
+        var observed = new List<double>();
+
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == "Loom.Telemetry" && instrument.Name == name)
+                l.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, measurement, tags, state) =>
+        {
+            observed.Add(measurement);
+        });
+
+        listener.Start();
+        listener.RecordObservableInstruments();
+        listener.Dispose();
+
+        Assert.Equal(2, observed.Count);
+        Assert.Contains(100, observed);
+        Assert.Contains(200, observed);
+    }
 }

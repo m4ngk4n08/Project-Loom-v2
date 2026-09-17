@@ -97,7 +97,10 @@ internal static class MetricsBridge
     public static void PublishGauge(string name, double value, ReadOnlySpan<MetricTag> tags = default)
     {
         var convertedTags = ConvertTags(tags);
-        var tagKey = BuildTagKey(convertedTags);
+        // MetricSeriesKey.Build length-prefixes each key/value instead of joining with
+        // plain 'key=value;' separators, so a tag VALUE containing ';' or '=' can't forge
+        // another tag combination's key (e.g. {a="1;b=2"} colliding with {a="1", b="2"}).
+        var tagKey = MetricSeriesKey.Build(string.Empty, MetricSeriesKey.SortTags(tags.ToArray()));
 
         var byTagKey = Gauges.GetOrAdd(name, static _ => new System.Collections.Concurrent.ConcurrentDictionary<string, GaugeState>());
         byTagKey[tagKey] = new GaugeState(value, convertedTags);
@@ -112,27 +115,6 @@ internal static class MetricsBridge
                 measurements.Add(new Measurement<double>(state.Value, state.Tags));
             return measurements;
         }));
-    }
-
-    // Sorted key=value pairs joined into one string: two calls with the same tags in a
-    // different order must resolve to the same series, so this can't rely on insertion
-    // order the way the raw MetricTag span is given to us.
-    private static string BuildTagKey(KeyValuePair<string, object?>[] tags)
-    {
-        if (tags.Length == 0)
-            return string.Empty;
-
-        var sorted = (KeyValuePair<string, object?>[])tags.Clone();
-        Array.Sort(sorted, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
-
-        var sb = new System.Text.StringBuilder();
-        for (var i = 0; i < sorted.Length; i++)
-        {
-            if (i > 0)
-                sb.Append(';');
-            sb.Append(sorted[i].Key).Append('=').Append(sorted[i].Value);
-        }
-        return sb.ToString();
     }
 
     private static KeyValuePair<string, object?>[] ConvertTags(ReadOnlySpan<MetricTag> tags)

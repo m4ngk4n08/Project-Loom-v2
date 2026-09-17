@@ -236,13 +236,13 @@ namespace Loom.Dashboard.Extensions
                         }
                     }
 
-                    var timestamp = metric.Timestamp ?? DateTime.UtcNow;
+                    var timestampUtcTicks = ToUtcTicks(metric.Timestamp) ?? DateTime.UtcNow.Ticks;
 
                     records[i] = new MetricRecord(
                         metric.Name,
                         type.Value,
                         metric.Value,
-                        timestamp.Ticks,
+                        timestampUtcTicks,
                         tags.Length > 0 ? tags : null
                     );
                 }

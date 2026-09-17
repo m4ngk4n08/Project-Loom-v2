@@ -35,9 +35,13 @@ Solution file is **`Loom.slnx`** (XML format), NOT `Loom.sln` — `dotnet build/
 Loom.sln` fails with `MSBUILD : error MSB1009`.
 
 ```
-Loom.slnx                      (15 projects)
+Loom.slnx                      (16 projects)
 ├── Loom.Telemetry/            → Core: MetricRecord, LogRecord, ring buffers,
-│                                collectors, sampling. NO project references.
+│                                collectors, sampling. Packable as
+│                                LoomDiagnostics.Telemetry. One ProjectReference, to
+│                                the generator, for BUILD ORDERING ONLY — never add
+│                                OutputItemType="Analyzer" to it (CS0436 in every
+│                                consumer; see the csproj comment).
 ├── Loom.Web.Contracts/        → Shared DTOs + LoomJsonSerializerContext.
 │                                NO project references (CRITICAL for AOT).
 ├── Loom.Telemetry.Generators/ → Roslyn source generators (netstandard2.0). No refs.
@@ -70,13 +74,22 @@ Loom.slnx                      (15 projects)
 ├── Loom.Dashboard/            → dotnet tool `loom-dashboard`. Thin wrapper that packs
 │                                and runs Loom.Dashboard.AspNetCore.
 ├── Loom.DevTools/             → dotnet tool `loom`. Exe, PackAsTool.
+├── Loom.TestFixtureApp/       → Console app the EventPipe integration tests attach to.
+│                                Prints READY, runs until its stdin closes — so it is
+│                                useless as a long-lived probe target; use
+│                                examples/SampleMonitoredApp for that.
 └── Loom.Telemetry.Tests/      → xUnit. The ONLY test project.
 
 Not in the solution:
   Loom.Web.Frontend/           → Angular 21 app (built via ng, not MSBuild)
-  examples/SampleMonitoredApp/ → demo app
-  Loom.Tests/                  → EMPTY directory, no csproj. Ignore it.
+  examples/SampleMonitoredApp/ → demo app; runs until killed
+  ci/consumer-aot-gate/        → PackageConsumer: restores the packed Loom.Telemetry
+                                 .nupkg and AOT-publishes it (CI job only)
 ```
+
+Package IDs: `LoomDiagnostics.Telemetry` (library), `LoomDiagnostics.Cli` → `loom`,
+`LoomDiagnostics.Dashboard` → `loom-dashboard`. All MIT (`LICENSE` at the root). Every other
+project is `IsPackable=false`.
 
 **Does not exist** despite older docs referencing them: `Loom.Core` (SIMD engine),
 `Loom.Host`, `Loom.Benchmarks` — planned, never built. `Loom.Web.Api` was retired; its
@@ -85,7 +98,8 @@ host: `Loom.Dashboard` and `Loom.DevTools` are the entry points.
 
 **Dependency flow** (arrows point to dependencies):
 ```
-Loom.Telemetry, Loom.Web.Contracts, Loom.Telemetry.Generators  ← foundation, no refs
+Loom.Web.Contracts, Loom.Telemetry.Generators  ← foundation, no refs
+Loom.Telemetry           → Loom.Telemetry.Generators (build ordering only)
 
 Loom.Telemetry.Assist    → Loom.Web.Contracts
 Loom.Security            → Loom.Web.Contracts
@@ -96,6 +110,7 @@ Loom.Telemetry.Alerting  → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
                            Loom.Web.Contracts
 Loom.Telemetry.Exporters → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
 Loom.AotProbe            → Loom.Telemetry, Loom.Telemetry.Generators
+Loom.TestFixtureApp      → Loom.Telemetry, Loom.Telemetry.Generators
 
 Loom.Dashboard.AspNetCore → Loom.Security, Loom.Storage, Loom.Telemetry,
                             Loom.Telemetry.Query, Loom.Telemetry.Alerting,
@@ -134,7 +149,12 @@ dotnet-counters monitor --process-id <pid> System.Runtime
 
 **Linux builds must happen on Linux.** AOT cannot cross-compile — `-r linux-x64` from
 Windows fails with `Cross-OS native compilation is not supported`. Use WSL (Ubuntu 24.04,
-SDK 10.0.400 in `~/.dotnet`, `clang` + `zlib1g-dev`) or the `ubuntu-latest` CI job.
+SDK 10.0.400 in `~/.dotnet`, `clang` + `zlib1g-dev`) or the `ubuntu-latest` CI job. The
+distro is named **`Ubuntu`** (`wsl -d Ubuntu-24.04` fails). Don't pass a multi-command
+`bash -lc '...'` from PowerShell — PS 5.1 mangles the quoting; write a `.sh` into the
+scratchpad and run `wsl -d Ubuntu -- bash /mnt/c/.../script.sh`. Run Linux tests in a
+detached temp worktree: the Linux build rewrites the generated `.g.cs` files with LF, so
+removing it afterwards needs `git worktree remove --force`.
 
 ```powershell
 cd Loom.Web.Frontend
@@ -150,8 +170,12 @@ dotnet pack Loom.Dashboard -c Release   # -> loom-dashboard
 dotnet pack Loom.DevTools  -c Release   # -> loom
 ```
 
-**CI** (`.github/workflows/ci.yml`, push + PR to `main`): build/test on ubuntu +
-windows, Angular tests + prod build, Linux AOT publish of `Loom.AotProbe`. ~4 minutes.
+**CI** (`.github/workflows/ci.yml`, push + PR to `main`): build/test on ubuntu, windows
+and macOS; Angular tests + prod build; Linux AOT publish of `Loom.AotProbe`; and the
+packaged consumer AOT gate (packs `Loom.Telemetry`, restores it into
+`ci/consumer-aot-gate`, AOT-publishes — the only check that exercises the package
+layout). Both AOT jobs `needs: build-and-test`, so a test failure on ubuntu shows them as
+**skipped**, not failed. Slowest job ~4.5 min (windows, run `35182511586`).
 
 ---
 
@@ -210,8 +234,10 @@ Brotli the Angular assets. Not worth it: `IlcGenerateStackTraceData=false` (27 K
 
 - **Loopback only.** Kestrel binds `127.0.0.1` in code via `ListenLocalhost`, so no
   environment variable can publish it — verified on Windows and Linux, where
-  `ASPNETCORE_URLS=http://0.0.0.0:5080` is overridden and Kestrel logs that it did so.
-  Port 5080, `LOOM_HTTP_PORT` to change. Remote access is an SSH tunnel, which already
+  `ASPNETCORE_URLS=http://0.0.0.0:<port>` is overridden and Kestrel logs that it did so.
+  `loom-dashboard` defaults to port **5209**, falling back to a free port if taken;
+  `--port <n>` > `LOOM_DASHBOARD_PORT` > 5209, and an explicit port that is taken is an
+  error, not a fallback (`Loom.Dashboard/Program.cs`). Remote access is an SSH tunnel, which already
   encrypts the only leg leaving the machine. In-process TLS measured +0.946 MB to defend
   a hop that never crosses the network (`BACKLOG.md` § 3.3). For non-tunnel access, front
   it with a reverse proxy and let that own the certificate lifecycle.
@@ -300,16 +326,19 @@ Prefer the Write tool over `Set-Content` for any file another tool will parse.
 ```powershell
 # 1. Expect 0 errors and exactly 4 known warnings: 2 xUnit1031 at
 #    InMemoryMetricStoreTests.cs:372/:387, 2 NETSDK1212 for the netstandard2.0
-#    generator project. Leave all four.
+#    generator project. Leave all four. A fresh worktree with no Angular build adds a
+#    fifth (GenerateEmbeddedFilesManifest: no EmbeddedResource items) — environmental.
 dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
 
 # 2 + 3. AOT compiles, and no managed assembly sits beside the native output.
 dotnet publish Loom.AotProbe/Loom.AotProbe.csproj -c Release -r win-x64
 Get-ChildItem Loom.AotProbe/bin/Release/net10.0/win-x64/publish/ | Select-Object Name, Length
 
-# 4. Baselines: 625 passing / 0 skipped backend (measured 2026-09-06; re-verify before
-#    trusting this number again — it has drifted before). Frontend count last verified
-#    separately: 3 files / 94 passing.
+# 4. Baselines: 801 passing / 0 skipped backend (measured 2026-09-17 on main b48b717,
+#    Windows and Linux; re-verify before trusting it — it has drifted before, and every
+#    merged branch moves it). Frontend last verified 2026-09-17: 3 files / 98 passing.
+#    Before any push, also run the backend suite on Linux (WSL): path- and OS-dependent
+#    tests have failed only there.
 dotnet test Loom.slnx -c Debug
 cd Loom.Web.Frontend; npx ng test; cd ..
 ```
@@ -379,12 +408,16 @@ instruct it to STOP and report on any line-reference mismatch rather than guessi
 wrong before treating it as a blocker. A find-string prompt cannot catch a second call
 site it does not mention, which is why a runtime probe follows every mechanical edit.
 
-**Hand every Sonnet task a branch, never `main`.** Before writing the prompt, create and
-check out `sonnet/<short-task-name>`; name that branch in the prompt's first line. This is
-mechanical, not advisory: on 2026-09-02 two consecutive tasks committed and pushed after
-being told in the prompt not to, once landing a startup regression on `main` directly. A
-"do not push" instruction is worth writing, but it is not a control — being on a branch is,
-because a push then goes somewhere harmless. Review the branch, then merge it yourself.
+**Hand every Sonnet task a branch in its own worktree, never `main`.** Before writing the
+prompt, `git worktree add -b sonnet/<short-task-name> ..\loom-sonnet-<short-task-name>`;
+name the branch and worktree path in the prompt's first line. A branch alone does not
+isolate a checkout shared with another session (2026-09-03: a Sonnet commit landed on
+Opus's branch). This is mechanical, not advisory: on 2026-09-02 two consecutive tasks
+committed and pushed after being told in the prompt not to, once landing a startup
+regression on `main` directly. A "do not push" instruction is worth writing, but it is not
+a control — being on a branch is, because a push then goes somewhere harmless. Review the
+branch, then merge it yourself. Before any git write in a `loom-sonnet-*` worktree, check
+`git status --porcelain` as a separate step — the user may already have handed it over.
 
 **Probe the failure path, not just the happy one.** The same 2026-09-02 regression turned a
 missing signing key from an actionable message + exit 1 into an unhandled exception + exit

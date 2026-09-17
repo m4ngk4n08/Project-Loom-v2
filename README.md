@@ -2,7 +2,7 @@
 
 A **customizable telemetry platform** for .NET applications. Loom provides live insight into CPU hotpaths, memory allocations, thread blockages, and — critically — **your own business metrics**, with zero-allocation instrumentation powered by C# source generators.
 
-The successor to the original SSH-based design, Loom v2 is a .NET-native observability stack that ships as a single AOT-compiled binary.
+The successor to the original SSH-based design, Loom v2 is a .NET-native observability stack. It is packaged as a Native-AOT-clean library (`LoomDiagnostics.Telemetry`) plus two dotnet tools: `loom` (`LoomDiagnostics.Cli`) and `loom-dashboard` (`LoomDiagnostics.Dashboard`). Nothing is published to NuGet yet.
 
 ---
 
@@ -14,13 +14,14 @@ Loom is not just a profiler. It's a **telemetry platform** you embed into .NET a
 - **Attribute-Based Instrumentation** — `[LoomProfile]` and `[LoomTrack]` auto-instrument methods at compile time
 - **Custom Collectors** — `ILoomCollector` plugin interface for third-party integrations (Redis, RabbitMQ, etc.)
 - **Query Language** — SQL-like telemetry queries + fluent code-based `Query()` API
-- **Alerting** — `AddAlert()` with window-based conditions, webhook/email notifications
+- **Alerting** — `AddAlert()` with window-based conditions; webhook, email and console targets
 - **Exporters** — Prometheus, Console interoperability
 - **Source Generator** — zero-allocation instrumentation resolved entirely at compile time (no reflection)
-- **Sampling** — configuration-driven sampling rules (path-based, duration-based)
-- **Local Dev Mode** — `loom dev` for zero-config live metrics during development
+- **Sampling** — configuration-driven sampling rules (name-pattern, duration-threshold, uniform, always-record)
+- **Log capture** — `ILogger` records captured, searched, tailed and exported through the dashboard
+- **CLI** — `loom` attaches to a process over EventPipe: `dev`, `watch`, `explore`, `metrics`, `query`, `logs`, `search`, `auth`
 
-All built on .NET 10 Native AOT with zero runtime reflection.
+The telemetry library is Native-AOT-clean with zero runtime reflection, proven in CI.
 
 ---
 
@@ -30,8 +31,7 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 
 | Constraint | Why |
 |-----------|-----|
-| Native AOT compatibility, proven by `Loom.AotProbe` | No shipping AOT binary today (`Loom.Web.Api` retired); binary size is not a gate — see `BACKLOG.md` § 2.1, § 11.4 |
-| Memory footprint **< 20 MB** background | Minimal overhead on host app |
+| Native AOT compatibility, proven by `Loom.AotProbe` and the packaged consumer gate | No shipping AOT binary today (`Loom.Web.Api` retired); binary size is not a gate — see `BACKLOG.md` § 2.1, § 11.4 |
 | **No reflection** | AOT can't do runtime codegen |
 | **Zero-allocation hot paths** | `Span<T>`, `ValueTask`, `ArrayPool<T>` |
 | **Source-generated JSON** | All DTOs registered in `LoomJsonSerializerContext` |
@@ -52,64 +52,83 @@ Everything is built around **.NET 10 Native AOT** (reflection-free) compilation:
 - Manual JWT authentication
 - C# Source Generators (Roslyn analyzer project)
 
+**Frontend**
+- Angular 21 standalone components + RxJS, Apache ECharts
+
 **Build Tools**
-- MSVC v143 (Windows) / LLVM-Clang 19 (Linux) native compilation
-- Node.js 20+ LTS (build tooling only)
+- Native toolchain for AOT publish only: MSVC build tools (Windows) / `clang` + `zlib1g-dev` (Linux)
+- Node.js 20+ LTS (frontend build only)
 
 ---
 
 ## Project Structure
 
 ```
-Loom.slnx                          (14 projects)
-├── Loom.AotProbe/                 → Minimal console app; the Native AOT proof (binary
-│                                     size is not a product metric — see BACKLOG.md § 11.4)
+Loom.slnx                          (16 projects)
+├── Loom.Telemetry/                → Custom Metrics API runtime (RecordMetric, LoomCollectors, LoomSampling, etc.)
+│                                     Packable: LoomDiagnostics.Telemetry
+├── Loom.Telemetry.Generators/     → C# source generator ([LoomProfile] → instrumented code),
+│                                     shipped inside the Loom.Telemetry package
 ├── Loom.Web.Contracts/            → Shared DTOs + source-generated JSON (MANDATORY for AOT)
 ├── Loom.Web.RealTime/             → Zero-allocation WebSocket handlers
 ├── Loom.Security/                 → Manual JWT: issuer, validator, PBKDF2 hashing, user
 │                                     store, login throttle, auth middleware, token endpoints
-├── Loom.Storage/                  → Ring-buffer metric store (in-memory)
-├── Loom.Telemetry/                → Custom Metrics API runtime (RecordMetric, LoomCollectors, LoomSampling, etc.)
-├── Loom.Telemetry.Generators/     → C# source generator ([LoomProfile] → instrumented code)
+├── Loom.Storage/                  → In-memory ring-buffer metric and log stores, ILogger capture
 ├── Loom.Telemetry.Query/          → Query engine (SQL-like tokenizer/parser/planner/executor)
 ├── Loom.Telemetry.Alerting/       → Alert rules, window conditions, notification dispatch
 ├── Loom.Telemetry.Exporters/      → Prometheus, Console
 ├── Loom.Telemetry.Assist/         → Remote LLM "Explain" client (templates + argument names only)
-├── Loom.DevTools/                 → `loom dev` CLI tool (local dev mode)
-├── Loom.Telemetry.Tests/          → Unit & integration tests
-└── Loom.Dashboard/                → `loom-dashboard <pid>` dev-time CLI tool; embeds the Angular dashboard, attaches to a target process via EventPipe
+├── Loom.Dashboard.AspNetCore/     → The dashboard web host as a library: endpoints, EventPipeBridge,
+│                                     AddLoomDashboard / UseLoomDashboard / MapLoomDashboard. Not packable yet
+├── Loom.Dashboard/                → `loom-dashboard <pid>` dotnet tool; thin wrapper over
+│                                     Loom.Dashboard.AspNetCore that embeds the Angular build
+├── Loom.DevTools/                 → `loom` dotnet tool (dev, watch, explore, metrics, query, logs, search, auth)
+├── Loom.AotProbe/                 → Minimal console app; the Native AOT proof (binary
+│                                     size is not a product metric — see BACKLOG.md § 11.4)
+├── Loom.TestFixtureApp/           → Console app the EventPipe integration tests attach to
+└── Loom.Telemetry.Tests/          → Unit & integration tests (the only test project)
+
+Not in the solution:
+  Loom.Web.Frontend/               → Angular 21 dashboard (built with ng, embedded by Loom.Dashboard)
+  examples/SampleMonitoredApp/     → Demo app instrumented with [LoomProfile] / [LoomTrack]
+  ci/consumer-aot-gate/            → Consumes the packed Loom.Telemetry .nupkg and AOT-publishes it
 ```
 
 > `Loom.Host/`, `Loom.Core/`, `Loom.Benchmarks/` from earlier design docs were never
 > implemented (empty scaffolding, since deleted). `Loom.Web.Api`, the earlier AOT host,
-> was retired — `Loom.Dashboard` is now the only web host, and the Native AOT proof
+> was retired — the dashboard is now the only web host, and the Native AOT proof
 > moved to `Loom.AotProbe` (see `BACKLOG.md` § 11.4). `Loom.Storage`'s ring buffers
 > superseded the planned SIMD engine. `Loom.Telemetry.Collectors` was folded directly
 > into `Loom.Telemetry`.
 
 **Dependency flow (verified `ProjectReference` edges):**
 ```
-Loom.Web.RealTime       → Loom.Web.Contracts
-Loom.Security           → Loom.Web.Contracts
-Loom.Storage            → Loom.Telemetry, Loom.Web.Contracts
-Loom.Telemetry           (no project refs; DI abstractions package only)
-Loom.Telemetry.Query    → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
-Loom.Telemetry.Alerting → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
-Loom.Telemetry.Exporters→ Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
-Loom.AotProbe           → Loom.Telemetry, Loom.Telemetry.Generators
-Loom.DevTools           → Loom.Security, Loom.Storage, Loom.Telemetry,
-                          Loom.Telemetry.Query, Loom.Web.Contracts
-Loom.Dashboard          → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
-                          Loom.Telemetry.Alerting, Loom.Telemetry.Assist, Loom.Telemetry.Exporters,
-                          Loom.Web.Contracts, Loom.Web.RealTime
-
-Loom.Telemetry.Generators (analyzer, referenced by consuming projects, no runtime dep)
+Loom.Web.Contracts, Loom.Telemetry.Generators  (no project refs)
+Loom.Telemetry           → Loom.Telemetry.Generators (build ordering only — not an
+                           analyzer reference; the package ships the generator itself)
+Loom.Web.RealTime        → Loom.Web.Contracts
+Loom.Security            → Loom.Web.Contracts
+Loom.Telemetry.Assist    → Loom.Web.Contracts
+Loom.Storage             → Loom.Telemetry, Loom.Web.Contracts
+Loom.Telemetry.Query     → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
+Loom.Telemetry.Alerting  → Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query, Loom.Web.Contracts
+Loom.Telemetry.Exporters → Loom.Storage, Loom.Telemetry, Loom.Web.Contracts
+Loom.AotProbe            → Loom.Telemetry, Loom.Telemetry.Generators
+Loom.TestFixtureApp      → Loom.Telemetry, Loom.Telemetry.Generators
+Loom.DevTools            → Loom.Security, Loom.Storage, Loom.Telemetry,
+                           Loom.Telemetry.Query, Loom.Web.Contracts
+Loom.Dashboard.AspNetCore→ Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
+                           Loom.Telemetry.Alerting, Loom.Telemetry.Exporters,
+                           Loom.Web.Contracts, Loom.Web.RealTime
+Loom.Dashboard           → Loom.Dashboard.AspNetCore, Loom.Security, Loom.Storage,
+                           Loom.Telemetry.Assist, Loom.Web.Contracts
 ```
 
-`Loom.Dashboard` is the only web host: a dev-time CLI (`PackAsTool`, exempt from AOT
-constraints) that embeds the Angular frontend and attaches to a target PID via
-`EventPipeBridge.cs`. `Loom.AotProbe` proves referencing `Loom.Telemetry` stays
-Native-AOT-clean; it is not a web host and has no endpoints of its own.
+`Loom.Dashboard.AspNetCore` is the only web host; `Loom.Dashboard` packs it as a dev-time
+dotnet tool (`PackAsTool`, not AOT-published) that embeds the Angular frontend and
+attaches to a target PID via `EventPipeBridge.cs`. `Loom.AotProbe` proves referencing
+`Loom.Telemetry` stays Native-AOT-clean; it is not a web host and has no endpoints of its
+own.
 
 ---
 
@@ -118,7 +137,8 @@ Native-AOT-clean; it is not a web host and has no endpoints of its own.
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (10.0.100+)
-- Native compilation tools (MSVC v143 on Windows / Clang 19 + `zlib1g-dev` on Linux)
+- Node.js 20+ LTS and the Angular CLI, to build the dashboard frontend
+- For the Native AOT probe only: MSVC build tools on Windows / `clang` + `zlib1g-dev` on Linux
 
 > **Native AOT cannot cross-compile between operating systems.** Publishing `linux-x64`
 > from Windows fails with `Cross-OS native compilation is not supported`. Build the Linux
@@ -150,12 +170,14 @@ issue or a commit message.
 ### Backend (development, fast iteration)
 
 ```bash
+cd Loom.Web.Frontend && ng build && cd ..   # the dashboard embeds this; skip it and the UI is empty
 dotnet test Loom.slnx --configuration Debug
-dotnet watch run --project Loom.Dashboard --no-hot-reload -- <pid>
+dotnet watch run --project Loom.Dashboard --no-hot-reload -- <pid> [--port <n>]
 ```
 
-The Dashboard listens on `http://localhost:5209` by default (`LOOM_DASHBOARD_PORT` to
-override), **loopback only**. Loom does not terminate TLS — it binds `127.0.0.1` in code,
+The Dashboard listens on `http://localhost:5209` by default, falling back to a free port
+if 5209 is taken. `--port <n>` or `LOOM_DASHBOARD_PORT` sets it explicitly, and then a
+taken port is an error rather than a fallback. **Loopback only**. Loom does not terminate TLS — it binds `127.0.0.1` in code,
 so no environment variable can publish it to an external interface. A remote operator
 reaches it through an SSH tunnel. See [Security](#security).
 
@@ -168,13 +190,21 @@ TOKEN=$(curl -s -X POST http://localhost:5209/api/token \
 curl -H "Authorization: Bearer $TOKEN" http://localhost:5209/api/metrics/cpu
 ```
 
-### Local Dev Mode
+### The `loom` CLI
 
 ```bash
-loom dev
-# Auto-discovers .NET apps on localhost
-# Streams live metrics to console/JSON
+loom dev [--all]                         # discover Loom-instrumented processes (--all: every .NET process)
+loom dev --dashboard                     # launch the dashboard (requires the loom-dashboard tool)
+loom watch <pid> [--raw]                 # stream metric events
+loom explore <pid>                       # list all metrics and latest values
+loom metrics <pid> [cpu|memory|thread]   # formatted metrics; --live for a refreshing terminal view
+loom query <pid> "SELECT ..."            # run a LoomQL query
+loom logs <pid> [--count N] [--category X] [--seconds N]
+loom search <pid> "<query>" [--max N] [--seconds N]   # BM25 search over captured logs
+loom auth init | add-user | hash | token # credentials (see First run above)
 ```
+
+Running `loom` with no arguments prints the full usage.
 
 `loom` attaches directly to a target process via EventPipe and has **no network
 surface**, so no token applies to it. Its security boundary is the OS user owning the
@@ -215,7 +245,7 @@ which on a 90-day unattended credential would hand a scraper the run of the API.
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/health` | Health check (status, uptime, memory). **Anonymous** so liveness probes work — a probe cannot hold a 60-minute JWT |
-| `GET /api/session` | Session/attach metadata (see `Loom.Dashboard/Extensions/EndpointExtensions.cs:66`) |
+| `GET /api/session` | Session/attach metadata |
 | `GET /api/metrics/cpu` | CPU hotpath metrics |
 | `GET /api/metrics/memory` | Memory allocation & GC stats |
 | `GET /api/metrics/thread` | Thread activity & blockage analysis |
@@ -226,15 +256,29 @@ which on a 90-day unattended credential would hand a scraper the run of the API.
 | Endpoint | Description |
 |----------|-------------|
 | `POST /api/metrics/ingest` | Batch metric ingestion (Counter/Gauge/Histogram) |
-| `GET /api/exporters/metrics/names` | List registered metric names |
-| `GET /api/exporters/metrics/summary` | Summary stats for registered metrics |
+
+### Logs
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/logs` | Recent captured log records |
+| `GET /api/logs/categories` | Distinct log categories |
+| `GET /api/logs/tail` | Records after a cursor, for incremental polling |
+| `GET /api/logs/export` | Export captured records |
+| `POST /api/logs/search` | Search captured records |
+| `POST /api/logs/explain` | LLM explanation of a record. **Only mapped when an explain client is configured** (`LOOM_LLM_API_KEY` for `loom-dashboard`); otherwise 404 |
+| `WS /ws/logs` | Real-time log stream |
+
+All routes are defined in `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs`;
+the token routes in `Loom.Security/TokenEndpoints.cs`. An unmapped `/api/*` path returns
+404 rather than the SPA page.
 
 ### Prometheus scrape endpoint
 
 `GET /prometheus`, not `/metrics`: the Angular app owns a client-side `/metrics` page
 (`metrics-explorer`), and its `MapFallback` serves `index.html` for unmatched routes, so
 mapping the scrape endpoint to `/metrics` would shadow that route and break deep-link/
-refresh on the Angular page. See `Loom.Dashboard/Extensions/EndpointExtensions.cs:473`.
+refresh on the Angular page.
 Accepts a **metrics-scoped** token.
 
 ### Query
@@ -295,27 +339,27 @@ the probe is proving nothing.
 ## Verification Checklist
 
 ```bash
-# 1. No trim/AOT warnings, solution-wide. This passes as of 3c6a660: Loom.Dashboard now
-#    sets EnableRequestDelegateGenerator, which cleared 24 IL2026 errors by replacing
-#    reflective delegate binding with compile-time interceptors. Expect 0 errors and 4
-#    known warnings - 2 xUnit1031 in InMemoryMetricStoreTests, and 2 NETSDK1212 because
-#    the netstandard2.0 generator project cannot use the trim analyzer. Leave all four.
+# 1. No trim/AOT warnings, solution-wide. Expect 0 errors and 4 known warnings -
+#    2 xUnit1031 in InMemoryMetricStoreTests, and 2 NETSDK1212 because the
+#    netstandard2.0 generator project cannot use the trim analyzer. Leave all four.
+#    (A fresh clone or worktree without a frontend build adds a fifth, from
+#    GenerateEmbeddedFilesManifest finding nothing to embed.)
 dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAnalyzer=true
 
-# 2. Native AOT compiles (on Linux; AOT properties live in the csproj)
+# 2. Native AOT compiles (on the target OS; AOT properties live in the csproj)
 dotnet publish Loom.AotProbe/Loom.AotProbe.csproj -c Release -r linux-x64
 
 # 3. No managed assembly beside the native output (Loom.AotProbe's size itself is not
 #    a product metric - see BACKLOG.md § 11.4)
-ls -lh Loom.AotProbe/bin/Release/net10.0/linux-x64/publish/Loom.AotProbe
+ls -l Loom.AotProbe/bin/Release/net10.0/linux-x64/publish/
 
-# 4. IL + AOT tests pass - baseline 592 passing, 0 skipped
+# 4. Backend tests - 801 passing, 0 skipped (measured 2026-09-17, Windows and Linux)
 dotnet test Loom.slnx --configuration Debug
 
-# 5. Frontend - baseline 3 files, 94 passing
+# 5. Frontend - 3 files, 98 passing (last measured 2026-09-17)
 cd Loom.Web.Frontend && npx ng test
 
-# 6. Zero allocations in hot paths
+# 6. Allocation and GC behaviour of a running dashboard
 dotnet-counters monitor --process-id $(pidof Loom.Dashboard) System.Runtime
 ```
 
@@ -346,16 +390,16 @@ All of the above run in CI on every push to `main` and every PR — see
 | 8 | Custom Collectors/Plugins | ✅ Complete | `ILoomCollector` — `Loom.Telemetry/LoomCollectors.cs`, `CollectorSnapshot.cs`, `CollectorTests.cs` |
 | 9 | Configuration-Driven Sampling | ✅ Complete | `Loom.Telemetry/LoomSampling.cs`, `SamplingTests.cs` |
 | 10 | Query Language | ✅ Complete | `Loom.Telemetry.Query/` (Tokenizer, Parser, Ast, Planner, Executor) + 4 test files |
-| 11 | Alerting/Thresholds | ✅ Complete | `Loom.Telemetry.Alerting/` + `Alerting/` tests + `PHASE-11-COMPLETE.md` |
+| 11 | Alerting/Thresholds | ✅ Complete | `Loom.Telemetry.Alerting/` + `Alerting/` tests |
 | 12 | Exporters | ✅ Complete | Prometheus, Console. Grafana Cloud and Elasticsearch were removed as non-functional dead code — see BACKLOG.md § 9 |
-| 13 | Local Development Mode | ✅ Complete | `loom dev` — `Loom.DevTools/Commands/DevCommand.cs` |
+| 13 | Local Development Mode | ✅ Complete | `loom` CLI — `Loom.DevTools/Commands/` |
 
 ### Production Hardening
 
 | Phase | System | Status | Description |
 |-------|--------|--------|-------------|
 | 14 | Security Hardening | ✅ Complete | Manual JWT in `Loom.Security` — login endpoint, PBKDF2 credentials, every endpoint enforced, scoped service tokens, Angular auth. Loopback bind in code; **in-process TLS was evaluated and rejected** (see Security below) |
-| 15 | Production Build & Deployment | In progress | **15.1 build** ✅ — Linux AOT binary built and smoke-tested. **15.3 CI/CD** ✅ — see below. **15.2 systemd** ⏳ — units, the `loomd` user, and secrets provisioning remain |
+| 15 | Production Build & Deployment | In progress | **15.1 build** — the Linux AOT binary was built and smoke-tested on the since-retired `Loom.Web.Api`; today only `Loom.AotProbe` is AOT-published. **15.3 CI/CD** ✅ — see below. **15.2 systemd** ⏳ — units, the `loomd` user, and secrets provisioning remain. **Packaging** ⏳ — pre-publish API review in progress, version number not yet chosen (`BACKLOG.md` § 11) |
 
 ### Frontend (Phase 16)
 
@@ -437,19 +481,27 @@ All DTO types used by the 9 telemetry systems must be registered at compile time
   Unknown usernames are compared against a fixed dummy record so "no such user" and
   "wrong password" take the same time — otherwise the login endpoint is a user-enumeration
   oracle
+- Login throttle: 5 failed attempts per client per 15 minutes, counted atomically before
+  the password check so concurrent guesses cannot exceed it. The dashboard binds loopback,
+  so in practice every client is `127.0.0.1` and the throttle is global — the ~74 ms
+  PBKDF2 cost is the real brute-force control
+- Token refresh preserves the original session start (12-hour cap) and re-checks that the
+  user still exists in the users file
 - Key material **fails closed**: a missing signing key, a missing users file, or a users
   file defining zero users aborts startup with an actionable message. No
-  generated-on-the-fly fallback exists in any environment
-- CORS: `Loom.Web.Api` read `LOOM_CORS_ORIGINS` and conditionally applied a whitelist;
-  that project is retired and `Loom.Dashboard` has no equivalent — it serves its UI from
-  its own origin, so same-origin is correct and no CORS policy is needed
+  generated-on-the-fly fallback exists in any environment. Default location on Linux is
+  `/var/secrets/loom/` (`LOOM_JWT_KEY_FILE` / `LOOM_AUTH_USERS_FILE` override it)
+- CORS: none. The dashboard serves its UI from its own origin, so same-origin is correct
+  and no CORS policy is needed
 - Security headers (X-Frame-Options, X-Content-Type-Options, Referrer-Policy), applied
-  at the front of the pipeline in `Loom.Dashboard` so short-circuiting middleware cannot
-  skip them. **No CSP is set yet** — `Loom.Web.Api`'s policy does not fit a host that
-  serves the Angular SPA; see `BACKLOG.md` § 11.4
-- systemd sandboxing (`ProtectSystem=strict`, `MemoryDenyWriteExecute`, etc.)
-- Runs as unprivileged user `loomd` with least privilege
-- JWT secret in `/var/secrets/loom/jwt.key` (mode 400)
+  at the front of the pipeline in `loom-dashboard`'s own host (`Loom.Dashboard/Program.cs`)
+  so short-circuiting middleware cannot skip them. They are not part of
+  `Loom.Dashboard.AspNetCore`, so an app embedding the library must set its own. **No CSP
+  is set yet** — see `BACKLOG.md` § 11.4
+
+**Planned, not yet implemented** (Phase 15.2): systemd unit with sandboxing
+(`ProtectSystem=strict`, `MemoryDenyWriteExecute`, etc.), a dedicated unprivileged `loomd`
+user, and provisioned secrets with mode 400.
 
 ---
 
@@ -459,12 +511,13 @@ All DTO types used by the 9 telemetry systems must be registered at compile time
 
 | Job | What it does |
 |-----|--------------|
-| Build & test (ubuntu + windows) | Restore, strict Release build with trim/AOT analyzers as errors, full test suite, source-generator tests |
+| Build & test (ubuntu, windows, macos) | Restore, strict Release build with trim/AOT analyzers as errors, full test suite, source-generator tests |
 | Angular tests | `npm ci`, `ng test`, and a production bundle build |
-| Native AOT probe (linux-x64) | Installs `clang` + `zlib1g-dev`, publishes `Loom.AotProbe`, asserts the output is genuinely native (no size gate — see `BACKLOG.md` § 11.4) |
+| Native AOT probe (linux-x64) | Installs `clang` + `zlib1g-dev`, publishes `Loom.AotProbe`, asserts the output is genuinely native, runs it (no size gate — see `BACKLOG.md` § 11.4) |
+| Packaged consumer AOT gate (linux-x64) | Packs `Loom.Telemetry`, restores it from a folder feed into `ci/consumer-aot-gate`, AOT-publishes and runs it. The only check that exercises the package layout rather than project references (`BACKLOG.md` § 11.3) |
 
-The AOT job exists because Native AOT cannot cross-compile — it is the only way the Linux
-artifact gets built in CI.
+The AOT jobs exist because Native AOT cannot cross-compile — they are the only way the
+Linux artifacts get built in CI.
 
 ---
 
@@ -472,14 +525,13 @@ artifact gets built in CI.
 
 | Document | Role |
 |----------|------|
-| [`IMPLEMENTATION-METHODOLOGY.md`](./IMPLEMENTATION-METHODOLOGY.md) | Authoritative step-by-step build guide (all 9 systems, full code) |
+| [`IMPLEMENTATION-METHODOLOGY.md`](./IMPLEMENTATION-METHODOLOGY.md) | Original step-by-step build guide (design intent; written before delivery, so some project names in it no longer exist) |
 | [`wiggly-noodling-hoare.md`](./wiggly-noodling-hoare.md) | Architecture decisions, deployment config, design rationale |
 | [`BACKLOG.md`](./BACKLOG.md) | Open items, decision log, and the measurements behind each decision |
 | [`TESTING.md`](./TESTING.md) | Test strategy and coverage |
 | [`SMOKE-TEST.md`](./SMOKE-TEST.md) | Manual end-to-end verification steps |
-| [`commands.md`](./commands.md) | Development commands reference |
-| [`skills.md`](./skills.md) | AI assistant skills guide |
-| [`CLAUDE.md`](./CLAUDE.md) | AI behavior constraints and project rules |
+| [`Loom.Telemetry/PACKAGE.md`](./Loom.Telemetry/PACKAGE.md) | README shipped inside the `LoomDiagnostics.Telemetry` package |
+| [`CLAUDE.md`](./CLAUDE.md) | AI behavior constraints, commands, and project rules |
 
 ---
 
@@ -493,7 +545,7 @@ The following are explicitly **not in scope** for the current implementation pas
 | Query Builder UI (autocomplete, visual query composer) | UI-shaped affordance; underlying query engine (#10) IS in scope | Phase 16+ |
 | Mobile app (PWA/React Native) | Depends on frontend | Phase 17+ |
 
-**Note:** The Angular frontend (Phase 16) is now **in progress** — it was un-deferred to provide a modern dashboard with Apache ECharts visualizations and dark theme.
+**Note:** The Angular frontend (Phase 16) was un-deferred to provide a modern dashboard with Apache ECharts visualizations and dark theme; see its status in the Frontend table above.
 
 The query engine (Phase 10), alert conditions (Phase 11), and all other backend capabilities are fully built and testable via curl/API without any frontend. The Local Development Mode (Phase 13) provides terminal/console output for day-to-day use without a browser.
 

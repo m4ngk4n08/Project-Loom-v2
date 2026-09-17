@@ -1575,8 +1575,8 @@ pure; add a relative-value case to the existing `ResolveUnixProfilePath` table t
 ### 6.19 The CLI Falls Back to a Relative dev-secrets Path When the Data Folder Is Unknown 🟢 LOW (OPEN — filed 2026-09-17)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
-`sonnet/auth-init-unix-persist`, `ResolveUsersFileForCli` (`:899-929`) and `ResolveKeyFileForCli`
-(`:933-959`), at `8c6e298`.
+`sonnet/auth-init-unix-persist` — **not yet on `main`**. `ResolveUsersFileForCli` (`:899-929`) and
+`ResolveKeyFileForCli` (`:933-959`), line numbers from the branch at `8c6e298`.
 
 Both guard with `KeyMaterial.IsUsableDefaultPath(DefaultUsersFile / DefaultKeyFile)`. On Unix those
 defaults are `/var/secrets/loom/...` — always rooted — so the guard never fires there. When

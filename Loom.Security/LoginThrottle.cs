@@ -37,22 +37,51 @@ public sealed class LoginThrottle(TimeProvider clock)
 
         lock (_gate)
         {
-            if (_clients.TryGetValue(client, out var entry) && now - entry.WindowStart < Window)
+            RecordFailureLocked(client, now);
+        }
+    }
+
+    /// <summary>Must be called with `_gate` already held. Increments the client's window,
+    /// or opens a new one (with the same bounded-eviction rule) if none is live.</summary>
+    private void RecordFailureLocked(string client, DateTimeOffset now)
+    {
+        if (_clients.TryGetValue(client, out var entry) && now - entry.WindowStart < Window)
+        {
+            _clients[client] = (entry.Failures + 1, entry.WindowStart);
+            return;
+        }
+
+        // Bounded so spoofed source addresses cannot grow this without limit. Evict
+        // the oldest window rather than clearing the table, which would erase live
+        // counters and hand an attacker a free reset.
+        if (_clients.Count >= MaxTrackedClients)
+        {
+            var oldest = _clients.OrderBy(kv => kv.Value.WindowStart).First().Key;
+            _clients.Remove(oldest);
+        }
+
+        _clients[client] = (1, now);
+    }
+
+    /// <summary>Atomically checks the block and counts this attempt as a failure. Call
+    /// BEFORE verifying the password; call Reset on success. Checking and recording
+    /// separately lets concurrent requests all pass the check before any is recorded.</summary>
+    public bool TryBeginAttempt(string client, out TimeSpan retryAfter)
+    {
+        retryAfter = TimeSpan.Zero;
+        var now = clock.GetUtcNow();
+
+        lock (_gate)
+        {
+            if (_clients.TryGetValue(client, out var entry) && now - entry.WindowStart < Window
+                && entry.Failures >= MaxFailures)
             {
-                _clients[client] = (entry.Failures + 1, entry.WindowStart);
-                return;
+                retryAfter = entry.WindowStart + Window - now;
+                return false;
             }
 
-            // Bounded so spoofed source addresses cannot grow this without limit. Evict
-            // the oldest window rather than clearing the table, which would erase live
-            // counters and hand an attacker a free reset.
-            if (_clients.Count >= MaxTrackedClients)
-            {
-                var oldest = _clients.OrderBy(kv => kv.Value.WindowStart).First().Key;
-                _clients.Remove(oldest);
-            }
-
-            _clients[client] = (1, now);
+            RecordFailureLocked(client, now);
+            return true;
         }
     }
 

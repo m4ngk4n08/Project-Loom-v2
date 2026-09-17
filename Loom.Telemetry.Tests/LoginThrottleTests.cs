@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Loom.Security;
 using Xunit;
 
@@ -70,5 +72,59 @@ public class LoginThrottleTests
 
         for (var i = 0; i < 4; i++) throttle.RecordFailure("client-1099");
         Assert.True(throttle.IsBlocked("client-1099", out _));
+    }
+
+    [Fact]
+    public void TryBeginAttempt_FiveAllowed_SixthRefused()
+    {
+        var throttle = new LoginThrottle(_clock);
+
+        for (var i = 0; i < 5; i++)
+            Assert.True(throttle.TryBeginAttempt("1.2.3.4", out _));
+
+        var allowed = throttle.TryBeginAttempt("1.2.3.4", out var retryAfter);
+        Assert.False(allowed);
+        Assert.True(retryAfter > TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void TryBeginAttempt_Concurrent_ExactlyFiveAllowed()
+    {
+        var throttle = new LoginThrottle(_clock);
+        var allowedCount = 0;
+
+        Parallel.For(0, 200, i =>
+        {
+            if (throttle.TryBeginAttempt("1.2.3.4", out _))
+                Interlocked.Increment(ref allowedCount);
+        });
+
+        Assert.Equal(LoginThrottle.MaxFailures, allowedCount);
+    }
+
+    [Fact]
+    public void TryBeginAttempt_ThenReset_Allowed()
+    {
+        var throttle = new LoginThrottle(_clock);
+
+        for (var i = 0; i < 5; i++)
+            Assert.True(throttle.TryBeginAttempt("1.2.3.4", out _));
+
+        throttle.Reset("1.2.3.4");
+
+        Assert.True(throttle.TryBeginAttempt("1.2.3.4", out _));
+    }
+
+    [Fact]
+    public void TryBeginAttempt_WindowExpired_Allowed()
+    {
+        var throttle = new LoginThrottle(_clock);
+
+        for (var i = 0; i < 5; i++)
+            Assert.True(throttle.TryBeginAttempt("1.2.3.4", out _));
+
+        _clock.Advance(LoginThrottle.Window + TimeSpan.FromSeconds(1));
+
+        Assert.True(throttle.TryBeginAttempt("1.2.3.4", out _));
     }
 }

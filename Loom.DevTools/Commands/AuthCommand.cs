@@ -983,7 +983,15 @@ public static class AuthCommand
         }
 
         var line = $"{username}:{PasswordHasher.Hash(ReadPassword())}";
-        File.AppendAllText(usersPath, line + Environment.NewLine);
+        try
+        {
+            File.AppendAllText(usersPath, line + Environment.NewLine);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            Console.Error.WriteLine($"Could not write to {usersPath}: {ex.Message}");
+            return false;
+        }
         Console.WriteLine($"Added '{username}' to {usersPath}.");
         return true;
     }

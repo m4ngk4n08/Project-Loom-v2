@@ -57,14 +57,27 @@ public sealed class ExplainEndpointTests
         }
     }
 
-    private static async Task<ExplainApi> StartAsync(IExplainClient? explainClient)
+    // Counts constructions, so a test can prove mapping the route never builds a client.
+    private sealed class CountingExplainClient : IExplainClient
     {
-        var builder = WebApplication.CreateBuilder();
+        public static int Constructed;
+
+        public CountingExplainClient() => Interlocked.Increment(ref Constructed);
+
+        public Task<ExplainResult> ExplainAsync(ExplainPayload payload, CancellationToken ct) =>
+            Task.FromResult(new ExplainResult("counted", "counting-model", "sent", 1, 1));
+    }
+
+    private static Task<ExplainApi> StartAsync(IExplainClient? explainClient) =>
+        StartAsync(explainClient is null ? null : services => services.AddSingleton(explainClient));
+
+    private static async Task<ExplainApi> StartAsync(Action<IServiceCollection>? register, string? environmentName = null)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = environmentName });
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
 
-        if (explainClient is not null)
-            builder.Services.AddSingleton(explainClient);
+        register?.Invoke(builder.Services);
 
         var app = builder.Build();
         app.MapGroup("/api").MapLogEndpoints();
@@ -115,5 +128,24 @@ public sealed class ExplainEndpointTests
         Assert.Equal("fake-model-v1", body.ModelUsed);
         Assert.Equal(12, body.InputTokens);
         Assert.Equal(34, body.OutputTokens);
+    }
+
+    // Development turns on scope validation, so resolving a scoped service from the root
+    // provider at map time throws. Checking registration must not resolve anything.
+    [Fact]
+    public async Task ScopedExplainClientInDevelopment_MapsWithoutResolving_AndServesRequests()
+    {
+        CountingExplainClient.Constructed = 0;
+
+        await using var api = await StartAsync(
+            services => services.AddScoped<IExplainClient, CountingExplainClient>(),
+            environmentName: "Development");
+
+        Assert.Equal(0, CountingExplainClient.Constructed);
+
+        var response = await api.Client.PostAsync("/api/logs/explain", ExplainRequestBody());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(1, CountingExplainClient.Constructed);
     }
 }

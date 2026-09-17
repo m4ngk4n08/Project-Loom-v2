@@ -327,7 +327,11 @@ namespace Loom.Dashboard.Extensions
             // service provider directly rather than any provider-specific configuration.
             // An unconfigured deployment returns 404 from the router rather than 501 from a
             // handler - there is no endpoint, not a disabled one.
-            if (((IEndpointRouteBuilder)api).ServiceProvider.GetService<IExplainClient>() is not null)
+            // IsService checks registration without constructing: resolving here would build
+            // a client at startup, and a scoped registration throws from the root provider
+            // under Development's scope validation.
+            if (((IEndpointRouteBuilder)api).ServiceProvider.GetRequiredService<IServiceProviderIsService>()
+                    .IsService(typeof(IExplainClient)))
             {
                 api.MapPost("/logs/explain", async (
                     ExplainRequest request,

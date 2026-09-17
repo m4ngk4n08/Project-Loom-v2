@@ -1779,8 +1779,6 @@ not change it again after publishing.
 **Found by** `/code-review high` on `sonnet/telemetry-review-fixes` (reported by the reviewing session; code
 confirmed by Opus in this session).
 
----
-
 ### 6.29 The Dashboard Library Sets No Security Headers — Only the `loom-dashboard` Host Does 🟡 MEDIUM (OPEN — filed 2026-09-17)
 
 **Where the code lives:** `Loom.Dashboard/Program.cs:177-197`, at `68b9d8a`.
@@ -1805,6 +1803,88 @@ and nothing tells it to. It has no effect today because the library is not packa
 packable.
 
 **Found by** `Opus while updating README.md, 2026-09-17`.
+
+### 6.30 `MapLoomDashboard` Always Adds an Anonymous Root Catch-All 🟡 MEDIUM (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs` — `MapLoomDashboard` (`:92`)
+calls `MapDashboardEndpoints` (`:29`), which calls `app.MapSpaFallback(...)` unconditionally (`:50`); that maps a
+`MapFallback` marked `LoomAllowAnonymous` (`:726-749`). At `68b9d8a`.
+
+The dashboard's route mapping always registers a root-level `MapFallback`. That is right for the `loom-dashboard`
+tool, which owns the whole app. For an app that *embeds* the library, it collides with the host's own catch-all
+(e.g. `MapFallbackToFile("index.html")`): two fallback endpoints with equal precedence → every unmatched request
+fails with an ambiguous-match 500. Without embedded assets, the host's unknown routes get Loom's "build Angular
+and repack" 404 instead of the host's own response.
+
+**Confirmed by code reading, not reproduced at runtime.** (The 500 is ASP.NET Core's documented
+`AmbiguousMatchException` behaviour for two equal-precedence endpoints; not measured here.)
+
+**Why MEDIUM:** no effect on the tool; a hard break for the § 11.1 library consumer the first time it has its
+own SPA. Out of scope for the dashboard fix round by design, not an oversight.
+
+**Fix shape:** mount the dashboard under a configurable path prefix (e.g. `/loom`) with the fallback scoped to
+that prefix, or make the fallback opt-in via an options flag that the tool sets. Decide with § 11.1 item 3, and
+add a test mapping both a host fallback and `MapLoomDashboard`. Measure the 500 before and after.
+
+**Found by** `/code-review high Loom.Dashboard.AspNetCore` (pre-publish review #3, finding 9; transcript
+`cd89c1d7`), re-checked against `main` by Opus.
+
+### 6.31 `/api/logs/tail` Echoes a Stale or Negative Cursor 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs:334-352`, at `68b9d8a`.
+
+`nextSequence = afterSequence + result.DroppedCount + entries.Length`. When `after` is **ahead** of the buffer
+(a cursor kept across a dashboard restart), nothing is returned and the stale cursor is handed back, so the
+client misses every record until new sequence numbers pass its old cursor. A **negative** `after` is clamped
+inside `ReadAfter` but not here, so the returned cursor can move backwards.
+
+**Confirmed by code reading, not reproduced at runtime.**
+
+**Why LOW:** no frontend code calls this endpoint; only external pollers are affected.
+
+**Fix shape:** clamp `after` to `[0, store.CurrentSequence]` before computing, and base `nextSequence` on the
+clamped value. Test: `after` = `CurrentSequence + 100` → response cursor equals `CurrentSequence`.
+
+**Found by** `/code-review high Loom.Dashboard.AspNetCore` (review #3, finding 10). Deliberately out of scope
+for the fix round.
+
+### 6.32 Ingest Timestamps With a UTC Offset Are Stored in Server Local Time 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs:239-245`, at `68b9d8a`.
+
+`var timestamp = metric.Timestamp ?? DateTime.UtcNow;` then `timestamp.Ticks`. System.Text.Json binds
+`"2026-09-17T10:00:00+02:00"` to a `DateTime` of `Kind=Local`, converted to the server's zone, so `.Ticks` is
+local time and the stored record is shifted by the server's UTC offset. `ToUtcTicks` in the same file
+(`:490-497`) documents and handles exactly this trap for the log export query; ingest does not use it.
+
+**Confirmed by code reading, not reproduced at runtime.** This dev machine runs at UTC+8, so a probe would show
+it; not run.
+
+**Why LOW:** clients that send `Z` timestamps or omit them are unaffected.
+
+**Fix shape:** `ToUtcTicks(metric.Timestamp) ?? DateTime.UtcNow.Ticks`, plus a test posting a `+02:00`
+timestamp and asserting the stored ticks equal the UTC instant.
+
+**Found by** `/code-review high` on `sonnet/dashboard-review-fixes` (round 1, finding 3; moved, not introduced,
+by that branch).
+
+### 6.33 `loom metrics --live` Reads GC Counter Names That Are Never Published 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/MetricsLiveCommand.cs:112-114`, at `68b9d8a`.
+
+It reads `gen-0/1/2-collection-count`. The runtime publishes `gen-N-gc-count` (see `SystemRuntimeCounters.cs`,
+"Bug B"), so the live view's GC counts are always 0. It also reads the latest per-interval delta rather than a
+running total. The dashboard had the identical bug and it was fixed in merge `02522c7`
+(`MetricsResponseBuilder` now reads counter totals); the CLI copy was left out of scope on purpose.
+
+**Confirmed by code reading, not reproduced at runtime.**
+
+**Why LOW:** display-only, in an interactive terminal view.
+
+**Fix shape:** read `gen-N-gc-count` counter totals, mirroring `MetricsResponseBuilder`'s single-pass
+`GetCounterTotals()` read.
+
+**Found by** the dashboard fix round's prompt (listed as out of scope), confirmed on `main` by Opus.
 
 ---
 

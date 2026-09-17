@@ -18,6 +18,9 @@ public sealed class MetricBuffer
 
     public MetricBuffer(int capacity = DefaultCapacity)
     {
+        if (capacity < 1 || capacity > (1 << 30))
+            throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be between 1 and 2^30 inclusive.");
+
         // Round up to next power of 2 for fast modulo via bitwise AND
         capacity = RoundUpToPowerOfTwo(capacity);
         _buffer = new MetricRecord[capacity];
@@ -59,7 +62,11 @@ public sealed class MetricBuffer
             return Array.Empty<MetricRecord>();
 
         var currentIndex = Interlocked.Read(ref _writeIndex);
-        var available = Math.Min(count, Math.Min((int)currentIndex, _buffer.Length));
+        // Clamp in long space before casting to int - currentIndex can exceed
+        // int.MaxValue (~2.4 days at 10k writes/sec) and a truncating cast would go
+        // negative, making the subsequent Math.Min/array allocation blow up.
+        var live = (int)Math.Min(currentIndex, _buffer.Length);
+        var available = Math.Min(count, live);
 
         if (available == 0)
             return Array.Empty<MetricRecord>();
@@ -88,7 +95,8 @@ public sealed class MetricBuffer
             return 0;
 
         var currentIndex = Interlocked.Read(ref _writeIndex);
-        var available = Math.Min(destination.Length, Math.Min((int)currentIndex, _buffer.Length));
+        var live = (int)Math.Min(currentIndex, _buffer.Length);
+        var available = Math.Min(destination.Length, live);
 
         for (int i = 0; i < available; i++)
         {
@@ -106,7 +114,7 @@ public sealed class MetricBuffer
     public MetricRecord[] ReadSince(long timestampUtcTicks)
     {
         var currentIndex = Interlocked.Read(ref _writeIndex);
-        var maxRead = Math.Min((int)currentIndex, _buffer.Length);
+        var maxRead = (int)Math.Min(currentIndex, _buffer.Length);
 
         if (maxRead == 0)
             return Array.Empty<MetricRecord>();
@@ -143,7 +151,7 @@ public sealed class MetricBuffer
     public (double Value, DateTime Timestamp)[] Snapshot()
     {
         var currentIndex = Interlocked.Read(ref _writeIndex);
-        var maxRead = Math.Min((int)currentIndex, _buffer.Length);
+        var maxRead = (int)Math.Min(currentIndex, _buffer.Length);
 
         if (maxRead == 0)
             return Array.Empty<(double, DateTime)>();

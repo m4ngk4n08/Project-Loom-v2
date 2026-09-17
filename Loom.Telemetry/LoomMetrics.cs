@@ -62,7 +62,7 @@ public static class LoomMetrics
             null
         );
         GetOrCreateBuffer(name).Write(in record);
-        MetricsBridge.PublishCounter(name, (long)value, tags);
+        MetricsBridge.PublishCounter(name, value, tags);
     }
 
     /// <summary>

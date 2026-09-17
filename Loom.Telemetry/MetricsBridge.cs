@@ -26,7 +26,7 @@ internal static class MetricsBridge
     private static readonly ObservableGauge<int> Up =
         Meter.CreateObservableGauge("loom.telemetry.up", () => 1);
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Counter<long>> Counters = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Counter<double>> Counters = new();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Histogram<double>> Histograms = new();
 
     // Dropped-record counts per metric-name buffer. Unlike PublishGauge, there is nothing
@@ -40,10 +40,14 @@ internal static class MetricsBridge
     private static readonly ObservableGauge<long> BufferDropped =
         Meter.CreateObservableGauge<long>("loom.telemetry.buffer.dropped", () =>
         {
-            var measurements = new Measurement<long>[BufferDroppedProviders.Count];
-            var i = 0;
+            // Capacity hint only - a List, not an array, because BufferDroppedProviders
+            // can grow between the .Count read and the enumeration below (a concurrent
+            // first-time RecordCounter/RecordGauge/RecordHistogram for a new metric name
+            // registers a new provider). An array sized from the stale Count would
+            // overrun; a per-poll List allocation is fine off the hot path.
+            var measurements = new List<Measurement<long>>(BufferDroppedProviders.Count);
             foreach (var kvp in BufferDroppedProviders)
-                measurements[i++] = new Measurement<long>(kvp.Value(), new KeyValuePair<string, object?>("metric.name", kvp.Key));
+                measurements.Add(new Measurement<long>(kvp.Value(), new KeyValuePair<string, object?>("metric.name", kvp.Key)));
             return measurements;
         });
 
@@ -84,8 +88,8 @@ internal static class MetricsBridge
     // than relying on that observation staying true.
     private sealed record GaugeState(double Value, KeyValuePair<string, object?>[] Tags);
 
-    public static void PublishCounter(string name, long increment, ReadOnlySpan<MetricTag> tags = default) =>
-        Counters.GetOrAdd(name, n => Meter.CreateCounter<long>(n)).Add(increment, ConvertTags(tags));
+    public static void PublishCounter(string name, double increment, ReadOnlySpan<MetricTag> tags = default) =>
+        Counters.GetOrAdd(name, n => Meter.CreateCounter<double>(n)).Add(increment, ConvertTags(tags));
 
     public static void PublishHistogram(string name, double value, ReadOnlySpan<MetricTag> tags = default) =>
         Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value, ConvertTags(tags));
@@ -93,7 +97,10 @@ internal static class MetricsBridge
     public static void PublishGauge(string name, double value, ReadOnlySpan<MetricTag> tags = default)
     {
         var convertedTags = ConvertTags(tags);
-        var tagKey = BuildTagKey(convertedTags);
+        // MetricSeriesKey.Build length-prefixes each key/value instead of joining with
+        // plain 'key=value;' separators, so a tag VALUE containing ';' or '=' can't forge
+        // another tag combination's key (e.g. {a="1;b=2"} colliding with {a="1", b="2"}).
+        var tagKey = MetricSeriesKey.Build(string.Empty, MetricSeriesKey.SortTags(tags.ToArray()));
 
         var byTagKey = Gauges.GetOrAdd(name, static _ => new System.Collections.Concurrent.ConcurrentDictionary<string, GaugeState>());
         byTagKey[tagKey] = new GaugeState(value, convertedTags);
@@ -101,33 +108,13 @@ internal static class MetricsBridge
         GaugeInstruments.GetOrAdd(name, n => Meter.CreateObservableGauge<double>(n, () =>
         {
             var combinations = Gauges[n];
-            var measurements = new Measurement<double>[combinations.Count];
-            var i = 0;
+            // List, not an array sized from .Count: a concurrent PublishGauge call can add
+            // a new tag combination between the Count read and the enumeration finishing.
+            var measurements = new List<Measurement<double>>(combinations.Count);
             foreach (var state in combinations.Values)
-                measurements[i++] = new Measurement<double>(state.Value, state.Tags);
+                measurements.Add(new Measurement<double>(state.Value, state.Tags));
             return measurements;
         }));
-    }
-
-    // Sorted key=value pairs joined into one string: two calls with the same tags in a
-    // different order must resolve to the same series, so this can't rely on insertion
-    // order the way the raw MetricTag span is given to us.
-    private static string BuildTagKey(KeyValuePair<string, object?>[] tags)
-    {
-        if (tags.Length == 0)
-            return string.Empty;
-
-        var sorted = (KeyValuePair<string, object?>[])tags.Clone();
-        Array.Sort(sorted, static (a, b) => string.CompareOrdinal(a.Key, b.Key));
-
-        var sb = new System.Text.StringBuilder();
-        for (var i = 0; i < sorted.Length; i++)
-        {
-            if (i > 0)
-                sb.Append(';');
-            sb.Append(sorted[i].Key).Append('=').Append(sorted[i].Value);
-        }
-        return sb.ToString();
     }
 
     private static KeyValuePair<string, object?>[] ConvertTags(ReadOnlySpan<MetricTag> tags)

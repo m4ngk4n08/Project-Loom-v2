@@ -59,8 +59,10 @@ public sealed class SamplingConfiguration
     /// </summary>
     public SamplingConfiguration SampleAll(double rate)
     {
-        // Use duration rule with zero threshold to apply to everything
-        _rules.Add(new DurationThresholdRule(TimeSpan.Zero, rate));
+        // Uniform rule samples every metric at rate regardless of duration - including
+        // duration-less metrics (property changes), which a duration-based rule would
+        // always record via its "no duration -> can't apply this rule" early-out.
+        _rules.Add(new UniformSamplingRule(rate));
         return this;
     }
 

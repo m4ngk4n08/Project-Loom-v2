@@ -29,6 +29,14 @@ public sealed class CollectorRegistration
     /// <summary>Whether this collector is currently enabled</summary>
     public bool IsEnabled { get; internal set; }
 
+    /// <summary>
+    /// Guards against the scheduler starting an overlapping run of this collector while a
+    /// previous scheduled run is still in flight. 0 = idle, 1 = collecting. A field (not a
+    /// property) so it can be passed by ref to Interlocked.CompareExchange. Manual
+    /// CollectAsync(name) does not check or set this - only the scheduler is gated.
+    /// </summary>
+    internal int IsCollecting;
+
     public CollectorRegistration(ILoomCollector collector)
     {
         Collector = collector ?? throw new ArgumentNullException(nameof(collector));

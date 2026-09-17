@@ -17,6 +17,9 @@ public sealed class LogBuffer
 
     public LogBuffer(int capacity = DefaultCapacity)
     {
+        if (capacity < 1 || capacity > (1 << 30))
+            throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be between 1 and 2^30 inclusive.");
+
         // Round up to next power of 2 for fast modulo via bitwise AND
         capacity = RoundUpToPowerOfTwo(capacity);
         _buffer = new LogRecord[capacity];

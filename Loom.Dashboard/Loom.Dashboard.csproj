@@ -33,6 +33,11 @@
     <ProjectReference Include="..\Loom.Dashboard.AspNetCore\Loom.Dashboard.AspNetCore.csproj" />
     <ProjectReference Include="..\Loom.Security\Loom.Security.csproj" />
     <ProjectReference Include="..\Loom.Storage\Loom.Storage.csproj" />
+    <!-- Loom.Dashboard.AspNetCore does not reference Assist; this tool opts in and registers
+         the IExplainClient itself. That keeps Assist out of the library's dependencies only:
+         loom-dashboard still ships Loom.Telemetry.Assist.dll and its outbound client, so
+         BACKLOG.md 11.2's "not in the default install path" is NOT met by this tool. -->
+    <ProjectReference Include="..\Loom.Telemetry.Assist\Loom.Telemetry.Assist.csproj" />
     <ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>

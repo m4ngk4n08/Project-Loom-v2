@@ -2,7 +2,6 @@ using Loom.Security;
 using Loom.Storage;
 using Loom.Telemetry;
 using Loom.Telemetry.Alerting;
-using Loom.Telemetry.Assist;
 using Loom.Telemetry.Exporters;
 using Loom.Telemetry.Exporters.Console;
 using Loom.Telemetry.Query;
@@ -52,15 +51,11 @@ namespace Loom.Dashboard.Extensions
                 options.Url = Environment.GetEnvironmentVariable("LOOM_ALERT_WEBHOOK_URL"));
             services.AddAlertTarget<WebhookAlertTarget>();
 
-            // The explain feature is absent, not broken, without a key: FromEnvironment returns
-            // null, nothing is registered, and MapLogEndpoints never maps the route. An operator
-            // who has not opted in has no endpoint to secure and no egress to worry about.
-            var assistOptions = AssistOptions.FromEnvironment();
-            if (assistOptions is not null)
-            {
-                services.AddSingleton(assistOptions);
-                services.AddHttpClient<IExplainClient, AnthropicExplainClient>();
-            }
+            // The explain feature is absent, not broken, when the host does not register an
+            // IExplainClient: MapLogEndpoints checks the service provider directly and never
+            // maps the route. This library no longer knows or cares which provider (if any)
+            // the host wires up - see PROMPT-assist-inversion.md. An operator who has not
+            // opted in has no endpoint to secure and no egress to worry about.
 
             // EventPipe bridge — pulls metrics from target process into the store
             services.AddSingleton(sp =>

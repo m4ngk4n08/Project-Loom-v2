@@ -1,5 +1,6 @@
 using System;
 using Loom.Telemetry.Assist;
+using Loom.Web.Contracts.Explain;
 using Xunit;
 
 namespace Loom.Telemetry.Tests.Assist;

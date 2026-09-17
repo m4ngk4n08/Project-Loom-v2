@@ -52,7 +52,9 @@ Loom.slnx                      (15 projects)
 ├── Loom.Telemetry.Assist/     → Remote LLM "Explain" client over raw HTTP (not the
 │                                Anthropic SDK — it is not AOT-clean). Transmits only
 │                                message templates and argument NAMES, never values.
-│                                NO project references.
+│                                Refs Loom.Web.Contracts for IExplainClient, which
+│                                pulls in ASP.NET Core — accepted while its only
+│                                consumer is loom-dashboard; revisit if published.
 ├── Loom.Web.RealTime/         → WebSocket handlers (zero-allocation).
 ├── Loom.AotProbe/             → Minimal console app. **The Native AOT publish target.**
 │                                Proves referencing Loom.Telemetry doesn't break a
@@ -83,9 +85,9 @@ host: `Loom.Dashboard` and `Loom.DevTools` are the entry points.
 
 **Dependency flow** (arrows point to dependencies):
 ```
-Loom.Telemetry, Loom.Web.Contracts, Loom.Telemetry.Generators,
-Loom.Telemetry.Assist                                           ← foundation, no refs
+Loom.Telemetry, Loom.Web.Contracts, Loom.Telemetry.Generators  ← foundation, no refs
 
+Loom.Telemetry.Assist    → Loom.Web.Contracts
 Loom.Security            → Loom.Web.Contracts
 Loom.Storage             → Loom.Telemetry, Loom.Web.Contracts
 Loom.Web.RealTime        → Loom.Web.Contracts
@@ -97,10 +99,10 @@ Loom.AotProbe            → Loom.Telemetry, Loom.Telemetry.Generators
 
 Loom.Dashboard.AspNetCore → Loom.Security, Loom.Storage, Loom.Telemetry,
                             Loom.Telemetry.Query, Loom.Telemetry.Alerting,
-                            Loom.Telemetry.Assist, Loom.Telemetry.Exporters,
-                            Loom.Web.Contracts, Loom.Web.RealTime
+                            Loom.Telemetry.Exporters, Loom.Web.Contracts,
+                            Loom.Web.RealTime
 Loom.Dashboard   → Loom.Dashboard.AspNetCore, Loom.Security, Loom.Storage,
-                   Loom.Web.Contracts
+                   Loom.Telemetry.Assist, Loom.Web.Contracts
 Loom.DevTools    → Loom.Security, Loom.Storage, Loom.Telemetry, Loom.Telemetry.Query,
                    Loom.Web.Contracts
 ```

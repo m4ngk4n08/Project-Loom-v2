@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace Loom.Telemetry.Assist;
+namespace Loom.Web.Contracts.Explain;
 
 /// <summary>What actually leaves the process. v1 sends the message TEMPLATE and the
 /// argument NAMES only — never argument values, never the rendered message. The model

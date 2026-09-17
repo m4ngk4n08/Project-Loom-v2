@@ -756,16 +756,19 @@ public static class AuthCommand
     }
 
     /// <summary>Pure. The decision behind ResolveUsersFileForCli/ResolveKeyFileForCli once
-    /// FileAccessCheck has answered for the system default: an explicit environment value
-    /// always wins outright. Otherwise Exists uses the system default (unchanged from
-    /// before this round), Missing falls back to dev-secrets (unchanged), and
-    /// Indeterminate returns null - this process cannot tell whether the system default
-    /// exists, so it must not guess. Silently falling back to dev-secrets there is exactly
-    /// the bug this round fixes: it would write to, or sign with, a file the host never
-    /// reads, while reporting success.</summary>
+    /// FileAccessCheck has answered for the system default: an explicit, non-empty,
+    /// non-whitespace environment value always wins outright (see
+    /// KeyMaterial.IsEnvironmentValueSet - an empty or whitespace-only value counts as
+    /// unset, the same as on Windows where such a value cannot even be represented).
+    /// Otherwise Exists uses the system default (unchanged from before this round),
+    /// Missing falls back to dev-secrets (unchanged), and Indeterminate returns null -
+    /// this process cannot tell whether the system default exists, so it must not guess.
+    /// Silently falling back to dev-secrets there is exactly the bug this round fixes: it
+    /// would write to, or sign with, a file the host never reads, while reporting
+    /// success.</summary>
     public static string? ResolveCliPath(string? envValue, FileAccessState systemDefaultState, string systemDefaultPath, string devSecretsPath) =>
-        envValue is not null
-            ? envValue
+        KeyMaterial.IsEnvironmentValueSet(envValue)
+            ? envValue!
             : systemDefaultState switch
             {
                 FileAccessState.Exists => systemDefaultPath,

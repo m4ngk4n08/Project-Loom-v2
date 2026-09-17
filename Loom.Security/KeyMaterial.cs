@@ -40,6 +40,17 @@ public static class KeyMaterial
     /// folder, e.g. a service or virtual account) at runtime.</summary>
     public static bool IsUsableDefaultPath(string defaultPath) => Path.IsPathRooted(defaultPath);
 
+    /// <summary>Pure. The one place that decides whether an environment value counts as
+    /// "set". Null, empty, and whitespace-only all count as unset - not for convenience,
+    /// but for cross-platform consistency: Windows cannot represent an empty environment
+    /// variable at all (setting one to "" deletes it), so `LOOM_JWT_KEY_FILE=` in a
+    /// systemd unit or .env file on Linux/macOS - which GetEnvironmentVariable returns as
+    /// "", not null - must fall back to the default the same way an unset variable does
+    /// on Windows, rather than being handed to FileAccessCheck/LoadSigningKey as a
+    /// malformed path. Used by ResolveKeyFile, ResolveUsersFile, and the CLI's
+    /// ResolveCliPath.</summary>
+    public static bool IsEnvironmentValueSet(string? value) => !string.IsNullOrWhiteSpace(value);
+
     /// <summary>Fails closed when no explicit value is set and the default is not rooted -
     /// which happens on Windows for an account with no profile folder, where
     /// GetFolderPath(LocalApplicationData) returns "" and Path.Combine yields the RELATIVE
@@ -51,7 +62,7 @@ public static class KeyMaterial
     public static string ResolveKeyFile()
     {
         var envValue = Environment.GetEnvironmentVariable(KeyFileVariable);
-        if (envValue is not null) return envValue;
+        if (IsEnvironmentValueSet(envValue)) return envValue!;
 
         if (!IsUsableDefaultPath(DefaultKeyFile))
             throw new InvalidOperationException(
@@ -64,7 +75,7 @@ public static class KeyMaterial
     public static string ResolveUsersFile()
     {
         var envValue = Environment.GetEnvironmentVariable(UsersFileVariable);
-        if (envValue is not null) return envValue;
+        if (IsEnvironmentValueSet(envValue)) return envValue!;
 
         if (!IsUsableDefaultPath(DefaultUsersFile))
             throw new InvalidOperationException(

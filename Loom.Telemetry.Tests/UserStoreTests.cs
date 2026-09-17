@@ -114,6 +114,79 @@ public class UserStoreTests
         Assert.Throws<InvalidOperationException>(() => UserStore.Load(path));
     }
 
+    // The host's fail-closed contract, stated as a test: over the whole category of
+    // malformed-path inputs from PROMPT-auth-persist-round7.md's table, Load must never
+    // throw anything except InvalidOperationException.
+    [Fact]
+    public void Load_NeverThrowsExceptInvalidOperationException_ForAnyPathShape()
+    {
+        var tempDir = Directory.CreateTempSubdirectory("loom-users-");
+        try
+        {
+            var existingFile = Path.Combine(tempDir.FullName, "exists.txt");
+            File.WriteAllText(existingFile, "not-a-users-file");
+
+            var paths = new[]
+            {
+                "",
+                "   ",
+                "a\0b",
+                Guid.NewGuid().ToString("N") + "-loom-missing-users",
+                Path.Combine(tempDir.FullName, "missing-users"),
+                Path.Combine(tempDir.FullName, "no-such-dir", "users"),
+                existingFile,
+                tempDir.FullName, // a directory where a file is expected
+            };
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    UserStore.Load(path);
+                }
+                catch (InvalidOperationException)
+                {
+                    // expected - the fail-closed contract
+                }
+                catch (Exception ex)
+                {
+                    Assert.Fail($"UserStore.Load('{path.Replace('\0', '?')}') threw {ex.GetType().Name}, not InvalidOperationException.");
+                }
+            }
+
+            var linkPath = Path.Combine(tempDir.FullName, "dangling-link");
+            var linkTarget = Path.Combine(tempDir.FullName, "link-target-does-not-exist");
+            try
+            {
+                File.CreateSymbolicLink(linkPath, linkTarget);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return;
+            }
+
+            try
+            {
+                try
+                {
+                    UserStore.Load(linkPath);
+                }
+                catch (InvalidOperationException)
+                {
+                    // expected
+                }
+            }
+            finally
+            {
+                File.Delete(linkPath);
+            }
+        }
+        finally
+        {
+            tempDir.Delete(recursive: true);
+        }
+    }
+
     private static string WriteUsersFile(params string[] lines)
     {
         var path = Path.GetTempFileName();

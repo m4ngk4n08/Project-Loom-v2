@@ -493,11 +493,11 @@ All DTO types used by the 9 telemetry systems must be registered at compile time
   `/var/secrets/loom/` (`LOOM_JWT_KEY_FILE` / `LOOM_AUTH_USERS_FILE` override it)
 - CORS: none. The dashboard serves its UI from its own origin, so same-origin is correct
   and no CORS policy is needed
-- Security headers (X-Frame-Options, X-Content-Type-Options, Referrer-Policy), applied
-  at the front of the pipeline in `loom-dashboard`'s own host (`Loom.Dashboard/Program.cs`)
-  so short-circuiting middleware cannot skip them. They are not part of
-  `Loom.Dashboard.AspNetCore`, so an app embedding the library must set its own. **No CSP
-  is set yet** — see `BACKLOG.md` § 11.4
+- Security headers (Content-Security-Policy, X-Frame-Options, X-Content-Type-Options,
+  Referrer-Policy), applied at the front of the pipeline in `loom-dashboard`'s own host
+  (`Loom.Dashboard/Program.cs`) so short-circuiting middleware cannot skip them — see
+  `BACKLOG.md` § 11.5. They are not part of `Loom.Dashboard.AspNetCore`, so an app
+  embedding the library must set its own
 
 **Planned, not yet implemented** (Phase 15.2): systemd unit with sandboxing
 (`ProtectSystem=strict`, `MemoryDenyWriteExecute`, etc.), a dedicated unprivileged `loomd`

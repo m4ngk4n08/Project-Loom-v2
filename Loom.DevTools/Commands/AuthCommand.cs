@@ -84,7 +84,7 @@ public static class AuthCommand
                 // loom block even though usersPath itself is missing here, so "persisting
                 // only the key" would be false whenever that carry-forward fires.
                 var persistedUsersPath = PersistEnvironmentVariables(keyPath, existingUsersPath, out persisted);
-                if (existingUsersPath is null)
+                if (existingUsersPath is null && persisted)
                 {
                     Console.WriteLine(persistedUsersPath is not null
                         ? $"No users file found at {usersPath} - kept the existing {KeyMaterial.UsersFileVariable} already in your shell profile ({persistedUsersPath})."

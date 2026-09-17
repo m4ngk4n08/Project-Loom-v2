@@ -36,16 +36,6 @@ public sealed class DurationThresholdRule : ISamplingRule
         if (!duration.HasValue)
             return true;
 
-        // Special case: threshold == 0 means "sample everything uniformly"
-        // (used by SampleAll helper)
-        if (_threshold == TimeSpan.Zero)
-        {
-            lock (_random)
-            {
-                return _random.NextDouble() < _sampleRate;
-            }
-        }
-
         // Slow operations (above threshold) always recorded
         if (duration.Value > _threshold)
             return true;

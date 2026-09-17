@@ -111,7 +111,7 @@ public sealed class SamplingTests : IDisposable
         LoomSampling.Configure(c =>
         {
             // Sample everything at 0% (skip everything)
-            c.SampleByDuration(TimeSpan.Zero, rate: 0.0);
+            c.SampleAll(rate: 0.0);
 
             // EXCEPT errors (always record)
             c.AlwaysRecordWhen((_, __, ex) => ex != null);
@@ -259,6 +259,43 @@ public sealed class SamplingTests : IDisposable
         // Slow: All 10 should be recorded
         Assert.True(slow.Count <= 10, $"Expected at most 10 slow metrics, got {slow.Count}");
         Assert.True(slow.Count > 0, $"Expected at least some slow metrics, got {slow.Count}");
+    }
+
+    [Fact]
+    public void SampleAll_DropsDurationLessMetrics()
+    {
+        // Arrange - SampleAll used to reuse a zero-threshold DurationThresholdRule, whose
+        // "duration.HasValue == false -> always record" early-out meant duration-less
+        // metrics (property changes) bypassed SampleAll's rate entirely.
+        LoomSampling.Configure(c => c.SampleAll(rate: 0.0));
+
+        var metricName = $"test.sampleall.noduration.{Guid.NewGuid()}";
+
+        // Act - RecordPropertyChange passes duration: null
+        LoomRuntime.RecordPropertyChange(metricName, 42);
+
+        // Assert
+        var recent = LoomMetrics.GetRecentMetrics(100);
+        Assert.Null(recent.FirstOrDefault(m => m.Name == metricName).Name);
+    }
+
+    [Fact]
+    public void SampleByDuration_WithZeroThreshold_StillRecordsSlowerThanZero()
+    {
+        // Arrange - SampleByDuration(TimeSpan.Zero, r) should mean "slower than zero is
+        // always recorded" per its own doc comment, not "sample everything uniformly"
+        // (that special case belonged only to SampleAll, and has been removed).
+        LoomSampling.Configure(c => c.SampleByDuration(TimeSpan.Zero, rate: 0.0));
+
+        var metricName = $"test.zerothreshold.{Guid.NewGuid()}";
+
+        // Act - 100ms is slower than the zero threshold, so it must always be recorded
+        // even though the sample rate is 0%.
+        LoomRuntime.RecordMethodExecution(metricName, TimeSpan.FromMilliseconds(100), null);
+
+        // Assert
+        var recent = LoomMetrics.GetRecentMetrics(100);
+        Assert.NotNull(recent.FirstOrDefault(m => m.Name == metricName).Name);
     }
 
     [Fact]

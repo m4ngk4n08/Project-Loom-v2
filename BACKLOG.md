@@ -1797,10 +1797,15 @@ returns zero hits.
 the dashboard library serves its UI and API with no CSP and no frame protection unless it adds them itself,
 and nothing tells it to. It has no effect today because the library is not packable yet.
 
-**Fix shape:** move the header middleware (and the CSP string) into `UseLoomDashboard`, keep
-`Loom.Dashboard/Program.cs` calling it, and add a test on a bare `WebApplication` that calls only
-`UseLoomDashboard` and asserts all four headers. Must be done **before** § 11.1 item 3 makes the library
-packable.
+**Fix shape:** ~~move the header middleware (and the CSP string) into `UseLoomDashboard`~~ — **wrong, found by
+Opus 2026-09-17:** `UseLoomDashboard` runs after `UseRouting` (`Program.cs:219-220`), and `UseStaticFiles`
+(`:207`) short-circuits before that, so the Angular bundle would lose every header. The headers must be
+installed ahead of static files. A library-wide CSP would also constrain the embedding app's own pages, so the
+header scope depends on the § 6.30 decision (dashboard mounted under a prefix vs at the root). Likely shape: a
+separate public `UseLoomDashboardSecurityHeaders()` the host calls first, scoped to the dashboard's paths once
+§ 6.30 settles them; `Loom.Dashboard/Program.cs` calls it in place of its inline `app.Use`; a test asserts the
+headers on an API response **and** on a static file. Must be done **before** § 11.1 item 3 makes the library
+packable, and together with § 6.30.
 
 **Found by** `Opus while updating README.md, 2026-09-17`.
 

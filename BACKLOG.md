@@ -1347,7 +1347,15 @@ same change as the fixes themselves, to keep the correctness fix reviewable on i
 
 ---
 
-### 6.13 The SPA Fallback Swallows Unmapped `/api/*` Routes and Returns 200 HTML 🟡 MEDIUM (OPEN — filed 2026-09-14)
+### 6.13 The SPA Fallback Swallows Unmapped `/api/*` Routes and Returns 200 HTML 🟡 MEDIUM (✅ CLOSED 2026-09-17 — `c362021`)
+
+**Closed by `6aa326a` + `70ae57d`, merged as `c362021`.** `MapSpaFallback` now answers any path under `/api`
+(segment match, case-insensitive) with a bare 404 before serving `index.html`; `SpaFallbackTests` covers 8
+cases including the Explain route with and without a client. Verified by Opus: 765 tests on Windows and on
+Linux; live dashboard with no Explain client → `POST /api/logs/explain` **404**, `GET /logs` 200 HTML, anonymous
+`GET /api/metrics/cpu` still 401. The Explain 404 message now names `loom-dashboard`. **The secondary LOW
+below was accepted, not fixed:** an anonymous caller can distinguish an unmapped route (404) from a protected
+one (401).
 
 `MapSpaFallback` (`Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs:595`) catches
 **every** unmatched request, including `POST /api/...`, and serves `index.html` with a **200**.

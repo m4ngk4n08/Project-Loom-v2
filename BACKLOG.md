@@ -1524,6 +1524,35 @@ than a correctness one.
 
 ---
 
+### 6.17 `--persist` Ignores zsh's `ZDOTDIR` and Reports Success 🟢 LOW (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
+`sonnet/auth-init-unix-persist` — **not yet on `main`**. Line number from the branch at `377a9d1`.
+
+`ResolveUnixProfilePath` maps zsh to `~/.zshrc` unconditionally (`:458`,
+`"zsh" => $"{home}/.zshrc"`). But zsh reads its startup files from **`$ZDOTDIR`** when that variable
+is set, and only falls back to `$HOME` when it is not. A zsh user who keeps their configuration
+under `ZDOTDIR` — a common way to keep `$HOME` tidy, e.g. `ZDOTDIR=~/.config/zsh` — gets the Loom
+block written to a `~/.zshrc` that zsh **never reads**. The command still prints
+`Wrote to …`, so nothing tells them. Their next terminal has no `LOOM_*` variables, and on Linux or
+macOS the dashboard then fails closed at startup.
+
+**This is the same defect class that branch already fixed for fish**, whose config path now
+honours `XDG_CONFIG_HOME` instead of assuming `~/.config`. zsh was not given the equivalent.
+
+**Why LOW:** it needs a zsh user with a non-default `ZDOTDIR`. The failure is a missing variable,
+which fails closed with an actionable message — not a silent wrong result or data loss.
+
+**Fix shape:** resolve zsh's file as `$ZDOTDIR/.zshrc` when `ZDOTDIR` is set and non-empty, falling
+back to `$HOME/.zshrc`. `ResolveUnixProfilePath` is already a pure function that takes its inputs as
+parameters for exactly this reason, so pass `ZDOTDIR` in the way `xdgConfigHome` already is, and
+add cases to its existing table test.
+
+**Found by** `/code-review high` on round 6 of that branch. Filed rather than fixed, for the same
+reason as § 6.16: a narrow precondition and a loud, fail-closed outcome.
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)

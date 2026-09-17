@@ -191,6 +191,23 @@ public sealed class ExplainEndpointTests
     }
 
     [Fact]
+    public async Task ThrowingJsonException_Returns502_WithoutEchoingMessage()
+    {
+        const string secretBody = "<html>secret-body</html>";
+        await using var api = await StartAsync(new ThrowingExplainClient(() => new JsonException(secretBody)));
+
+        var response = await api.Client.PostAsync("/api/logs/explain", ExplainRequestBody());
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(secretBody, text);
+
+        var body = JsonSerializer.Deserialize(text, LoomJsonSerializerContext.Default.ErrorResponse);
+        Assert.NotNull(body);
+        Assert.Equal("The explain provider returned an unreadable response.", body.Error);
+    }
+
+    [Fact]
     public async Task ClientThrowsTaskCanceledException_Returns504()
     {
         await using var api = await StartAsync(new ThrowingExplainClient(() => new TaskCanceledException()));

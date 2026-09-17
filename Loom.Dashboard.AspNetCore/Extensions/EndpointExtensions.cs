@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
 using Loom.Dashboard;
 using Loom.Security;
@@ -455,6 +456,15 @@ namespace Loom.Dashboard.Extensions
                         // Authored in AnthropicExplainClient; safe to show, never contains the key.
                         return Results.Json(
                             new ErrorResponse { Error = ex.Message },
+                            LoomJsonSerializerContext.Default.ErrorResponse,
+                            statusCode: 502);
+                    }
+                    catch (JsonException)
+                    {
+                        // A 200 whose body is not the provider's JSON (proxy, captive portal).
+                        // Never echo ex.Message - it can quote the body.
+                        return Results.Json(
+                            new ErrorResponse { Error = "The explain provider returned an unreadable response." },
                             LoomJsonSerializerContext.Default.ErrorResponse,
                             statusCode: 502);
                     }

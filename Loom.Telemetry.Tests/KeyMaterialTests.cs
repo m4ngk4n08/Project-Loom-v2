@@ -11,12 +11,18 @@ namespace Loom.Telemetry.Tests;
 // function with an injected path instead.
 public class KeyMaterialTests
 {
-    [Theory]
-    [InlineData(@"C:\Users\u\AppData\Local\Loom\dev-secrets\jwt.key")]
-    [InlineData("/var/secrets/loom/jwt.key")]
-    public void IsUsableDefaultPath_RootedPath_ReturnsTrue(string path)
+    [Fact]
+    public void IsUsableDefaultPath_RootedPath_ReturnsTrue()
     {
-        Assert.True(KeyMaterial.IsUsableDefaultPath(path));
+        Assert.True(KeyMaterial.IsUsableDefaultPath("/var/secrets/loom/jwt.key"));
+    }
+
+    // A drive-letter path is rooted only on Windows. On Linux/macOS it is a relative file
+    // name, and refusing it there is correct - so the expectation follows the OS.
+    [Fact]
+    public void IsUsableDefaultPath_DriveLetterPath_IsRootedOnlyOnWindows()
+    {
+        Assert.Equal(OperatingSystem.IsWindows(), KeyMaterial.IsUsableDefaultPath(@"C:\Users\u\AppData\Local\Loom\dev-secrets\jwt.key"));
     }
 
     [Theory]

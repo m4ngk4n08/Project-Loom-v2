@@ -109,6 +109,28 @@ public sealed class LogRecordTests
             new LogRecord("message", null!, LoomLogLevel.Information, 0L));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData((1 << 30) + 1)]
+    public void LogBufferConstructor_WithOutOfRangeCapacity_Throws(int capacity)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new LogBuffer(capacity));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4096)]
+    // Not testing 1 << 30 itself: at 88 bytes/record (see SizeOf_Is88Bytes_On64BitRuntime)
+    // that buffer alone would be ~94 GB, too big to actually allocate in a test run. 1 and
+    // a moderate in-range value cover the boundary logic without exercising the
+    // allocation size - the omission is intentional, not an oversight.
+    public void LogBufferConstructor_WithInRangeCapacity_DoesNotThrow(int capacity)
+    {
+        var exception = Record.Exception(() => new LogBuffer(capacity));
+        Assert.Null(exception);
+    }
+
     [Fact]
     public void LogBufferRoundTrip_PreservesNewFields()
     {

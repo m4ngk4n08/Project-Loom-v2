@@ -101,6 +101,28 @@ public sealed class MetricBufferTests
         Assert.Equal(16, buffer.Snapshot().Length);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData((1 << 30) + 1)]
+    public void Constructor_WithOutOfRangeCapacity_Throws(int capacity)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MetricBuffer(capacity));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4096)]
+    // Not testing 1 << 30 itself: at ~48 bytes/record that buffer alone would be ~48 GB,
+    // too big to actually allocate in a test run. 1 and a moderate in-range value cover
+    // the boundary logic without exercising the allocation size - the omission is
+    // intentional, not an oversight.
+    public void Constructor_WithInRangeCapacity_DoesNotThrow(int capacity)
+    {
+        var exception = Record.Exception(() => new MetricBuffer(capacity));
+        Assert.Null(exception);
+    }
+
     [Fact]
     public void ReadRecent_ReturnsFullCapacity_WhenWriteIndexTruncatesToASmallPositiveValue()
     {

@@ -1781,6 +1781,33 @@ confirmed by Opus in this session).
 
 ---
 
+### 6.29 The Dashboard Library Sets No Security Headers — Only the `loom-dashboard` Host Does 🟡 MEDIUM (OPEN — filed 2026-09-17)
+
+**Where the code lives:** `Loom.Dashboard/Program.cs:177-197`, at `68b9d8a`.
+
+`Loom.Dashboard/Program.cs` builds a `Content-Security-Policy` string (`:177-187`) and applies it along with
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer` in an `app.Use`
+at the front of its pipeline (`:189-197`). That is the `loom-dashboard` tool's own host.
+`Loom.Dashboard.AspNetCore` — the library behind `AddLoomDashboard()` / `UseLoomDashboard()` /
+`MapLoomDashboard()` — sets none of these headers.
+
+**Confirmed by code reading, not reproduced at runtime.**
+`Get-ChildItem Loom.Dashboard.AspNetCore -Recurse -Filter *.cs | Select-String 'X-Frame-Options|Content-Security-Policy'`
+returns zero hits.
+
+**Why MEDIUM:** it is a silent downgrade for the exact consumer § 11.1 is building for — an app that embeds
+the dashboard library serves its UI and API with no CSP and no frame protection unless it adds them itself,
+and nothing tells it to. It has no effect today because the library is not packable yet.
+
+**Fix shape:** move the header middleware (and the CSP string) into `UseLoomDashboard`, keep
+`Loom.Dashboard/Program.cs` calling it, and add a test on a bare `WebApplication` that calls only
+`UseLoomDashboard` and asserts all four headers. Must be done **before** § 11.1 item 3 makes the library
+packable.
+
+**Found by** `Opus while updating README.md, 2026-09-17`.
+
+---
+
 ## 7. Priority Summary
 
 ### High Priority (Pre-1.0 Release)
@@ -2247,7 +2274,8 @@ from the assembly names and namespaces (`Loom.*`), and that is deliberate.
    the package; (c) the Angular UI is embedded in the `Loom.Dashboard` tool, not in the library, so a library
    consumer currently gets the API but "Dashboard assets not found" for the page; (d) no consumer gate
    exists for it yet (the § 11.3 equivalent). **Before (a)–(d): review the library's public API** — see
-   `handoff.md`, "Pre-publish review plan".
+   `handoff.md`, "Pre-publish review plan". **Also before packing:** § 6.29 — the library sets no security
+   headers; only the `loom-dashboard` host does.
 4. ~~Add a consumer-AOT CI gate (see § 11.3).~~ **DONE 2026-09-02 — see § 11.3.** The
    `consumer-aot-gate` job packs `Loom.Telemetry`, restores it into a throwaway consumer
    from a folder feed, AOT-publishes, and runs the result.

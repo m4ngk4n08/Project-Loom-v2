@@ -18,6 +18,7 @@ using Loom.Web.Contracts.Dtos;
 using Loom.Web.Contracts.Explain;
 using Loom.Web.RealTime;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -31,7 +32,8 @@ namespace Loom.Dashboard.Extensions
             int targetPid,
             DateTime sessionStartedAtUtc,
             IFileProvider? embeddedProvider,
-            MetricsResponseBuilder metricsBuilder)
+            MetricsResponseBuilder metricsBuilder,
+            bool mapFallback = true)
         {
             var api = app.MapGroup("/api");
 
@@ -47,8 +49,158 @@ namespace Loom.Dashboard.Extensions
             app.MapPrometheusEndpoint();
             app.MapWebSocketEndpoint(metricsBuilder);
             app.MapLogsWebSocketEndpoint();
-            app.MapSpaFallback(embeddedProvider);
 
+            if (mapFallback)
+            {
+                app.MapSpaFallback(embeddedProvider);
+            }
+
+            return app;
+        }
+
+        // Static, allocation-free response headers, ported from Loom.Web.Api/Program.cs:83-85
+        // (originally inlined again in Loom.Dashboard/Program.cs; moved here so a host
+        // embedding this library gets the same protection without copying the block itself -
+        // BACKLOG.md § 6.29). Must be callable BEFORE UseStaticFiles and UseRouting: the whole
+        // point is a short-circuited static-file response still carries the headers. Does not
+        // depend on anything UseLoomDashboard()/MapLoomDashboard() sets up.
+        //
+        // The CSP is NOT Web.Api's. That host served JSON only, so "default-src 'none'" was
+        // correct there and would render this one blank. This policy is written against what the
+        // production Angular bundle actually emits, verified by reading dist/.../index.html:
+        //   script-src 'self'  - the bundle is one external <script type="module"> plus
+        //                        modulepreload links. No inline script and no inline event
+        //                        handler, which holds only because critical-CSS inlining is
+        //                        turned off in angular.json (it emitted a <style> block and an
+        //                        onload= attribute). Re-enabling it breaks this line.
+        //   style-src adds 'unsafe-inline' - Angular injects component styles as <style>
+        //                        elements at runtime. Removing it needs a per-request nonce
+        //                        (ngCspNonce), which means generating index.html per request
+        //                        instead of serving it statically. Not worth it on a loopback
+        //                        host; revisit if this is ever fronted by a proxy.
+        //   connect-src 'self'  - covers the REST API and, per CSP3, same-origin ws:// too.
+        //   img-src adds data:  - chart canvases export to data URIs.
+        // Everything else is denied: no plugins, no framing, no form posts, no <base> rewrite.
+        private const string ContentSecurityPolicy =
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data:; " +
+            "font-src 'self'; " +
+            "connect-src 'self'; " +
+            "object-src 'none'; " +
+            "base-uri 'self'; " +
+            "form-action 'none'; " +
+            "frame-ancestors 'none'";
+
+        // Prefixes this library actually maps, per MapDashboardEndpoints/MapLoomTokenEndpoints/
+        // MapPrometheusEndpoint/MapWebSocketEndpoint/MapLogsWebSocketEndpoint below and
+        // Loom.Security/TokenEndpoints.cs. Checked with StartsWithSegments (path-segment aware,
+        // so "/apix" does not match "/api"), matching the existing style at MapSpaFallback.
+        // Routing has not run yet at this middleware's position (it must stay ahead of
+        // UseRouting/UseStaticFiles - see the doc comment below), so this is the only signal
+        // available to tell a Loom request from a host's own.
+        private static readonly string[] LoomPathPrefixes =
+        [
+            "/api",
+            "/ws/metrics",
+            "/ws/logs",
+            "/prometheus"
+        ];
+
+        private static bool IsLoomRequestPath(PathString path)
+        {
+            foreach (var prefix in LoomPathPrefixes)
+            {
+                if (path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Shared by UseLoomDashboardSecurityHeaders's middleware and MapSpaFallback's handler so
+        // the header set and the CSP string live in exactly one place.
+        private static void ApplyLoomSecurityHeaders(IHeaderDictionary headers)
+        {
+            headers["X-Content-Type-Options"] = "nosniff";
+            headers["X-Frame-Options"] = "DENY";
+            headers["Referrer-Policy"] = "no-referrer";
+            headers["Content-Security-Policy"] = ContentSecurityPolicy;
+        }
+
+        // Consumer-facing: a host embedding this library calls this ahead of UseStaticFiles
+        // (and UseWebSockets/UseRouting) to get the same CSP/frame/sniff protection the
+        // loom-dashboard tool applies to itself. Independent of UseLoomDashboard/MapLoomDashboard
+        // on purpose - a host may want these headers even if it never maps Loom's endpoints.
+        //
+        // Scoped to Loom's own paths only: /api (covers every endpoint under MapDashboardEndpoints
+        // plus the two token endpoints in Loom.Security/TokenEndpoints.cs), /ws/metrics, /ws/logs,
+        // and /prometheus. A host's own routes are never touched - a page the host serves that
+        // relies on inline scripts or framing is unaffected by this call. Routing has not run yet
+        // at this pipeline position, so the check is on the raw request path, not endpoint
+        // metadata. The SPA fallback response (MapSpaFallback) is not reachable through this
+        // prefix check - its path is whatever went unmatched - so it sets the same four headers
+        // directly in its own handler via ApplyLoomSecurityHeaders.
+        //
+        // Does NOT cover static files served by a separately-registered UseStaticFiles call,
+        // even Loom's own embedded Angular bundle - that middleware can short-circuit the
+        // request before this prefix check would ever see a matching path (the bundle is mounted
+        // at the app root with content-hashed filenames, none of which are in LoomPathPrefixes).
+        // A host serving Loom's embedded UI - or its own static content it wants protected the
+        // same way - must register that specific mount through
+        // UseLoomDashboardStaticAssets(provider) below instead of a bare
+        // app.UseStaticFiles(...). A host's other, unrelated static-file mounts are correctly
+        // left untouched by both methods - that's the design, not a gap.
+        public static WebApplication UseLoomDashboardSecurityHeaders(this WebApplication app)
+        {
+            app.Use(async (context, next) =>
+            {
+                if (IsLoomRequestPath(context.Request.Path))
+                {
+                    ApplyLoomSecurityHeaders(context.Response.Headers);
+                }
+                await next();
+            });
+            return app;
+        }
+
+        // Serves one specific static-file mount with Loom's security headers. This exists
+        // because the file paths served this way (an Angular build's content-hashed bundle
+        // filenames, e.g. main-XXXX.js, plus index.html) can't be expressed as a static prefix
+        // list the way Loom's own fixed API/WS/prometheus routes can: the actual set of paths
+        // depends on what this specific IFileProvider's build output happens to contain, which
+        // is only knowable by reading its manifest at runtime, not by guessing filenames ahead of
+        // time. Rather than recognizing these responses by a static path list, this checks
+        // fileProvider.GetFileInfo(...).Exists directly - the same information UseStaticFiles
+        // itself will use to decide whether to serve the request - and only applies the headers
+        // when that specific provider actually has a file at the request path.
+        //
+        // This is a file-existence check, not a pipeline-position check: a request path that
+        // doesn't resolve to a file in this fileProvider gets no headers here, regardless of
+        // whether it 404s or falls through to a host route mapped later via UseRouting/Map*
+        // (which, per the ordering rules above, is always registered after this call). A host's
+        // own routes and its own, separately-registered static-file mounts are therefore never
+        // touched by this method, regardless of registration order relative to it.
+        public static WebApplication UseLoomDashboardStaticAssets(this WebApplication app, IFileProvider fileProvider)
+        {
+            app.Use(async (context, next) =>
+            {
+                var relativePath = context.Request.Path.Value?.TrimStart('/') ?? string.Empty;
+                if (relativePath.Length > 0
+                    && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method)))
+                {
+                    var fileInfo = fileProvider.GetFileInfo(relativePath);
+                    if (fileInfo.Exists && !fileInfo.IsDirectory)
+                    {
+                        ApplyLoomSecurityHeaders(context.Response.Headers);
+                    }
+                }
+                await next();
+            });
+            app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
             return app;
         }
 
@@ -68,12 +220,21 @@ namespace Loom.Dashboard.Extensions
         // map anything until UseLoomDashboard has installed the auth middleware - without it,
         // the LoomAllowAnonymous markers below are inert and every endpoint would be served to
         // anonymous callers.
+        //
+        // mapFallback (default true, matching prior behavior): whether to register the anonymous
+        // root-level MapFallback (serves index.html / a "build Angular and repack" 404 for
+        // anything under /api - see MapSpaFallback). Pass false when the host already maps its
+        // own SPA/catch-all fallback route (e.g. app.MapFallbackToFile("index.html")) - two
+        // MapFallback registrations have equal route precedence, and ASP.NET Core throws
+        // AmbiguousMatchException on every unmatched request when both are present
+        // (BACKLOG.md § 6.30).
         public static WebApplication MapLoomDashboard(
             this WebApplication app,
             int targetPid,
             IFileProvider? embeddedProvider = null,
             DateTime? sessionStartedAtUtc = null,
-            bool mapTokenEndpoints = true)
+            bool mapTokenEndpoints = true,
+            bool mapFallback = true)
         {
             if (!((IApplicationBuilder)app).Properties.ContainsKey(AuthenticationRegisteredKey))
             {
@@ -89,7 +250,7 @@ namespace Loom.Dashboard.Extensions
             {
                 app.MapLoomTokenEndpoints();
             }
-            app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc ?? DateTime.UtcNow, embeddedProvider, metricsBuilder);
+            app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc ?? DateTime.UtcNow, embeddedProvider, metricsBuilder, mapFallback);
             return app;
         }
 
@@ -727,6 +888,13 @@ namespace Loom.Dashboard.Extensions
         {
             app.MapFallback(async context =>
             {
+                // This handler's own response - a 404 for an unmatched /api path, the SPA's
+                // index.html, or a "build Angular" 404 - is always Loom's own content, so it
+                // always gets the same headers. Its path is whatever went unmatched (could be
+                // "/", could be anything a host also leaves unmatched), so it cannot rely on
+                // IsLoomRequestPath the way UseLoomDashboardSecurityHeaders does.
+                ApplyLoomSecurityHeaders(context.Response.Headers);
+
                 if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.StatusCode = 404;

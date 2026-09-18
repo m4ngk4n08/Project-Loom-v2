@@ -1,0 +1,10 @@
+<Project>
+	<!-- Applies to every project in the solution. The three published packages
+	     (LoomDiagnostics.Telemetry / .Dashboard / .Cli) have not set a version anywhere,
+	     so `dotnet pack` was defaulting to 1.0.0 - a stable-release number before the
+	     packaging shape (BACKLOG.md 11.1 item 3: publish-vs-bundle, UI-or-not for
+	     Loom.Dashboard.AspNetCore) has been decided. Prerelease until that settles. -->
+	<PropertyGroup>
+		<Version>1.0.0-preview.1</Version>
+	</PropertyGroup>
+</Project>

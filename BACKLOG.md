@@ -2827,6 +2827,44 @@ has tests).
 
 ---
 
+### 2026-09-18: Version Number, Dashboard-Library Shape, and § 6.25 Closed
+
+**Decisions (recommended by Opus, adopted by the user this session):**
+
+1. **Version: `1.0.0-preview.1`**, set once in a new root `Directory.Build.props` rather than
+   per-project. No project previously set `<Version>`/`<PackageVersion>` anywhere, so `dotnet
+   pack` was silently defaulting to a stable `1.0.0` even though the three pre-publish reviews
+   had only just closed and the two decisions below were still open. A stable 1.0.0 asserts a
+   SemVer guarantee the project can't back yet; a prerelease tag lets a package go out (if
+   wanted) without that promise. Verified: `dotnet pack Loom.slnx -c Release` now produces
+   `LoomDiagnostics.{Telemetry,Cli,Dashboard}.1.0.0-preview.1`.
+2. **`Loom.Dashboard.AspNetCore` publishes as its own package, dependencies via normal
+   `PackageReference`, not bundled/ILRepacked.** Bundling a class library fights the existing
+   per-project package structure (`LoomDiagnostics.Telemetry` etc. are already independent);
+   a consumer who already depends on one of the seven directly would get duplicate types from
+   a bundled copy.
+3. **`Loom.Dashboard.AspNetCore` ships API-only — no Angular UI.** The library's purpose (§
+   11.1) is letting a host app embed `AddLoomDashboard()`/`MapLoomDashboard()` into its own
+   pipeline; an embedded UI a consumer can't theme or route around is worse than pointing
+   them at the standalone `loom-dashboard` tool for the full UI, and it sidesteps the
+   `wwwroot`/Angular-build coupling trap already on record (`CLAUDE.md`, rediscover-list item 8).
+   **This affects § 6.29 and § 6.30's fix shape** — the header middleware and the SPA-fallback
+   mounting decision should both be scoped to "library has no UI to protect or fall back to,"
+   not deferred pending a UI answer.
+4. **§ 6.25 fixed, not just decided.** `LoginThrottle.IsBlocked`/`RecordFailure` made
+   `internal`; `Loom.Security.csproj` gained `InternalsVisibleTo("Loom.Telemetry.Tests")`.
+   Verified: only `LoginThrottleTests.cs` called either method (grepped the whole repo first);
+   `dotnet build Loom.slnx -c Debug` clean (0 errors, the 2 known xUnit1031 warnings only);
+   `dotnet test --filter FullyQualifiedName~LoginThrottleTests` → 10/10 passed (non-zero count
+   confirmed, per the filter-trap in `CLAUDE.md`). Done ahead of publish, per the entry's own
+   reasoning: `InternalsVisibleTo` added after a version ships doesn't help versions already out.
+
+**Still open:** § 6.29 and § 6.30 need their fix shapes re-read against decision 3 above, then
+implementing — not done in this pass. BACKLOG § 11.1 item 3 (making the library packable with a
+consumer gate) is unstarted and still next.
+
+---
+
 **Document Owner:** Project Loom v2 Team  
 **Last Review:** 2026-08-24  
 **Next Review:** Phase 13 completion or pre-1.0 release

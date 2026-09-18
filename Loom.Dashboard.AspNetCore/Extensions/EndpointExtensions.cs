@@ -31,7 +31,8 @@ namespace Loom.Dashboard.Extensions
             int targetPid,
             DateTime sessionStartedAtUtc,
             IFileProvider? embeddedProvider,
-            MetricsResponseBuilder metricsBuilder)
+            MetricsResponseBuilder metricsBuilder,
+            bool mapFallback = true)
         {
             var api = app.MapGroup("/api");
 
@@ -47,8 +48,65 @@ namespace Loom.Dashboard.Extensions
             app.MapPrometheusEndpoint();
             app.MapWebSocketEndpoint(metricsBuilder);
             app.MapLogsWebSocketEndpoint();
-            app.MapSpaFallback(embeddedProvider);
 
+            if (mapFallback)
+            {
+                app.MapSpaFallback(embeddedProvider);
+            }
+
+            return app;
+        }
+
+        // Static, allocation-free response headers, ported from Loom.Web.Api/Program.cs:83-85
+        // (originally inlined again in Loom.Dashboard/Program.cs; moved here so a host
+        // embedding this library gets the same protection without copying the block itself -
+        // BACKLOG.md § 6.29). Must be callable BEFORE UseStaticFiles and UseRouting: the whole
+        // point is a short-circuited static-file response still carries the headers. Does not
+        // depend on anything UseLoomDashboard()/MapLoomDashboard() sets up.
+        //
+        // The CSP is NOT Web.Api's. That host served JSON only, so "default-src 'none'" was
+        // correct there and would render this one blank. This policy is written against what the
+        // production Angular bundle actually emits, verified by reading dist/.../index.html:
+        //   script-src 'self'  - the bundle is one external <script type="module"> plus
+        //                        modulepreload links. No inline script and no inline event
+        //                        handler, which holds only because critical-CSS inlining is
+        //                        turned off in angular.json (it emitted a <style> block and an
+        //                        onload= attribute). Re-enabling it breaks this line.
+        //   style-src adds 'unsafe-inline' - Angular injects component styles as <style>
+        //                        elements at runtime. Removing it needs a per-request nonce
+        //                        (ngCspNonce), which means generating index.html per request
+        //                        instead of serving it statically. Not worth it on a loopback
+        //                        host; revisit if this is ever fronted by a proxy.
+        //   connect-src 'self'  - covers the REST API and, per CSP3, same-origin ws:// too.
+        //   img-src adds data:  - chart canvases export to data URIs.
+        // Everything else is denied: no plugins, no framing, no form posts, no <base> rewrite.
+        private const string ContentSecurityPolicy =
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data:; " +
+            "font-src 'self'; " +
+            "connect-src 'self'; " +
+            "object-src 'none'; " +
+            "base-uri 'self'; " +
+            "form-action 'none'; " +
+            "frame-ancestors 'none'";
+
+        // Consumer-facing: a host embedding this library calls this ahead of UseStaticFiles
+        // (and UseWebSockets/UseRouting) to get the same CSP/frame/sniff protection the
+        // loom-dashboard tool applies to itself. Independent of UseLoomDashboard/MapLoomDashboard
+        // on purpose - a host may want these headers even if it never maps Loom's endpoints.
+        public static WebApplication UseLoomDashboardSecurityHeaders(this WebApplication app)
+        {
+            app.Use(async (context, next) =>
+            {
+                var headers = context.Response.Headers;
+                headers["X-Content-Type-Options"] = "nosniff";
+                headers["X-Frame-Options"] = "DENY";
+                headers["Referrer-Policy"] = "no-referrer";
+                headers["Content-Security-Policy"] = ContentSecurityPolicy;
+                await next();
+            });
             return app;
         }
 
@@ -68,12 +126,21 @@ namespace Loom.Dashboard.Extensions
         // map anything until UseLoomDashboard has installed the auth middleware - without it,
         // the LoomAllowAnonymous markers below are inert and every endpoint would be served to
         // anonymous callers.
+        //
+        // mapFallback (default true, matching prior behavior): whether to register the anonymous
+        // root-level MapFallback (serves index.html / a "build Angular and repack" 404 for
+        // anything under /api - see MapSpaFallback). Pass false when the host already maps its
+        // own SPA/catch-all fallback route (e.g. app.MapFallbackToFile("index.html")) - two
+        // MapFallback registrations have equal route precedence, and ASP.NET Core throws
+        // AmbiguousMatchException on every unmatched request when both are present
+        // (BACKLOG.md § 6.30).
         public static WebApplication MapLoomDashboard(
             this WebApplication app,
             int targetPid,
             IFileProvider? embeddedProvider = null,
             DateTime? sessionStartedAtUtc = null,
-            bool mapTokenEndpoints = true)
+            bool mapTokenEndpoints = true,
+            bool mapFallback = true)
         {
             if (!((IApplicationBuilder)app).Properties.ContainsKey(AuthenticationRegisteredKey))
             {
@@ -89,7 +156,7 @@ namespace Loom.Dashboard.Extensions
             {
                 app.MapLoomTokenEndpoints();
             }
-            app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc ?? DateTime.UtcNow, embeddedProvider, metricsBuilder);
+            app.MapDashboardEndpoints(targetPid, sessionStartedAtUtc ?? DateTime.UtcNow, embeddedProvider, metricsBuilder, mapFallback);
             return app;
         }
 

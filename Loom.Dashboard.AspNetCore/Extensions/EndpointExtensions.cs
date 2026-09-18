@@ -18,6 +18,7 @@ using Loom.Web.Contracts.Dtos;
 using Loom.Web.Contracts.Explain;
 using Loom.Web.RealTime;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -188,9 +189,14 @@ namespace Loom.Dashboard.Extensions
             app.Use(async (context, next) =>
             {
                 var relativePath = context.Request.Path.Value?.TrimStart('/') ?? string.Empty;
-                if (relativePath.Length > 0 && fileProvider.GetFileInfo(relativePath).Exists)
+                if (relativePath.Length > 0
+                    && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method)))
                 {
-                    ApplyLoomSecurityHeaders(context.Response.Headers);
+                    var fileInfo = fileProvider.GetFileInfo(relativePath);
+                    if (fileInfo.Exists && !fileInfo.IsDirectory)
+                    {
+                        ApplyLoomSecurityHeaders(context.Response.Headers);
+                    }
                 }
                 await next();
             });

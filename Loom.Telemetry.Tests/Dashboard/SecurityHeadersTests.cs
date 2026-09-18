@@ -296,6 +296,38 @@ public sealed class SecurityHeadersTests
         AssertNoLoomHeadersPresent(hostResponse);
     }
 
+    // Fourth follow-up (§ 6.29, directory/verb gaps): fileProvider.GetFileInfo(path).Exists is
+    // also true for a directory entry, but UseStaticFiles never serves directories (no directory
+    // browsing configured here) - so a request path matching a folder name must not get Loom's
+    // headers stamped for a response this provider will never produce.
+    [Fact]
+    public async Task DirectoryMatchingPath_NeverGetsLoomSecurityHeaders()
+    {
+        await using var api = await StartWithStaticAssetsAsync();
+
+        // LoomAssetsDir itself has no subdirectory; create one so a request path can resolve to
+        // a directory entry in the file provider rather than a file.
+        var subDir = Path.Combine(api.LoomAssetsDir, "subdir");
+        Directory.CreateDirectory(subDir);
+
+        var response = await api.Client.GetAsync("/subdir");
+
+        AssertNoLoomHeadersPresent(response);
+    }
+
+    // Same follow-up: StaticFileMiddleware only ever serves GET/HEAD, so a POST to a path that
+    // otherwise resolves to an existing file must not get Loom's headers either - this provider
+    // will never produce a response for it.
+    [Fact]
+    public async Task NonGetHeadRequest_ToExistingAssetPath_NeverGetsLoomSecurityHeaders()
+    {
+        await using var api = await StartWithStaticAssetsAsync();
+
+        var response = await api.Client.PostAsync("/index.html", content: null);
+
+        AssertNoLoomHeadersPresent(response);
+    }
+
     [Fact]
     public async Task SpaFallback_UnmatchedRoute_CarriesAllFourSecurityHeaders()
     {

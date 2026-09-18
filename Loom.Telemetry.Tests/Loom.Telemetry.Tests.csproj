@@ -23,6 +23,11 @@
 		     [LoomProfile] interceptors activate here too. Must match
 		     LoomProfileGenerator.InterceptorsNamespace exactly. -->
 		<InterceptorsNamespaces>$(InterceptorsNamespaces);Loom.Telemetry.GeneratedInterceptors</InterceptorsNamespaces>
+		<!-- SecurityHeadersTests.cs has inline app.MapGet(...) call sites for test-only
+		     endpoints. Without this, they get no compile-time interceptor and fall back to the
+		     reflection-based delegate binding the trim analyzer flags as AOT-unsafe (IL2026/IL3050)
+		     under the strict Release build. See CLAUDE.md "The Map* trim-warning trap". -->
+		<EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
 	</PropertyGroup>
 
 	<ItemGroup>

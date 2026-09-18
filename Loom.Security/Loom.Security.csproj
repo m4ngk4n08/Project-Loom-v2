@@ -22,4 +22,8 @@
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 		<ProjectReference Include="..\Loom.Web.Contracts\Loom.Web.Contracts.csproj" />
 	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Loom.Telemetry.Tests" />
+	</ItemGroup>
 </Project>

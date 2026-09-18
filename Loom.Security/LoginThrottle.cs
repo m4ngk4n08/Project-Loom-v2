@@ -15,7 +15,7 @@ public sealed class LoginThrottle(TimeProvider clock)
     private readonly Dictionary<string, (int Failures, DateTimeOffset WindowStart)> _clients = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
 
-    public bool IsBlocked(string client, out TimeSpan retryAfter)
+    internal bool IsBlocked(string client, out TimeSpan retryAfter)
     {
         retryAfter = TimeSpan.Zero;
         var now = clock.GetUtcNow();
@@ -31,7 +31,7 @@ public sealed class LoginThrottle(TimeProvider clock)
         }
     }
 
-    public void RecordFailure(string client)
+    internal void RecordFailure(string client)
     {
         var now = clock.GetUtcNow();
 

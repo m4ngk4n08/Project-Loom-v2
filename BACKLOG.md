@@ -1779,7 +1779,7 @@ not change it again after publishing.
 **Found by** `/code-review high` on `sonnet/telemetry-review-fixes` (reported by the reviewing session; code
 confirmed by Opus in this session).
 
-### 6.29 The Dashboard Library Sets No Security Headers — Only the `loom-dashboard` Host Does 🟡 MEDIUM (OPEN — filed 2026-09-17)
+### 6.29 The Dashboard Library Sets No Security Headers — Only the `loom-dashboard` Host Does 🟢 FIXED, not yet merged (filed 2026-09-17, fixed 2026-09-18, tip `6401778`)
 
 **Where the code lives:** `Loom.Dashboard/Program.cs:177-197`, at `68b9d8a`.
 
@@ -1807,9 +1807,54 @@ separate public `UseLoomDashboardSecurityHeaders()` the host calls first, scoped
 headers on an API response **and** on a static file. Must be done **before** § 11.1 item 3 makes the library
 packable, and together with § 6.30.
 
+**FIXED 2026-09-18 across five commits on `sonnet/dashboard-headers-fallback` (unmerged) — took five rounds,
+each caught by `/code-review high` re-run against the branch, not by re-reading the diff:**
+
+1. `d6b9aa2` — extracted `UseLoomDashboardSecurityHeaders()` per this entry's fix shape, but shipped it as an
+   unconditional `app.Use` with no path check, forcing Loom's CSP onto every response the host serves —
+   exactly the risk this entry's own "Why MEDIUM" paragraph named. Caught by review.
+2. `60e02b4` — scoped it to Loom's own known route prefixes (`/api`, `/ws/metrics`, `/ws/logs`,
+   `/prometheus`). This fixed the host-route leak but missed that `Loom.Dashboard/Program.cs` also serves
+   the embedded Angular bundle via `UseStaticFiles` mounted at the app root, with no prefix — those
+   responses (the tool's own real UI) silently lost the headers they'd always had before this fix round
+   started. Caught by review, reproduced with a live probe (`GET /index.html` → `hasCsp=False`).
+3. `a96727f` — added `UseLoomDashboardStaticAssets(IFileProvider)`, wrapping the header-setting directly
+   around a specific `UseStaticFiles` registration instead of guessing by path. But the header-setting ran
+   unconditionally before `next()`, so it leaked onto any host route mapped *after* this call too —
+   reintroducing round 1's bug through a different code path. Caught by review with a reproduced test
+   (wrapper → `UseRouting` → host route → host response carried Loom's headers).
+4. `5155c84` — re-gated on `fileProvider.GetFileInfo(path).Exists` (the same data `UseStaticFiles` itself
+   reads) instead of pipeline position. This design held — confirmed by the next two review rounds as the
+   correct fix for the leak. Introduced a side effect: the new regression tests added raw `MapGet(...)`
+   calls directly in `Loom.Telemetry.Tests` (no `EnableRequestDelegateGenerator` there), breaking the
+   strict-Release build (`CLAUDE.md`'s "Map* trim-warning trap") with 6 `IL2026`/`IL3050` errors. Also
+   flagged: the `Exists` gate matches directories (never actually served) and ignores HTTP verb (only
+   GET/HEAD are ever served by `UseStaticFiles`) — both cosmetic (headers get correctly reapplied by
+   whatever does handle the request) but broke the method's own stated invariant.
+5. `6401778` — added `EnableRequestDelegateGenerator=true` to `Loom.Telemetry.Tests.csproj` (verified by the
+   `InterceptsLocationAttribute` artefact, not just the warning going quiet, per `CLAUDE.md`'s own rule);
+   gated the `Exists` check on `!IsDirectory` and GET/HEAD only.
+
+**Verified clean by `/code-review high` on `6401778`:** strict build 0 errors (the 2 documented `xUnit1031`
+warnings + 1 environmental embedded-manifest warning, matching `CLAUDE.md`'s known baseline), all 13 new
+tests across `SecurityHeadersTests.cs` and `MapLoomDashboardFallbackTests.cs` pass, no regressions.
+
+**One residual, accepted, not a bug:** headers are opt-in per static-file mount, with no runtime enforcement
+— a host that calls a bare `app.UseStaticFiles(provider)` instead of
+`app.UseLoomDashboardStaticAssets(provider)` gets a working but silently unprotected dashboard. Not fixed;
+recorded here rather than left implicit. If revisited, the fix is documentation/API-naming (e.g. making the
+bare-`UseStaticFiles` path harder to reach for granted), not another gating rule — this is a "did you call
+the right method" problem, not a "does the gate work" problem.
+
+**Also confirmed still present, deliberately not fixed:** `UseLoomDashboardStaticAssets` calls
+`fileProvider.GetFileInfo` once in its own gate and `UseStaticFiles` calls it again internally — a doubled
+file-provider lookup per asset request. Cheap (a stat call) and the only ways to eliminate it (threading a
+resolved `IFileInfo` through to `UseStaticFiles`, or replacing it with custom serving code) are each bigger,
+riskier changes than this fix round took on. Left as accepted overhead.
+
 **Found by** `Opus while updating README.md, 2026-09-17`.
 
-### 6.30 `MapLoomDashboard` Always Adds an Anonymous Root Catch-All 🟡 MEDIUM (OPEN — filed 2026-09-17)
+### 6.30 `MapLoomDashboard` Always Adds an Anonymous Root Catch-All 🟢 FIXED, not yet merged (filed 2026-09-17, fixed 2026-09-18)
 
 **Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs` — `MapLoomDashboard` (`:92`)
 calls `MapDashboardEndpoints` (`:29`), which calls `app.MapSpaFallback(...)` unconditionally (`:50`); that maps a
@@ -1830,6 +1875,15 @@ own SPA. Out of scope for the dashboard fix round by design, not an oversight.
 **Fix shape:** mount the dashboard under a configurable path prefix (e.g. `/loom`) with the fallback scoped to
 that prefix, or make the fallback opt-in via an options flag that the tool sets. Decide with § 11.1 item 3, and
 add a test mapping both a host fallback and `MapLoomDashboard`. Measure the 500 before and after.
+
+**FIXED 2026-09-18, `d6b9aa2` on `sonnet/dashboard-headers-fallback` (unmerged).** Took the opt-in-flag shape,
+not the path-prefix shape — the path-prefix alternative was dropped per the 2026-09-18 "no UI" packaging
+decision (`BACKLOG.md` § 9), since a configurable mount prefix solves a UI-hosting problem the library no
+longer has. `MapLoomDashboard` gained `bool mapFallback = true` (default preserves `loom-dashboard`'s existing
+behaviour unchanged); a host with its own SPA fallback passes `mapFallback: false`. **Actually reproduced, not
+just asserted:** `/code-review high` on the branch ran the new tests directly and confirmed the
+`AmbiguousMatchException` → 500 scenario occurs with the old unconditional behaviour and is gone with
+`mapFallback: false`.
 
 **Found by** `/code-review high Loom.Dashboard.AspNetCore` (pre-publish review #3, finding 9; transcript
 `cd89c1d7`), re-checked against `main` by Opus.

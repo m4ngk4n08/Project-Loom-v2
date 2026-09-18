@@ -92,19 +92,65 @@ namespace Loom.Dashboard.Extensions
             "form-action 'none'; " +
             "frame-ancestors 'none'";
 
+        // Prefixes this library actually maps, per MapDashboardEndpoints/MapLoomTokenEndpoints/
+        // MapPrometheusEndpoint/MapWebSocketEndpoint/MapLogsWebSocketEndpoint below and
+        // Loom.Security/TokenEndpoints.cs. Checked with StartsWithSegments (path-segment aware,
+        // so "/apix" does not match "/api"), matching the existing style at MapSpaFallback.
+        // Routing has not run yet at this middleware's position (it must stay ahead of
+        // UseRouting/UseStaticFiles - see the doc comment below), so this is the only signal
+        // available to tell a Loom request from a host's own.
+        private static readonly string[] LoomPathPrefixes =
+        [
+            "/api",
+            "/ws/metrics",
+            "/ws/logs",
+            "/prometheus"
+        ];
+
+        private static bool IsLoomRequestPath(PathString path)
+        {
+            foreach (var prefix in LoomPathPrefixes)
+            {
+                if (path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Shared by UseLoomDashboardSecurityHeaders's middleware and MapSpaFallback's handler so
+        // the header set and the CSP string live in exactly one place.
+        private static void ApplyLoomSecurityHeaders(IHeaderDictionary headers)
+        {
+            headers["X-Content-Type-Options"] = "nosniff";
+            headers["X-Frame-Options"] = "DENY";
+            headers["Referrer-Policy"] = "no-referrer";
+            headers["Content-Security-Policy"] = ContentSecurityPolicy;
+        }
+
         // Consumer-facing: a host embedding this library calls this ahead of UseStaticFiles
         // (and UseWebSockets/UseRouting) to get the same CSP/frame/sniff protection the
         // loom-dashboard tool applies to itself. Independent of UseLoomDashboard/MapLoomDashboard
         // on purpose - a host may want these headers even if it never maps Loom's endpoints.
+        //
+        // Scoped to Loom's own paths only: /api (covers every endpoint under MapDashboardEndpoints
+        // plus the two token endpoints in Loom.Security/TokenEndpoints.cs), /ws/metrics, /ws/logs,
+        // and /prometheus. A host's own routes are never touched - a page the host serves that
+        // relies on inline scripts or framing is unaffected by this call. Routing has not run yet
+        // at this pipeline position, so the check is on the raw request path, not endpoint
+        // metadata. The SPA fallback response (MapSpaFallback) is not reachable through this
+        // prefix check - its path is whatever went unmatched - so it sets the same four headers
+        // directly in its own handler via ApplyLoomSecurityHeaders.
         public static WebApplication UseLoomDashboardSecurityHeaders(this WebApplication app)
         {
             app.Use(async (context, next) =>
             {
-                var headers = context.Response.Headers;
-                headers["X-Content-Type-Options"] = "nosniff";
-                headers["X-Frame-Options"] = "DENY";
-                headers["Referrer-Policy"] = "no-referrer";
-                headers["Content-Security-Policy"] = ContentSecurityPolicy;
+                if (IsLoomRequestPath(context.Request.Path))
+                {
+                    ApplyLoomSecurityHeaders(context.Response.Headers);
+                }
                 await next();
             });
             return app;
@@ -794,6 +840,13 @@ namespace Loom.Dashboard.Extensions
         {
             app.MapFallback(async context =>
             {
+                // This handler's own response - a 404 for an unmatched /api path, the SPA's
+                // index.html, or a "build Angular" 404 - is always Loom's own content, so it
+                // always gets the same headers. Its path is whatever went unmatched (could be
+                // "/", could be anything a host also leaves unmatched), so it cannot rely on
+                // IsLoomRequestPath the way UseLoomDashboardSecurityHeaders does.
+                ApplyLoomSecurityHeaders(context.Response.Headers);
+
                 if (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.StatusCode = 404;

@@ -170,7 +170,7 @@ IFileProvider? embeddedProvider = null;
 try
 {
     embeddedProvider = new ManifestEmbeddedFileProvider(Assembly.GetExecutingAssembly(), "wwwroot");
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = embeddedProvider });
+    app.UseLoomDashboardStaticAssets(embeddedProvider);
 }
 catch (InvalidOperationException)
 {

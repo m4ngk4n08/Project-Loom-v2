@@ -26,6 +26,15 @@ namespace Loom.Telemetry.Tests.Dashboard;
 /// host serves, not just Loom's own routes. UseLoomDashboardSecurityHeaders() now scopes to
 /// Loom's known path prefixes (/api, /ws/metrics, /ws/logs, /prometheus); a host's own routes
 /// (e.g. "/custom" below) must never see these headers.
+///
+/// Second follow-up (§ 6.29, static-asset gap): UseLoomDashboardSecurityHeaders's path-prefix
+/// scoping has no entry for the Angular bundle's own paths (content-hashed filenames, index.html)
+/// because Loom.Dashboard/Program.cs mounts that provider with UseStaticFiles at the app root,
+/// outside every scoped prefix, and static files are served before routing runs - so the
+/// middleware never sees a matching path and MapSpaFallback's own header-setting never fires
+/// either (the static-file middleware already short-circuited the request). The fix is
+/// UseLoomDashboardStaticAssets(provider), which ties header-setting directly to that specific
+/// UseStaticFiles registration instead of trying to recognize its paths.
 /// </summary>
 public sealed class SecurityHeadersTests
 {
@@ -55,8 +64,6 @@ public sealed class SecurityHeadersTests
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "loom-security-headers-tests-" + Guid.NewGuid());
         Directory.CreateDirectory(tempDir);
-        File.WriteAllText(Path.Combine(tempDir, "index.html"), "<html>static</html>");
-        var provider = new PhysicalFileProvider(tempDir);
 
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
@@ -64,15 +71,8 @@ public sealed class SecurityHeadersTests
 
         var app = builder.Build();
 
-        // Applied ahead of static files/routing, matching the required pipeline position.
+        // Applied ahead of routing, matching the required pipeline position.
         app.UseLoomDashboardSecurityHeaders();
-
-        // Mounted under /api - one of Loom's own prefixes - so this still exercises "a
-        // short-circuited static-file response carries the headers" now that the middleware is
-        // scoped by path. (Loom's real static assets are served at the process root by the
-        // loom-dashboard tool itself, outside this library's scoped prefixes entirely; see the
-        // handback note on that gap.)
-        app.UseStaticFiles(new StaticFileOptions { FileProvider = provider, RequestPath = "/api" });
 
         app.UseRouting();
         app.MapGet("/api/ping", () => "pong");
@@ -89,6 +89,80 @@ public sealed class SecurityHeadersTests
             App = app,
             Client = new HttpClient { BaseAddress = new Uri(address) },
             TempDir = tempDir
+        };
+    }
+
+    private sealed class StaticAssetApi : IAsyncDisposable
+    {
+        public required WebApplication App { get; init; }
+        public required HttpClient Client { get; init; }
+        public required string LoomAssetsDir { get; init; }
+        public required string HostAssetsDir { get; init; }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await App.StopAsync();
+            await App.DisposeAsync();
+            foreach (var dir in new[] { LoomAssetsDir, HostAssetsDir })
+            {
+                try
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
+                catch
+                {
+                    // best-effort cleanup; not the point of the test
+                }
+            }
+        }
+    }
+
+    // Mounts Loom's static assets exactly the way Loom.Dashboard/Program.cs:173 does - via
+    // UseLoomDashboardStaticAssets, at the app root, no RequestPath - alongside a second,
+    // unrelated static-file mount registered the plain way (bare UseStaticFiles, not through the
+    // wrapper) under its own RequestPath, standing in for a host's own static content.
+    private static async Task<StaticAssetApi> StartWithStaticAssetsAsync()
+    {
+        var loomAssetsDir = Path.Combine(Path.GetTempPath(), "loom-security-headers-loom-assets-" + Guid.NewGuid());
+        Directory.CreateDirectory(loomAssetsDir);
+        File.WriteAllText(Path.Combine(loomAssetsDir, "index.html"), "<html>loom static</html>");
+        var loomProvider = new PhysicalFileProvider(loomAssetsDir);
+
+        var hostAssetsDir = Path.Combine(Path.GetTempPath(), "loom-security-headers-host-assets-" + Guid.NewGuid());
+        Directory.CreateDirectory(hostAssetsDir);
+        File.WriteAllText(Path.Combine(hostAssetsDir, "page.html"), "<html>host static</html>");
+        var hostProvider = new PhysicalFileProvider(hostAssetsDir);
+
+        var builder = WebApplication.CreateBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+
+        var app = builder.Build();
+
+        // A host's own, unrelated static-file mount, registered the plain way (not through the
+        // wrapper) and placed ahead of Loom's in the pipeline - exactly how a host embedding this
+        // library would register its own, pre-existing static content. Because
+        // UseLoomDashboardStaticAssets's header-setting middleware is unconditional (it has no
+        // path check - see its doc comment), only requests that reach it get the headers; a host
+        // mount short-circuiting earlier in the pipeline is never touched.
+        app.UseStaticFiles(new StaticFileOptions { FileProvider = hostProvider, RequestPath = "/host-content" });
+
+        // Root-mounted, via the wrapper - reproduces Program.cs:173 exactly.
+        app.UseLoomDashboardStaticAssets(loomProvider);
+
+        await app.StartAsync();
+
+        var address = app.Services.GetRequiredService<IServer>()
+            .Features.Get<IServerAddressesFeature>()!
+            .Addresses.First();
+
+        return new StaticAssetApi
+        {
+            App = app,
+            Client = new HttpClient { BaseAddress = new Uri(address) },
+            LoomAssetsDir = loomAssetsDir,
+            HostAssetsDir = hostAssetsDir
         };
     }
 
@@ -125,14 +199,38 @@ public sealed class SecurityHeadersTests
         AssertAllHeadersPresent(response);
     }
 
+    // The regression § 6.29's second follow-up reproduced: mounting the embedded Angular
+    // provider at the app root via a bare UseStaticFiles (exactly Program.cs:173, before this
+    // fix) short-circuits the request before UseLoomDashboardSecurityHeaders's prefix check or
+    // MapSpaFallback's own header-setting ever run, so the response carries no headers at all.
+    // Ported here as a real test against UseLoomDashboardStaticAssets: fails against 60e02b4's
+    // code (no wrapper existed, so a root-mounted UseStaticFiles is bare) and passes once the
+    // static-file registration goes through the wrapper.
     [Fact]
-    public async Task StaticFileResponse_ShortCircuitedBeforeRouting_StillCarriesAllFourSecurityHeaders()
+    public async Task StaticAsset_MountedAtRootViaWrapper_CarriesAllFourSecurityHeaders()
     {
-        await using var api = await StartAsync();
+        await using var api = await StartWithStaticAssetsAsync();
 
-        var response = await api.Client.GetAsync("/api/index.html");
+        var response = await api.Client.GetAsync("/index.html");
 
         AssertAllHeadersPresent(response);
+    }
+
+    // Proves the fix didn't regress back to "everything gets headers" - the failure mode the
+    // very first round's review caught. A host's own static-file mount, registered the plain way
+    // and never routed through UseLoomDashboardStaticAssets, must carry none of Loom's headers,
+    // even though Loom's own root-mounted static assets (served through the wrapper, in the same
+    // pipeline) do.
+    [Fact]
+    public async Task HostOwnStaticFileMount_NotThroughWrapper_NeverGetsLoomSecurityHeaders()
+    {
+        await using var api = await StartWithStaticAssetsAsync();
+
+        var loomResponse = await api.Client.GetAsync("/index.html");
+        var hostResponse = await api.Client.GetAsync("/host-content/page.html");
+
+        AssertAllHeadersPresent(loomResponse);
+        AssertNoLoomHeadersPresent(hostResponse);
     }
 
     // The bug § 6.29's code review found: the first cut stamped Loom's CSP/frame/sniff headers

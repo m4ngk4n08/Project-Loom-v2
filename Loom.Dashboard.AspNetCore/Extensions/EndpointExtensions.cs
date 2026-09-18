@@ -143,6 +143,16 @@ namespace Loom.Dashboard.Extensions
         // metadata. The SPA fallback response (MapSpaFallback) is not reachable through this
         // prefix check - its path is whatever went unmatched - so it sets the same four headers
         // directly in its own handler via ApplyLoomSecurityHeaders.
+        //
+        // Does NOT cover static files served by a separately-registered UseStaticFiles call,
+        // even Loom's own embedded Angular bundle - that middleware can short-circuit the
+        // request before this prefix check would ever see a matching path (the bundle is mounted
+        // at the app root with content-hashed filenames, none of which are in LoomPathPrefixes).
+        // A host serving Loom's embedded UI - or its own static content it wants protected the
+        // same way - must register that specific mount through
+        // UseLoomDashboardStaticAssets(provider) below instead of a bare
+        // app.UseStaticFiles(...). A host's other, unrelated static-file mounts are correctly
+        // left untouched by both methods - that's the design, not a gap.
         public static WebApplication UseLoomDashboardSecurityHeaders(this WebApplication app)
         {
             app.Use(async (context, next) =>
@@ -153,6 +163,35 @@ namespace Loom.Dashboard.Extensions
                 }
                 await next();
             });
+            return app;
+        }
+
+        // Serves one specific static-file mount with Loom's security headers, unconditionally,
+        // on every response through it - including a short-circuited file hit. This exists
+        // because the file paths served this way (an Angular build's content-hashed bundle
+        // filenames, e.g. main-XXXX.js, plus index.html) can't be expressed as a static prefix
+        // list the way Loom's own fixed API/WS/prometheus routes can: the actual set of paths
+        // depends on what this specific IFileProvider's build output happens to contain, which
+        // is only knowable by reading its manifest at runtime, not by guessing filenames ahead of
+        // time. Rather than recognizing these responses by path, this ties the header-setting
+        // directly to the specific UseStaticFiles registration that serves them - the same
+        // structural approach MapSpaFallback already uses for its own unmatched-path response.
+        // Because both app.Use calls happen here, in this order, the header middleware runs
+        // immediately before this specific static-file middleware in the pipeline.
+        //
+        // The header-setting itself has no path check - it applies to whatever request reaches
+        // this point, whether or not this fileProvider ends up serving it, then calls next(). A
+        // host's own static-file mount is only untouched if it is registered EARLIER in the
+        // pipeline than this call, so it short-circuits before ever reaching this middleware -
+        // register a host's own unrelated static content ahead of this call, not after it.
+        public static WebApplication UseLoomDashboardStaticAssets(this WebApplication app, IFileProvider fileProvider)
+        {
+            app.Use(async (context, next) =>
+            {
+                ApplyLoomSecurityHeaders(context.Response.Headers);
+                await next();
+            });
+            app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
             return app;
         }
 

@@ -166,29 +166,32 @@ namespace Loom.Dashboard.Extensions
             return app;
         }
 
-        // Serves one specific static-file mount with Loom's security headers, unconditionally,
-        // on every response through it - including a short-circuited file hit. This exists
+        // Serves one specific static-file mount with Loom's security headers. This exists
         // because the file paths served this way (an Angular build's content-hashed bundle
         // filenames, e.g. main-XXXX.js, plus index.html) can't be expressed as a static prefix
         // list the way Loom's own fixed API/WS/prometheus routes can: the actual set of paths
         // depends on what this specific IFileProvider's build output happens to contain, which
         // is only knowable by reading its manifest at runtime, not by guessing filenames ahead of
-        // time. Rather than recognizing these responses by path, this ties the header-setting
-        // directly to the specific UseStaticFiles registration that serves them - the same
-        // structural approach MapSpaFallback already uses for its own unmatched-path response.
-        // Because both app.Use calls happen here, in this order, the header middleware runs
-        // immediately before this specific static-file middleware in the pipeline.
+        // time. Rather than recognizing these responses by a static path list, this checks
+        // fileProvider.GetFileInfo(...).Exists directly - the same information UseStaticFiles
+        // itself will use to decide whether to serve the request - and only applies the headers
+        // when that specific provider actually has a file at the request path.
         //
-        // The header-setting itself has no path check - it applies to whatever request reaches
-        // this point, whether or not this fileProvider ends up serving it, then calls next(). A
-        // host's own static-file mount is only untouched if it is registered EARLIER in the
-        // pipeline than this call, so it short-circuits before ever reaching this middleware -
-        // register a host's own unrelated static content ahead of this call, not after it.
+        // This is a file-existence check, not a pipeline-position check: a request path that
+        // doesn't resolve to a file in this fileProvider gets no headers here, regardless of
+        // whether it 404s or falls through to a host route mapped later via UseRouting/Map*
+        // (which, per the ordering rules above, is always registered after this call). A host's
+        // own routes and its own, separately-registered static-file mounts are therefore never
+        // touched by this method, regardless of registration order relative to it.
         public static WebApplication UseLoomDashboardStaticAssets(this WebApplication app, IFileProvider fileProvider)
         {
             app.Use(async (context, next) =>
             {
-                ApplyLoomSecurityHeaders(context.Response.Headers);
+                var relativePath = context.Request.Path.Value?.TrimStart('/') ?? string.Empty;
+                if (relativePath.Length > 0 && fileProvider.GetFileInfo(relativePath).Exists)
+                {
+                    ApplyLoomSecurityHeaders(context.Response.Headers);
+                }
                 await next();
             });
             app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });

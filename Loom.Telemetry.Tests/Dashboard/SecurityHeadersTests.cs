@@ -35,6 +35,14 @@ namespace Loom.Telemetry.Tests.Dashboard;
 /// either (the static-file middleware already short-circuited the request). The fix is
 /// UseLoomDashboardStaticAssets(provider), which ties header-setting directly to that specific
 /// UseStaticFiles registration instead of trying to recognize its paths.
+///
+/// Third follow-up (§ 6.29, host-route leak): the previous fix set the headers unconditionally
+/// before calling next(), with no check on whether this fileProvider would actually serve the
+/// request. A host's own route, registered downstream via UseRouting/Map* (which must come after
+/// this call, per the ordering rules above), still got the headers forced onto it. The fix gates
+/// header-setting on fileProvider.GetFileInfo(relativePath).Exists - the same check UseStaticFiles
+/// itself makes - so only requests this specific provider actually serves get the headers,
+/// regardless of what happens to unmatched requests downstream.
 /// </summary>
 public sealed class SecurityHeadersTests
 {
@@ -142,14 +150,20 @@ public sealed class SecurityHeadersTests
 
         // A host's own, unrelated static-file mount, registered the plain way (not through the
         // wrapper) and placed ahead of Loom's in the pipeline - exactly how a host embedding this
-        // library would register its own, pre-existing static content. Because
-        // UseLoomDashboardStaticAssets's header-setting middleware is unconditional (it has no
-        // path check - see its doc comment), only requests that reach it get the headers; a host
-        // mount short-circuiting earlier in the pipeline is never touched.
+        // library would register its own, pre-existing static content. It is never touched by
+        // the wrapper's header-setting middleware because it short-circuits the request before
+        // reaching that middleware at all.
         app.UseStaticFiles(new StaticFileOptions { FileProvider = hostProvider, RequestPath = "/host-content" });
 
         // Root-mounted, via the wrapper - reproduces Program.cs:173 exactly.
         app.UseLoomDashboardStaticAssets(loomProvider);
+
+        // A host's own route, mapped downstream via UseRouting/Map* - exactly the order the
+        // wrapper's own doc comment tells a consumer to use. Its header-setting middleware must
+        // NOT stamp Loom's headers onto this response just because the request passed through it
+        // on the way to routing.
+        app.UseRouting();
+        app.MapGet("/custom", () => "host route");
 
         await app.StartAsync();
 
@@ -231,6 +245,38 @@ public sealed class SecurityHeadersTests
 
         AssertAllHeadersPresent(loomResponse);
         AssertNoLoomHeadersPresent(hostResponse);
+    }
+
+    // Third follow-up's repro, ported permanently: a host's own route mapped downstream of
+    // UseLoomDashboardStaticAssets via UseRouting/Map* - exactly the order the wrapper's doc
+    // comment tells a consumer to use - must never get Loom's headers just because the request
+    // passed through the wrapper's header-setting middleware on its way to routing. Fails against
+    // a96727f (unconditional ApplyLoomSecurityHeaders before next()) and passes once
+    // header-setting is gated on fileProvider.GetFileInfo(relativePath).Exists.
+    [Fact]
+    public async Task HostRoute_MappedDownstreamOfStaticAssetsWrapper_NeverGetsLoomSecurityHeaders()
+    {
+        await using var api = await StartWithStaticAssetsAsync();
+
+        var loomResponse = await api.Client.GetAsync("/index.html");
+        var hostResponse = await api.Client.GetAsync("/custom");
+
+        AssertAllHeadersPresent(loomResponse);
+        AssertNoLoomHeadersPresent(hostResponse);
+    }
+
+    // A path that resolves neither to a file in the wrapper's fileProvider nor to any mapped
+    // route - a genuine 404. Confirms the gate is "does this specific provider have this file,"
+    // not some broader heuristic that happens to also exclude mapped host routes.
+    [Fact]
+    public async Task PathMatchingNeitherFileNorRoute_NeverGetsLoomSecurityHeaders()
+    {
+        await using var api = await StartWithStaticAssetsAsync();
+
+        var response = await api.Client.GetAsync("/does-not-exist-anywhere.html");
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+        AssertNoLoomHeadersPresent(response);
     }
 
     // The bug § 6.29's code review found: the first cut stamped Loom's CSP/frame/sniff headers

@@ -1,6 +1,5 @@
 using Loom.Dashboard.Extensions;
 using Loom.Security;
-using Loom.Web.Contracts;
 
 // Two modes, chosen by the first argument. Consumes exactly the three public setup methods
 // (AddLoomDashboard / UseLoomDashboard / MapLoomDashboard) plus the security-headers helper,
@@ -22,16 +21,6 @@ if (args is not ["serve", var pidText, var portText]
 }
 
 var builder = WebApplication.CreateSlimBuilder(Array.Empty<string>());
-
-// MEASURED: without this call every request 500s under AOT, /api/health included - the
-// route table cannot be built because the minimal-API body binder finds no JsonTypeInfo for
-// Loom.Web.Contracts.Dtos.TokenRequest ("was not provided by TypeInfoResolver of type '[]'").
-// The library's three public methods do not register LoomJsonSerializerContext; the host
-// must, exactly as Loom.Dashboard/Program.cs does.
-builder.Services.ConfigureHttpJsonOptions(options =>
-{
-    options.SerializerOptions.TypeInfoResolverChain.Insert(0, LoomJsonSerializerContext.Default);
-});
 
 // A missing key or users file throws InvalidOperationException here. Deliberately not
 // caught: an unhandled exception and a non-zero exit is the fail-closed behaviour under test.

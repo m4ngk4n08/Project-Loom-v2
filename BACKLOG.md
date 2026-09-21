@@ -1779,7 +1779,7 @@ not change it again after publishing.
 **Found by** `/code-review high` on `sonnet/telemetry-review-fixes` (reported by the reviewing session; code
 confirmed by Opus in this session).
 
-### 6.29 The Dashboard Library Sets No Security Headers — Only the `loom-dashboard` Host Does 🟢 FIXED, not yet merged (filed 2026-09-17, fixed 2026-09-18, tip `6401778`)
+### 6.29 The Dashboard Library Sets No Security Headers — Only the `loom-dashboard` Host Does 🟢 ✅ CLOSED (fixed 2026-09-18, merged `12adb2f`)
 
 **Where the code lives:** `Loom.Dashboard/Program.cs:177-197`, at `68b9d8a`.
 
@@ -1854,7 +1854,7 @@ riskier changes than this fix round took on. Left as accepted overhead.
 
 **Found by** `Opus while updating README.md, 2026-09-17`.
 
-### 6.30 `MapLoomDashboard` Always Adds an Anonymous Root Catch-All 🟢 FIXED, not yet merged (filed 2026-09-17, fixed 2026-09-18)
+### 6.30 `MapLoomDashboard` Always Adds an Anonymous Root Catch-All 🟢 ✅ CLOSED (fixed 2026-09-18, merged `12adb2f`)
 
 **Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs` — `MapLoomDashboard` (`:92`)
 calls `MapDashboardEndpoints` (`:29`), which calls `app.MapSpaFallback(...)` unconditionally (`:50`); that maps a
@@ -1888,7 +1888,7 @@ just asserted:** `/code-review high` on the branch ran the new tests directly an
 **Found by** `/code-review high Loom.Dashboard.AspNetCore` (pre-publish review #3, finding 9; transcript
 `cd89c1d7`), re-checked against `main` by Opus.
 
-### 6.31 `/api/logs/tail` Echoes a Stale or Negative Cursor 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.31 `/api/logs/tail` Echoes a Stale or Negative Cursor 🟢 LOW (✅ CLOSED 2026-09-21 — merge `9a2bed4`)
 
 **Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs:334-352`, at `68b9d8a`.
 
@@ -1907,7 +1907,7 @@ clamped value. Test: `after` = `CurrentSequence + 100` → response cursor equal
 **Found by** `/code-review high Loom.Dashboard.AspNetCore` (review #3, finding 10). Deliberately out of scope
 for the fix round.
 
-### 6.32 Ingest Timestamps With a UTC Offset Are Stored in Server Local Time 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.32 Ingest Timestamps With a UTC Offset Are Stored in Server Local Time 🟢 LOW (✅ CLOSED 2026-09-21 — merge `9a2bed4`; its test only discriminates on a non-UTC machine, CI runners are UTC)
 
 **Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/EndpointExtensions.cs:239-245`, at `68b9d8a`.
 
@@ -1927,7 +1927,7 @@ timestamp and asserting the stored ticks equal the UTC instant.
 **Found by** `/code-review high` on `sonnet/dashboard-review-fixes` (round 1, finding 3; moved, not introduced,
 by that branch).
 
-### 6.33 `loom metrics --live` Reads GC Counter Names That Are Never Published 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.33 `loom metrics --live` Reads GC Counter Names That Are Never Published 🟢 LOW (✅ CLOSED 2026-09-21 — merge `9a2bed4`)
 
 **Where the code lives:** `Loom.DevTools/Commands/MetricsLiveCommand.cs:112-114`, at `68b9d8a`.
 
@@ -1945,7 +1945,7 @@ running total. The dashboard had the identical bug and it was fixed in merge `02
 
 **Found by** the dashboard fix round's prompt (listed as out of scope), confirmed on `main` by Opus.
 
-### 6.34 The Dashboard Library Breaks Every Request Under AOT Unless the Host Registers Its JSON Context 🔴 HIGH (OPEN — filed 2026-09-21, blocks publishing)
+### 6.34 The Dashboard Library Breaks Every Request Under AOT Unless the Host Registers Its JSON Context 🔴 HIGH (✅ CLOSED 2026-09-21 — merge `6178308`; the packaged-consumer gate is now its regression test)
 
 **Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/ServiceExtensions.cs:96` (`AddLoomDashboard`), at `5bd82de`.
 The workaround lives in the host: `Loom.Dashboard/Program.cs` calls

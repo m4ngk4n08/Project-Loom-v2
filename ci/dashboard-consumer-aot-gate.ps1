@@ -295,15 +295,13 @@ try {
     Write-Host "   authenticated /api/alerts 200, /api/query 200"
 
     # Data flowing through TraceEvent in native code is the reason this gate exists.
-    $names = $null
     Wait-Until {
         $r = Invoke-Api 'GET' "$base/api/exporters/metrics/names" $token $null
         $script:names = $r
         return ($r.Status -eq 200 -and $r.Body.Contains('fixture.orders.processed'))
-    } 20 "/api/exporters/metrics/names to list fixture.orders.processed (last status $($names.Status))"
+    } 20 "/api/exporters/metrics/names to list fixture.orders.processed"
     Write-Host "   metric 'fixture.orders.processed' ingested"
 
-    $logs = $null
     Wait-Until {
         $r = Invoke-Api 'GET' "$base/api/logs?count=50" $token $null
         $script:logs = $r

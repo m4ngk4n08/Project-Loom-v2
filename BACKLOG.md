@@ -2941,8 +2941,21 @@ later (e.g. `Security` on its own) remains possible.
 **Also decided, same session:** all packages version in lockstep (`Directory.Build.props`); the new package
 ships without a README page (`.gitignore` is never staged); making it packable does **not** include pushing to
 nuget.org or reserving the prefix — that needs its own explicit go-ahead. The consumer gate AOT-publishes; the
-user accepts reflection inside `TraceEvent` provided it is not on a hot path — **unmeasured**, to be checked
-before the gate is built.
+user accepts reflection inside `TraceEvent` provided it is not on a hot path.
+
+**Measured 2026-09-21, win-x64 only** (scratch probe: the real `EventPipeBridge` in a console app referencing
+`Loom.Dashboard.AspNetCore`, AOT-published with `TrimmerSingleWarn=false`). **Check 1, static:** publish exits 0 with
+exactly three warnings, all inside `TraceEvent`: IL3050 on the `TraceEvent` constructor (the class derives from
+`DynamicObject`; Loom never uses `dynamic`), IL2067 in `DynamicTraceEventData.GetDefaultValueByType` (`Activator.CreateInstance`),
+IL2057 in `DynamicTraceEventData.PayloadFetch.FromStream` (`Type.GetType(string)`, reading a saved trace). None is
+`PayloadValue` or Loom's per-event callback. How often they run was not measured. **Check 2, runtime:** a normal build
+and the AOT build attached one after the other to one `Loom.TestFixtureApp` for 12 s each: 396 vs 395 metric
+records, 113 vs 113 log records, 0 parse warnings, and **all 38 series/log shapes identical**. Deterministic values
+matched exactly: queue depth 10/20, counter 4–5, histogram 168–210, log text, exception type/message, arguments
+JSON. Only `fixture.active.connections` differed (1–6 vs 2–8). That is the documented session-relative "value" of an
+up-down counter, not AOT. **Not yet measured on linux-x64**, which is what CI's gate runs. **Gate implication:**
+`TraceEvent` copies two *managed* helper DLLs (`Dia2Lib.dll`, `TraceReloggerLib.dll`) next to the native exe, so
+"no managed DLL beside the binary" must check for `Loom.*.dll` specifically, not every `.dll`.
 
 ---
 

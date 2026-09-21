@@ -397,13 +397,13 @@ namespace Loom.Dashboard.Extensions
                         }
                     }
 
-                    var timestamp = metric.Timestamp ?? DateTime.UtcNow;
+                    var timestampUtcTicks = ToUtcTicks(metric.Timestamp) ?? DateTime.UtcNow.Ticks;
 
                     records[i] = new MetricRecord(
                         metric.Name,
                         type.Value,
                         metric.Value,
-                        timestamp.Ticks,
+                        timestampUtcTicks,
                         tags.Length > 0 ? tags : null
                     );
                 }
@@ -492,7 +492,10 @@ namespace Loom.Dashboard.Extensions
 
             api.MapGet("/logs/tail", (long? after, int? count, ILogStore store) =>
             {
-                var afterSequence = after ?? 0;
+                var currentSequence = store.CurrentSequence;
+                // A cursor ahead of the buffer (kept across a dashboard restart) or negative
+                // must not be echoed back to the caller.
+                var afterSequence = Math.Clamp(after ?? 0, 0, currentSequence);
                 var clampedCount = Math.Clamp(count ?? 100, 1, 1000);
                 var result = store.ReadAfter(afterSequence);
 

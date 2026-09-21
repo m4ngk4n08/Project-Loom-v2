@@ -210,4 +210,40 @@ public sealed class MetricIngestEndpointTests
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task OffsetTimestamp_StoredAsUtc()
+    {
+        await using var api = await StartAsync();
+
+        var expectedTicks = new DateTime(2026, 9, 17, 8, 0, 0, DateTimeKind.Utc).Ticks;
+
+        var offsetBody = RawJson("""
+            {
+              "metrics": [
+                { "name": "offset-metric", "type": "Gauge", "value": 1, "timestamp": "2026-09-17T10:00:00+02:00" }
+              ]
+            }
+            """);
+        var offsetResponse = await api.Client.PostAsync("/api/metrics/ingest", offsetBody);
+        Assert.Equal(HttpStatusCode.Accepted, offsetResponse.StatusCode);
+
+        var offsetRecords = api.Store.ReadRecent("offset-metric", 1);
+        Assert.Single(offsetRecords);
+        Assert.Equal(expectedTicks, offsetRecords[0].TimestampUtcTicks);
+
+        var zBody = RawJson("""
+            {
+              "metrics": [
+                { "name": "z-metric", "type": "Gauge", "value": 1, "timestamp": "2026-09-17T08:00:00Z" }
+              ]
+            }
+            """);
+        var zResponse = await api.Client.PostAsync("/api/metrics/ingest", zBody);
+        Assert.Equal(HttpStatusCode.Accepted, zResponse.StatusCode);
+
+        var zRecords = api.Store.ReadRecent("z-metric", 1);
+        Assert.Single(zRecords);
+        Assert.Equal(expectedTicks, zRecords[0].TimestampUtcTicks);
+    }
 }

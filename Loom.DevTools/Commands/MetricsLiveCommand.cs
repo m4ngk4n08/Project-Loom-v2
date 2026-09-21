@@ -109,9 +109,7 @@ public static class MetricsLiveCommand
         var narrow = width < NarrowThreshold;
 
         var threads = LatestValue(store, "threadpool-thread-count");
-        var gen0 = LatestValue(store, "gen-0-collection-count");
-        var gen1 = LatestValue(store, "gen-1-collection-count");
-        var gen2 = LatestValue(store, "gen-2-collection-count");
+        var (gen0, gen1, gen2) = ReadGcCounts(store);
 
         var accent = HexTag(LoomTheme.Accent);
         var dim = HexTag(LoomTheme.Dim);
@@ -283,6 +281,33 @@ public static class MetricsLiveCommand
     {
         var records = store.ReadRecent(metricName, 1);
         return records.Length == 0 ? 0 : records[0].Value;
+    }
+
+    // gen-N-gc-count is a Counter (per-interval delta accumulated into a running total by
+    // the store) - "gen-N-collection-count" is never published by the runtime. Mirrors
+    // MetricsResponseBuilder's single-pass GetCounterTotals() read.
+    internal static (double Gen0, double Gen1, double Gen2) ReadGcCounts(IMetricStore store)
+    {
+        double gen0 = 0, gen1 = 0, gen2 = 0;
+        foreach (var total in store.GetCounterTotals())
+        {
+            if (total.Tags.Length != 0) continue;
+
+            switch (total.MetricName)
+            {
+                case "gen-0-gc-count":
+                    gen0 = total.Total;
+                    break;
+                case "gen-1-gc-count":
+                    gen1 = total.Total;
+                    break;
+                case "gen-2-gc-count":
+                    gen2 = total.Total;
+                    break;
+            }
+        }
+
+        return (gen0, gen1, gen2);
     }
 
     private static string HexTag(Color color) => $"#{color.ToHex()}";

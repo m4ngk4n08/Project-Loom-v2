@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Packaged-consumer Native AOT gate for LoomDiagnostics.Dashboard.AspNetCore. This
+       project is deliberately NOT in Loom.slnx: it must restore the package from a packed
+       .nupkg, never from a ProjectReference - a ProjectReference would ship the seven
+       bundled libraries as loose project outputs and never exercise the package layout.
+       It builds only via ci/dashboard-consumer-aot-gate.ps1 (locally, or the
+       dashboard-consumer-aot-gate CI job), against the folder feed in nuget.config. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <PublishAot>true</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>link</TrimMode>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+
+    <!-- Any new trim/AOT warning fails the publish. Exactly three, all inside the
+         third-party TraceEvent library, are accepted (BACKLOG.md decision log
+         2026-09-21, "Bundle the Seven Supporting Libraries"); the gate script re-checks
+         them by code AND method, so a fourth with one of these codes still fails.
+         TrimmerSingleWarn=false: otherwise a third-party assembly's warnings collapse into
+         one IL2104 that names no method and the per-method allow-list cannot work. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>IL3050;IL2067;IL2057</WarningsNotAsErrors>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+
+  <!-- Passed by the gate script from the packed file name; see
+       ci/consumer-aot-gate/PackageConsumer.csproj for why a literal or a floating version
+       would test the wrong bits. -->
+  <PropertyGroup>
+    <LoomPackageVersion Condition="'$(LoomPackageVersion)' == ''">1.0.0</LoomPackageVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The whole point: ONE PackageReference. LoomDiagnostics.Telemetry must arrive
+         transitively, and the seven supporting libraries must arrive inside this package. -->
+    <PackageReference Include="LoomDiagnostics.Dashboard.AspNetCore" Version="$(LoomPackageVersion)" />
+  </ItemGroup>
+
+</Project>

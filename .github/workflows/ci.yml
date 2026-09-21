@@ -142,6 +142,29 @@ jobs:
         shell: pwsh
         run: ./ci/consumer-aot-gate.ps1 -Rid linux-x64
 
+  dashboard-consumer-aot-gate:
+    # Sibling of consumer-aot-gate, for LoomDiagnostics.Dashboard.AspNetCore. Packs it and
+    # LoomDiagnostics.Telemetry into a folder feed, asserts the package layout (the seven
+    # bundled DLLs, no Loom.Telemetry.dll), restores it into a consumer with no
+    # ProjectReference, AOT-publishes, then runs the native binary against a live
+    # Loom.TestFixtureApp and checks that metrics and logs arrive over HTTP. Kept separate
+    # so a failure names which package broke.
+    name: Packaged dashboard consumer AOT gate (linux-x64)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install native toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      - name: Pack, restore from a folder feed, AOT publish, run against a live target
+        shell: pwsh
+        run: ./ci/dashboard-consumer-aot-gate.ps1 -Rid linux-x64
   frontend:
     name: Angular tests
     runs-on: ubuntu-latest

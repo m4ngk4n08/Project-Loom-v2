@@ -2919,6 +2919,33 @@ consumer gate) is unstarted and still next.
 
 ---
 
+### 2026-09-21: Bundle the Seven Supporting Libraries — Reverses 2026-09-18 Decision 2
+
+**Decision (the user's):** `LoomDiagnostics.Dashboard.AspNetCore` ships `Loom.Security`, `Loom.Storage`,
+`Loom.Telemetry.Query`, `Loom.Telemetry.Alerting`, `Loom.Telemetry.Exporters`, `Loom.Web.Contracts` and
+`Loom.Web.RealTime` **inside its own package**. None of the seven gets a `PackageId`; all stay
+`IsPackable=false`. `LoomDiagnostics.Telemetry` stays a real package dependency.
+
+**Why the 2026-09-18 reasoning was wrong:** it rejected bundling because "a consumer who already depends on one
+of the seven directly would get duplicate types." That can only happen if the seven are published separately.
+If they never are, there is nothing to duplicate.
+
+**Why bundling:** publishing the seven would turn six libraries the pre-publish review explicitly classed as "not
+public APIs, lower priority" into seven separately versioned public promises, none reviewed. Bundled, there is
+one package to review, version and support.
+
+**Honest limit:** the seven assemblies still ship in the package's `lib/` folder, so their public types remain
+callable by a consumer. They are not separately versioned, but they are not hidden either. Splitting one out
+later (e.g. `Security` on its own) remains possible.
+
+**Also decided, same session:** all packages version in lockstep (`Directory.Build.props`); the new package
+ships without a README page (`.gitignore` is never staged); making it packable does **not** include pushing to
+nuget.org or reserving the prefix — that needs its own explicit go-ahead. The consumer gate AOT-publishes; the
+user accepts reflection inside `TraceEvent` provided it is not on a hot path — **unmeasured**, to be checked
+before the gate is built.
+
+---
+
 **Document Owner:** Project Loom v2 Team  
 **Last Review:** 2026-08-24  
 **Next Review:** Phase 13 completion or pre-1.0 release

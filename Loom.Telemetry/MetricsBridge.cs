@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 
@@ -88,11 +89,14 @@ internal static class MetricsBridge
     // than relying on that observation staying true.
     private sealed record GaugeState(double Value, KeyValuePair<string, object?>[] Tags);
 
+    // TagList, not ConvertTags: it is a struct holding up to 8 tags inline, so a counter or
+    // histogram pays no second heap array for the BCL call (BACKLOG.md 6.35). Gauges keep
+    // ConvertTags because GaugeState retains the array for the observable callback.
     public static void PublishCounter(string name, double increment, ReadOnlySpan<MetricTag> tags = default) =>
-        Counters.GetOrAdd(name, n => Meter.CreateCounter<double>(n)).Add(increment, ConvertTags(tags));
+        Counters.GetOrAdd(name, n => Meter.CreateCounter<double>(n)).Add(increment, ToTagList(tags));
 
     public static void PublishHistogram(string name, double value, ReadOnlySpan<MetricTag> tags = default) =>
-        Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value, ConvertTags(tags));
+        Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value, ToTagList(tags));
 
     public static void PublishGauge(string name, double value, ReadOnlySpan<MetricTag> tags = default)
     {
@@ -115,6 +119,14 @@ internal static class MetricsBridge
                 measurements.Add(new Measurement<double>(state.Value, state.Tags));
             return measurements;
         }));
+    }
+
+    private static TagList ToTagList(ReadOnlySpan<MetricTag> tags)
+    {
+        var list = default(TagList);
+        for (var i = 0; i < tags.Length; i++)
+            list.Add(tags[i].Key, tags[i].Value);
+        return list;
     }
 
     private static KeyValuePair<string, object?>[] ConvertTags(ReadOnlySpan<MetricTag> tags)

@@ -1,6 +1,6 @@
 # Project Loom v2
 
-A **customizable telemetry platform** for .NET applications. Loom provides live insight into CPU hotpaths, memory allocations, thread blockages, and — critically — **your own business metrics**, with zero-allocation instrumentation powered by C# source generators.
+A **customizable telemetry platform** for .NET applications. Loom provides live insight into CPU hotpaths, memory allocations, thread blockages, and — critically — **your own business metrics**, with instrumentation powered by C# source generators that allocates nothing on untagged recording paths.
 
 The successor to the original SSH-based design, Loom v2 is a .NET-native observability stack. It is packaged as a Native-AOT-clean library (`LoomDiagnostics.Telemetry`) plus two dotnet tools: `loom` (`LoomDiagnostics.Cli`) and `loom-dashboard` (`LoomDiagnostics.Dashboard`). Nothing is published to NuGet yet.
 
@@ -16,11 +16,23 @@ Loom is not just a profiler. It's a **telemetry platform** you embed into .NET a
 - **Query Language** — SQL-like telemetry queries + fluent code-based `Query()` API
 - **Alerting** — `AddAlert()` with window-based conditions; webhook, email and console targets
 - **Exporters** — Prometheus, Console interoperability
-- **Source Generator** — zero-allocation instrumentation resolved entirely at compile time (no reflection)
+- **Source Generator** — instrumentation resolved entirely at compile time (no reflection)
 - **Sampling** — configuration-driven sampling rules (name-pattern, duration-threshold, uniform, always-record)
 - **Log capture** — `ILogger` records captured, searched, tailed and exported through the dashboard
 - **CLI** — `loom` attaches to a process over EventPipe: `dev`, `watch`, `explore`, `metrics`, `query`, `logs`, `search`, `auth`
 
+**Allocation cost.** Bytes allocated per call on the calling thread, measured (`GC.GetAllocatedBytesForCurrentThread`, after warm-up, .NET 10, Windows x64, JIT):
+
+| Path | Bytes per call |
+|------|---------------:|
+| `RecordCounter` / `RecordHistogram`, no tags | 0 |
+| `[LoomProfile]` method, normal return | 0 |
+| `RecordCounter` / `RecordHistogram`, 1 tag | 40 |
+| `RecordCounter` / `RecordHistogram`, 2 tags | 56 |
+| `RecordGauge`, no tags / 1 tag | 32 / 296 |
+| `[LoomProfile]` method that throws | 552 (a bare throw/catch of the same exception costs 296) |
+
+The tagged cost is the `params MetricTag[]` array, which the ring buffer keeps. Gauges retain a copy of their tags for the observable callback, so they allocate more. The untagged rows are asserted by tests and, natively, by `Loom.AotProbe` in CI.
 The telemetry library is Native-AOT-clean with zero runtime reflection, proven in CI.
 
 ---

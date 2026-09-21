@@ -92,11 +92,6 @@ var port = explicitPort ?? ResolvePort(PreferredPort);
 // Build the web application
 var builder = WebApplication.CreateBuilder(Array.Empty<string>());
 
-builder.Services.ConfigureHttpJsonOptions(options =>
-{
-    options.SerializerOptions.TypeInfoResolverChain.Insert(0, LoomJsonSerializerContext.Default);
-});
-
 // AddLoomDashboard calls AddLoomSecurity internally, so the try/catch has to wrap THIS
 // call. It previously wrapped a separate AddLoomSecurity() on the line below, which left
 // the throw happening one line too early: the message below became unreachable and a

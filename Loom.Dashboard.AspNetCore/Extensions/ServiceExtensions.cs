@@ -5,6 +5,7 @@ using Loom.Telemetry.Alerting;
 using Loom.Telemetry.Exporters;
 using Loom.Telemetry.Exporters.Console;
 using Loom.Telemetry.Query;
+using Loom.Web.Contracts;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
@@ -95,9 +96,21 @@ namespace Loom.Dashboard.Extensions
         // missing - deliberately left uncaught here, a library must not swallow it.
         public static IServiceCollection AddLoomDashboard(this IServiceCollection services, int targetPid)
         {
+            // First, so the registration is in place even if AddLoomSecurity below throws.
+            services.AddLoomDashboardJsonContext();
             services.AddDashboardServices(targetPid);
             services.AddSingleton<MetricsResponseBuilder>();
             services.AddLoomSecurity();
+            return services;
+        }
+
+        // Without this every endpoint 500s under AOT: reflection-based JSON is off, so the route
+        // table cannot bind TokenRequest (BACKLOG.md 6.34). Internal so a test can reach it
+        // without key material.
+        internal static IServiceCollection AddLoomDashboardJsonContext(this IServiceCollection services)
+        {
+            services.ConfigureHttpJsonOptions(options =>
+                options.SerializerOptions.TypeInfoResolverChain.Insert(0, LoomJsonSerializerContext.Default));
             return services;
         }
     }

@@ -1971,6 +1971,55 @@ its public API. It has no effect today only because nothing is published.
 from `Loom.Dashboard/Program.cs`, and from the gate's consumer, so the gate becomes the regression test: it must pass
 **without** the host call. Must land before any publish.
 
+### 6.35 "Zero-Allocation" Is False on Every Recording Path — Measured 🟡 MEDIUM (OPEN — filed 2026-09-21, blocks publishing the claim)
+
+**Where the code lives:** `Loom.Telemetry/LoomMetrics.cs:178-200` (`GetOrCreateBuffer`), `Loom.Telemetry/MetricsBridge.cs`
+(`ConvertTags`, `PublishGauge`), `Loom.Telemetry/LoomRuntime.cs` (error path), at `cb76f8e`.
+
+`LoomDiagnostics.Telemetry`'s NuGet description opens with "Zero-allocation", and the README repeats it. **No test in the
+repo had ever measured it.**
+
+**Measured 2026-09-21** (scratch probe, `GC.GetAllocatedBytesForCurrentThread`, 200k calls after warm-up). JIT and Native
+AOT gave identical numbers, with and without a `MeterListener` attached, and 4 threads matched 1:
+
+| Path | Bytes per call |
+|---|---|
+| `RecordCounter` / `RecordHistogram`, no tags | **24** |
+| `RecordCounter` / `RecordHistogram`, 1 tag | 104 |
+| `RecordGauge`, no tags / 1 tag | 56 / 328 |
+| `[LoomProfile]` method, success | **24** |
+| `[LoomProfile]` method, throws | ~250–350 more than a bare throw/catch |
+
+**Root cause of the 24 B, bisected** (the BCL `Counter<double>.Add`, `DateTime.UtcNow`, `new MetricRecord`,
+`MetricBuffer.Write` and `MetricsBridge.PublishCounter` each measured 0 B):
+- **Where:** `GetOrCreateBuffer`'s fast path, a plain `TryGetValue` then return.
+- **Why:** the slow path's lambda `() => buffer.DroppedCount` captures a local. C# allocates the capture object when the
+  method starts, on every call, before the early return.
+- **The comment directly above says the opposite:** "the closure allocation below only happens on this first-time path".
+
+**Other sources, not bisected further:**
+- **Tags (+80 B):** the `params MetricTag[]` array, which the record stores, plus `ConvertTags`' `KeyValuePair[]`.
+- **Gauges:** `PublishGauge` does `tags.ToArray()`, builds a series-key string, and allocates a `GaugeState` on every
+  call.
+- **Error path:** a `MetricTag` array plus an interpolated `"{metricName}.errors"` string on every exception.
+
+**Why MEDIUM:** 24 B/call is small, but the claim is the package's first word and it's false. The untagged fix is a
+structural one-liner.
+
+**Fix verified in a throwaway worktree, same day.** With the slow path moved into its own `NoInlining` method:
+- **Every path drops by exactly 24 B, JIT and AOT, with and without a listener.**
+- Untagged counter/histogram and the `[LoomProfile]` success path go to **0.0 B**.
+- What's left: 1 tag → 80 B (the stored `params` array + `ConvertTags`' array, 40 B each); gauge → 32 B / 304 B; the error
+  path → ~300 B over a bare throw.
+
+**Fix shape:**
+1. Move `GetOrCreateBuffer`'s slow path into its own `[MethodImpl(MethodImplOptions.NoInlining)]` method, so the
+   closure is only allocated there.
+2. Add an allocation regression test (0 B for untagged counter/histogram and the `[LoomProfile]` success path), in the
+   test suite **and** in `Loom.AotProbe`, so the Linux AOT CI job enforces it natively.
+3. Reword the description and README to what is then measured true.
+4. Tags, gauges and the error path are separate, larger work; state their costs honestly rather than fix them now.
+
 ---
 
 ## 7. Priority Summary

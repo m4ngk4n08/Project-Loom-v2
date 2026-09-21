@@ -1945,6 +1945,32 @@ running total. The dashboard had the identical bug and it was fixed in merge `02
 
 **Found by** the dashboard fix round's prompt (listed as out of scope), confirmed on `main` by Opus.
 
+### 6.34 The Dashboard Library Breaks Every Request Under AOT Unless the Host Registers Its JSON Context 🔴 HIGH (OPEN — filed 2026-09-21, blocks publishing)
+
+**Where the code lives:** `Loom.Dashboard.AspNetCore/Extensions/ServiceExtensions.cs:96` (`AddLoomDashboard`), at `5bd82de`.
+The workaround lives in the host: `Loom.Dashboard/Program.cs` calls
+`ConfigureHttpJsonOptions(o => o.SerializerOptions.TypeInfoResolverChain.Insert(0, LoomJsonSerializerContext.Default))`.
+
+`AddLoomDashboard` / `UseLoomDashboard` / `MapLoomDashboard` never register `LoomJsonSerializerContext`. Under Native AOT,
+reflection-based JSON is off, so an app that calls only those three methods publishes cleanly and then returns **500 on
+every request, `/api/health` included**. The route table can't bind `TokenRequest`:
+`NotSupportedException: JsonTypeInfo metadata for type 'Loom.Web.Contracts.Dtos.TokenRequest' was not provided by
+TypeInfoResolver of type '[]'`. Nothing in the library's API or docs tells the host to add the call. A normal (JIT) host
+is unaffected because reflection-based JSON fills the gap, which is why `loom-dashboard` never showed it.
+
+**Reproduced at runtime.** Found by the new packaged-dashboard consumer gate (`sonnet/dashboard-consumer-gate`, the
+JSON-options measurement its prompt asked for). Re-run by Opus 2026-09-21 on win-x64: with the call removed from the
+gate's consumer, `/api/health` returned 500 with exactly that exception. With the call present, the gate passes on
+win-x64 and linux-x64.
+
+**Why HIGH:** the package's headline promise is Native AOT, and on AOT it is completely broken for anyone following
+its public API. It has no effect today only because nothing is published.
+
+**Fix shape:** `AddLoomDashboard` registers the context itself, via
+`services.ConfigureHttpJsonOptions(...Insert(0, LoomJsonSerializerContext.Default))`. Remove the now-duplicate call
+from `Loom.Dashboard/Program.cs`, and from the gate's consumer, so the gate becomes the regression test: it must pass
+**without** the host call. Must land before any publish.
+
 ---
 
 ## 7. Priority Summary

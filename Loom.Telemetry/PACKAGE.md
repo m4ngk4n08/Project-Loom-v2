@@ -10,8 +10,10 @@ C# by the time the compiler sees it.
 ## Install
 
 ```
-dotnet add package LoomDiagnostics.Telemetry
+dotnet add package LoomDiagnostics.Telemetry --prerelease
 ```
+
+`--prerelease` is needed while Loom is in preview.
 
 The package ID is `LoomDiagnostics.Telemetry`; the namespace you write against is
 `Loom.Telemetry`. They differ because the `Loom.` prefix on nuget.org belongs to unrelated,

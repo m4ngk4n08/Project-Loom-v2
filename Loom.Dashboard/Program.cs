@@ -18,7 +18,11 @@ if (args.Length == 0 || !int.TryParse(args[0], out var targetPid))
 {
     if (args is ["--version"])
     {
-        Console.WriteLine("loom-dashboard 1.0.0");
+        // From Directory.Build.props via the assembly, so it can't drift from the package.
+        // The SDK appends "+<commit>" to the informational version; that isn't the version.
+        var version = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+        Console.WriteLine($"loom-dashboard {version.Split('+')[0]}");
         return 0;
     }
     Console.WriteLine("Usage: loom-dashboard <pid> [--port <n>]");

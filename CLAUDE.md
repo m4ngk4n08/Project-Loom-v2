@@ -180,6 +180,14 @@ packaged consumer AOT gate (packs `Loom.Telemetry`, restores it into
 layout). Both AOT jobs `needs: build-and-test`, so a test failure on ubuntu shows them as
 **skipped**, not failed. Slowest job ~4.5 min (windows, run `35182511586`).
 
+**Publishing** (`.github/workflows/publish.yml`, manual `workflow_dispatch`, `main` only):
+nuget.org Trusted Publishing — OIDC via `NuGet/login@v1`, a one-hour key, nothing stored.
+Refuses a version already on nuget.org, runs `release.ps1` on windows-latest, pushes
+Telemetry first. Needs the `release` environment (with required reviewers), the
+`NUGET_USER` secret, and the policy on nuget.org. `1.0.0-preview.1` shipped 2026-09-23 by
+hand with an API key; every later release goes through this workflow and needs a new
+`<Version>` in `Directory.Build.props`.
+
 ---
 
 ## Native AOT constraints

@@ -1,0 +1,90 @@
+name: Publish to nuget.org
+
+# Publishes the four LoomDiagnostics.* packages with nuget.org Trusted Publishing: GitHub
+# issues an OIDC token, nuget.org exchanges it for an API key that lives one hour. No
+# long-lived key is stored anywhere.
+#
+# Manual only, and only from main. The `release` environment must have required reviewers
+# (Settings > Environments), so starting the run is not enough - someone approves the job
+# before any of it runs. A version on nuget.org can be unlisted, never deleted.
+#
+# nuget.org side (username > Trusted Publishing): owner = your account, repository owner
+# and repository = this repo, workflow file = publish.yml, environment = release.
+# Repository secret NUGET_USER = the nuget.org username (profile name, not the email).
+
+on:
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '20'
+
+jobs:
+  publish:
+    name: Build, verify and publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: read
+      actions: read     # release.ps1 checks CI passed on this commit via `gh run list`
+      id-token: write   # OIDC token for NuGet/login
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Loom.Web.Frontend/package-lock.json
+
+      # Fail before the ~10 minute build rather than on a 409 at push time. Every release
+      # needs a new <Version> in Directory.Build.props.
+      - name: Version is not already on nuget.org
+        shell: pwsh
+        run: |
+          $version = (dotnet msbuild Loom.Telemetry/Loom.Telemetry.csproj -getProperty:Version).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $version) { throw 'could not read the version' }
+          foreach ($id in 'LoomDiagnostics.Telemetry','LoomDiagnostics.Dashboard.AspNetCore','LoomDiagnostics.Cli','LoomDiagnostics.Dashboard') {
+            $url = "https://api.nuget.org/v3-flatcontainer/$($id.ToLowerInvariant())/index.json"
+            try { $published = (Invoke-RestMethod $url).versions } catch { $published = @() }
+            if ($published -contains $version) { throw "$id $version is already on nuget.org - bump <Version> in Directory.Build.props" }
+            "$id $version - not published yet"
+          }
+
+      # The same script as a local release: clean tree, CI green on this commit, clean UI
+      # build, strict build, both test suites, pack, UI-embedded check.
+      - name: release.ps1
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./release.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/release/
+
+      # Requested only now: the key expires an hour after issue.
+      - name: NuGet login (OIDC -> temporary API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      # Telemetry first: Dashboard.AspNetCore depends on it. Its .snupkg goes up with it.
+      - name: Push
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          foreach ($id in 'LoomDiagnostics.Telemetry','LoomDiagnostics.Dashboard.AspNetCore','LoomDiagnostics.Cli','LoomDiagnostics.Dashboard') {
+            $pkg = @(Get-ChildItem artifacts/release -Filter "$id.*.nupkg" | Where-Object { $_.Extension -eq '.nupkg' -and $_.Name -match "^$([regex]::Escape($id))\.\d" })
+            if ($pkg.Count -ne 1) { throw "expected one $id package, found $($pkg.Count)" }
+            dotnet nuget push $pkg[0].FullName --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+            if ($LASTEXITCODE -ne 0) { throw "push of $id failed" }
+          }

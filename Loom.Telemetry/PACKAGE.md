@@ -40,15 +40,10 @@ public class OrderService
 
 `Name` is optional and defaults to `ClassName.MethodName`.
 
-To collect what the wrappers record, register the runtime in any
-`IServiceCollection`-based host:
-
-```csharp
-builder.Services.AddLoomTelemetry(options => { });
-```
-
-The `options` callback is currently required and `LoomTelemetryOptions` has no settings
-yet, so an empty lambda is the correct call today.
+No registration is needed: what the wrappers and `LoomMetrics.Record*` record is published
+on the `Loom.Telemetry` meter, and the `loom` and `loom-dashboard` tools read it from the
+running process over EventPipe. `builder.Services.AddLoomTelemetry()` exists for hosts that
+want `LoomTelemetryOptions` in DI; it has no settings of its own.
 
 `[LoomTrack]` does the same for a property, recording a metric whenever its value changes.
 **Unlike `[LoomProfile]`, the class must be `partial`** for `[LoomTrack]`: its generator

@@ -1,3 +1,4 @@
+using System.Reflection;
 using Loom.DevTools.Commands;
 using Loom.Security;
 
@@ -15,6 +16,15 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
 switch (args)
 {
+    case ["--version"]:
+        {
+            // From Directory.Build.props via the assembly, so it can't drift from the package.
+            // The SDK appends "+<commit>" to the informational version; that isn't the version.
+            var version = typeof(Program).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+            Console.WriteLine($"loom {version.Split('+')[0]}");
+        }
+        break;
     case ["dev"]:
         await DevCommand.RunAsync(showAll: false, cts.Token);
         break;
@@ -136,5 +146,6 @@ switch (args)
         Console.WriteLine("  loom auth hash                          Print a password hash to stdout");
         Console.WriteLine("                                          (the users-file line is <name>:<hash>)");
         Console.WriteLine("  loom auth token --sub <name> [--scope metrics|full] [--ttl 90d] [--key-file <path>]  Mint a service token");
+        Console.WriteLine("  loom --version                          Print the version");
         break;
 }

@@ -33,6 +33,7 @@ Loom is not just a profiler. It's a **telemetry platform** you embed into .NET a
 | `[LoomProfile]` method that throws | 552 (a bare throw/catch of the same exception costs 296) |
 
 The tagged cost is the `params MetricTag[]` array, which the ring buffer keeps. Gauges retain a copy of their tags for the observable callback, so they allocate more. The untagged rows are asserted by tests and, natively, by `Loom.AotProbe` in CI.
+
 The telemetry library is Native-AOT-clean with zero runtime reflection, proven in CI.
 
 ---

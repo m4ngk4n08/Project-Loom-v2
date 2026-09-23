@@ -17,8 +17,8 @@ in a local web dashboard.
 - **Local and locked down.** The dashboard listens on `127.0.0.1` only and every endpoint
   needs a login.
 
-> **Preview.** Loom is at `1.0.0-preview.1` and not yet on nuget.org. Until it is, build the
-> packages yourself (see [Building from source](#building-from-source)). APIs may still change.
+> **Preview.** Loom is at `1.0.0-preview.1`. APIs may still change before `1.0.0`, which is
+> why the install commands below use `--prerelease`.
 
 ---
 

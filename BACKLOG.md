@@ -1971,7 +1971,14 @@ its public API. It has no effect today only because nothing is published.
 from `Loom.Dashboard/Program.cs`, and from the gate's consumer, so the gate becomes the regression test: it must pass
 **without** the host call. Must land before any publish.
 
-### 6.35 "Zero-Allocation" Is False on Every Recording Path — Measured 🟡 MEDIUM (OPEN — filed 2026-09-21, blocks publishing the claim)
+### 6.35 "Zero-Allocation" Is False on Every Recording Path — Measured 🟡 MEDIUM (✅ CLOSED 2026-09-23 — merge `b423f3c`; tags, gauges and the error path still allocate, stated in the README rather than fixed)
+
+**Closed by `69e4f16` + `cf9b549`, merged `b423f3c`.** Fix shape items 1–3 done; item 4 is the README's new
+"Allocation cost" table. Re-measured by Opus on the branch (Release JIT, win-x64, bytes per call): untagged
+counter/histogram and `[LoomProfile]` success **0**; 1 tag **40**; 2 tags **56**; gauge **32 / 296**; a throwing
+`[LoomProfile]` method ~552–560 vs **296** for the same throw unprofiled (the `"{name}.errors"` string makes it vary with
+the metric name). `RecordingAllocationTests` (5) and `Loom.AotProbe` enforce the untagged zeros; sabotage confirmed both
+fail at 24 B. 849 / 0 / 0 on Windows and Linux.
 
 **Where the code lives:** `Loom.Telemetry/LoomMetrics.cs:178-200` (`GetOrCreateBuffer`), `Loom.Telemetry/MetricsBridge.cs`
 (`ConvertTags`, `PublishGauge`), `Loom.Telemetry/LoomRuntime.cs` (error path), at `cb76f8e`.

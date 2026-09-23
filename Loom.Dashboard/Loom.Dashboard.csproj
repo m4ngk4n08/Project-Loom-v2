@@ -43,4 +43,15 @@
   <ItemGroup>
     <EmbeddedResource Include="..\Loom.Web.Frontend\dist\Loom.Web.Frontend\browser\**\*" LinkBase="wwwroot" />
   </ItemGroup>
+
+  <!-- dist/ is gitignored, so on a fresh clone the wildcard above matches nothing and the
+       build still succeeds - into an API-only tool with no UI. Fine for `dotnet run`, never
+       for a package. Refuse to pack instead. release.ps1 builds the frontend first. -->
+  <Target Name="LoomRequireDashboardUi" BeforeTargets="GenerateNuspec">
+    <ItemGroup>
+      <_LoomUiIndex Include="@(EmbeddedResource)" Condition="'%(Filename)%(Extension)' == 'index.html'" />
+    </ItemGroup>
+    <Error Condition="'@(_LoomUiIndex)' == ''"
+           Text="Refusing to pack loom-dashboard without its UI: no index.html under Loom.Web.Frontend/dist/Loom.Web.Frontend/browser. Run ./release.ps1, or build the frontend first (cd Loom.Web.Frontend; npx ng build --configuration production)." />
+  </Target>
 </Project>

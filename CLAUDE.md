@@ -162,12 +162,15 @@ ng serve                            # dev server + proxy, http://localhost:4200
 ng build --configuration production
 npx ng test                         # vitest, one pass, no watch
 
-# Packing. Loom.Dashboard embeds the Angular build in wwwroot by wildcard, and
-# Loom.Web.Frontend/dist is gitignored — on a fresh clone the wildcard matches
-# nothing and the tool ships an EMPTY wwwroot. ALWAYS build the frontend first.
-cd Loom.Web.Frontend; ng build; cd ..
-dotnet pack Loom.Dashboard -c Release   # -> loom-dashboard
-dotnet pack Loom.DevTools  -c Release   # -> loom
+# Releasing: ./release.ps1 -> artifacts/release/, all four packages. Requires a clean
+# tree and green CI on HEAD; rebuilds the Angular UI from scratch; strict build + both
+# test suites; verifies the tool's DLL embeds every file of that UI. Never pushes.
+# (-AllowDirty / -SkipCiCheck / -SkipTests exist for trying it, not for a release.)
+./release.ps1
+
+# Loom.Dashboard embeds the Angular build by wildcard and dist/ is gitignored, so on a
+# fresh clone the tool builds UI-less. `dotnet pack Loom.Dashboard` now REFUSES that
+# (LoomRequireDashboardUi target); `dotnet build`/`run` still allow it (API-only mode).
 ```
 
 **CI** (`.github/workflows/ci.yml`, push + PR to `main`): build/test on ubuntu, windows

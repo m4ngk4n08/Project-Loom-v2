@@ -120,6 +120,17 @@ public class AuthCommandTests
         Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/local/bin/fish", "/home/u", isMacOS: false, xdgConfigHome));
     }
 
+    [Theory]
+    [InlineData("/home/u/zdot", "/home/u/zdot/.zshrc")]
+    [InlineData("/home/u/zdot/", "/home/u/zdot/.zshrc")]
+    [InlineData(null, "/home/u/.zshrc")]
+    [InlineData("", "/home/u/.zshrc")]
+    [InlineData("relative/zdot", "/home/u/.zshrc")]
+    public void ResolveUnixProfilePath_Zsh_HonoursZdotdir(string? zdotdir, string expected)
+    {
+        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/bin/zsh", "/home/u", isMacOS: false, zdotdir: zdotdir));
+    }
+
     [Fact]
     public void RenderUnixPersistBlock_Fish_UsesSetDashGx()
     {

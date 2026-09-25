@@ -422,7 +422,7 @@ public static class AuthCommand
             return null;
         }
 
-        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, OperatingSystem.IsMacOS(), Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
+        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, OperatingSystem.IsMacOS(), Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"), Environment.GetEnvironmentVariable("ZDOTDIR"));
         string? effectiveUsersPath;
 
         try
@@ -598,12 +598,17 @@ public static class AuthCommand
     /// an explicit parameter, not an internal OperatingSystem.IsMacOS() read, so this
     /// stays pure and testable for both branches on any host - the caller passes what
     /// it detects.</summary>
-    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory, bool isMacOS, string? xdgConfigHome = null)
+    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory, bool isMacOS, string? xdgConfigHome = null, string? zdotdir = null)
     {
         var home = homeDirectory.TrimEnd('/');
         return ClassifyUnixShell(shellEnvValue) switch
         {
-            "zsh" => $"{home}/.zshrc",
+            // zsh reads $ZDOTDIR/.zshrc when ZDOTDIR is set, and only falls back to
+            // $HOME when it is not. A relative value is not a location we can trust
+            // (it would resolve against the working directory), so it falls back too.
+            "zsh" => !string.IsNullOrEmpty(zdotdir) && Path.IsPathRooted(zdotdir)
+                ? $"{zdotdir.TrimEnd('/')}/.zshrc"
+                : $"{home}/.zshrc",
             // Terminal.app and iTerm start bash as a login shell on macOS, which reads
             // .bash_profile (or .bash_login / .profile) and never .bashrc - a stock
             // .bash_profile does not source .bashrc either. Linux interactive bash reads

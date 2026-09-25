@@ -477,64 +477,8 @@ public static class AuthCommand
 
             var updatedBytes = UpsertUnixPersistBlockBytes(existingBytes, existing, block);
 
-            // Many people's shell profile is a symlink into a dotfiles repo (stow,
-            // chezmoi, a plain git repo). File.Move REPLACES the target rather than
-            // writing through it - unlinking the symlink and dropping a regular file in
-            // its place, silently detaching the user's setup. Resolve to the final
-            // target first and write-then-rename there instead; a non-symlink
-            // profilePath resolves to itself (ResolveLinkTarget returns null).
-            var writeTargetPath = profilePath;
-            if (File.Exists(profilePath))
-            {
-                var resolvedTarget = File.ResolveLinkTarget(profilePath, returnFinalTarget: true);
-                if (resolvedTarget is not null) writeTargetPath = resolvedTarget.FullName;
-            }
-
-            // File.Move also does not preserve the replaced file's permissions - a 600
-            // profile would come back 644. Capture the current mode and re-apply it to
-            // the temp file before the rename so it survives. The !IsWindows() guard is
-            // redundant with the caller's (this method only runs on Unix) but is what
-            // the platform-compat analyzer needs to see directly around a Unix-only
-            // API to accept the call - see TightenIfLoose above for the same pattern.
-            UnixFileMode? existingMode = null;
-            if (!OperatingSystem.IsWindows() && File.Exists(writeTargetPath))
-                existingMode = File.GetUnixFileMode(writeTargetPath);
-
-            // Write-then-rename rather than truncate-in-place, so a crash mid-write
-            // leaves either the old file or the new one intact, never a truncated shell
-            // profile. File.Move's overwrite is atomic on the same filesystem, and the
-            // temp file sits next to the target so it always is one.
-            var tempPath = writeTargetPath + $".loom-tmp-{Guid.NewGuid():N}";
-            try
-            {
-                // When the target already exists, create the temp file WITH its mode from
-                // the moment it comes into being - the same technique WriteSecretFile uses
-                // for key files - rather than WriteAllBytes (default permissions, typically
-                // 644) followed by SetUnixFileMode. For a profile deliberately kept at 600
-                // (e.g. because it exports tokens), that write-then-chmod left its full
-                // contents world-readable beside the target for the gap between the two
-                // calls. A brand-new profile (no existing mode) keeps today's default
-                // permissions - this must not quietly make a fresh .zshrc 600.
-                if (!OperatingSystem.IsWindows() && existingMode is not null)
-                {
-                    using var stream = new FileStream(tempPath, new FileStreamOptions
-                    {
-                        Mode = FileMode.CreateNew,
-                        Access = FileAccess.Write,
-                        UnixCreateMode = existingMode.Value,
-                    });
-                    stream.Write(updatedBytes, 0, updatedBytes.Length);
-                }
-                else
-                {
-                    File.WriteAllBytes(tempPath, updatedBytes);
-                }
-                File.Move(tempPath, writeTargetPath, overwrite: true);
-            }
-            finally
-            {
-                if (File.Exists(tempPath)) File.Delete(tempPath);
-            }
+            var writeTargetPath = ResolveProfileWriteTarget(profilePath, out _);
+            WriteProfileAtomically(writeTargetPath!, updatedBytes);
 
             Console.WriteLine($"Wrote to {profilePath}.");
         }
@@ -549,6 +493,78 @@ public static class AuthCommand
         succeeded = true;
         Console.WriteLine($"This terminal's environment does not change - open a new terminal or run `source {profilePath}` to pick them up.");
         return effectiveUsersPath;
+    }
+
+    /// <summary>Resolves the file a profile write must land on. `refusal` is set, and
+    /// null returned, when the profile must not be written.</summary>
+    internal static string? ResolveProfileWriteTarget(string profilePath, out string? refusal)
+    {
+        refusal = null;
+
+        // Many people's shell profile is a symlink into a dotfiles repo (stow,
+        // chezmoi, a plain git repo). File.Move REPLACES the target rather than
+        // writing through it - unlinking the symlink and dropping a regular file in
+        // its place, silently detaching the user's setup. Resolve to the final
+        // target first and write-then-rename there instead; a non-symlink
+        // profilePath resolves to itself (ResolveLinkTarget returns null).
+        var writeTargetPath = profilePath;
+        if (File.Exists(profilePath))
+        {
+            var resolvedTarget = File.ResolveLinkTarget(profilePath, returnFinalTarget: true);
+            if (resolvedTarget is not null) writeTargetPath = resolvedTarget.FullName;
+        }
+        return writeTargetPath;
+    }
+
+    /// <summary>Write-then-rename of `bytes` onto writeTargetPath, keeping the replaced
+    /// file's permissions.</summary>
+    internal static void WriteProfileAtomically(string writeTargetPath, byte[] bytes)
+    {
+        // File.Move also does not preserve the replaced file's permissions - a 600
+        // profile would come back 644. Capture the current mode and re-apply it to
+        // the temp file before the rename so it survives. The !IsWindows() guard is
+        // redundant with the caller's (this method only runs on Unix) but is what
+        // the platform-compat analyzer needs to see directly around a Unix-only
+        // API to accept the call - see TightenIfLoose above for the same pattern.
+        UnixFileMode? existingMode = null;
+        if (!OperatingSystem.IsWindows() && File.Exists(writeTargetPath))
+            existingMode = File.GetUnixFileMode(writeTargetPath);
+
+        // Write-then-rename rather than truncate-in-place, so a crash mid-write
+        // leaves either the old file or the new one intact, never a truncated shell
+        // profile. File.Move's overwrite is atomic on the same filesystem, and the
+        // temp file sits next to the target so it always is one.
+        var tempPath = writeTargetPath + $".loom-tmp-{Guid.NewGuid():N}";
+        try
+        {
+            // When the target already exists, create the temp file WITH its mode from
+            // the moment it comes into being - the same technique WriteSecretFile uses
+            // for key files - rather than WriteAllBytes (default permissions, typically
+            // 644) followed by SetUnixFileMode. For a profile deliberately kept at 600
+            // (e.g. because it exports tokens), that write-then-chmod left its full
+            // contents world-readable beside the target for the gap between the two
+            // calls. A brand-new profile (no existing mode) keeps today's default
+            // permissions - this must not quietly make a fresh .zshrc 600.
+            if (!OperatingSystem.IsWindows() && existingMode is not null)
+            {
+                using var stream = new FileStream(tempPath, new FileStreamOptions
+                {
+                    Mode = FileMode.CreateNew,
+                    Access = FileAccess.Write,
+                    UnixCreateMode = existingMode.Value,
+                });
+                stream.Write(bytes, 0, bytes.Length);
+            }
+            else
+            {
+                File.WriteAllBytes(tempPath, bytes);
+            }
+            File.Move(tempPath, writeTargetPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
     }
 
     /// <summary>Pure. Maps $SHELL's basename to the profile file loom persists into.

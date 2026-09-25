@@ -2053,7 +2053,19 @@ structural one-liner.
 
 ---
 
-### 6.36 Every Windows Build Rewrites the Checked-In `LoomProfileInterceptors.g.cs` 🟢 LOW (OPEN — filed 2026-09-25)
+### 6.36 Every Windows Build Rewrites the Checked-In `LoomProfileInterceptors.g.cs` 🟢 LOW (✅ CLOSED 2026-09-25 — `f0a6552`; the diagnosis below was incomplete — see the closing note)
+
+**Closing note (measured on Windows, not on Linux).** The checksum does depend on line endings, but the
+checked-in file was a mix, not "LF, and Linux matches it": the `RecordingAllocationTests.cs` line was hashed
+from LF text, and the lines for `GeneratorTests.cs`, `LoomProfileInterceptorTests.cs` and
+`LoomProfileInterfaceDispatchTests.cs` from CRLF text. That is why only one line changed on a Windows build.
+A Linux build (LF checkout) would therefore have differed on the other three; that part is inferred from
+the Windows measurement, not run on Linux. Fixed by pinning those four files to `eol=lf` in `.gitattributes`
+and committing the file regenerated from LF sources. Verified: after a fresh checkout of the four files
+(`git ls-files --eol` shows `w/lf`), a rebuild and the full suite (894 passed, 6 skipped) leave
+`git status` clean. `GeneratorTests.cs` carries a UTF-8 BOM, which does not change the checksum. A new
+interceptor call site in another test file needs the same pin, or the file dirties again. The original
+entry follows.
 
 `Loom.Telemetry.Tests/Generated/.../LoomProfileInterceptors.g.cs` was committed in `69e4f16`. Its
 `InterceptsLocationAttribute` carries a checksum of `RecordingAllocationTests.cs`, and that checksum

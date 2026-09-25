@@ -1415,7 +1415,7 @@ the case it names; the status code reaching it is what is wrong.
 
 ---
 
-### 6.14 `ParseShellValue` Applies fish Escapes to bash/zsh Values 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.14 `ParseShellValue` Applies fish Escapes to bash/zsh Values 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs`, `ParseShellValue`, on branch
 `sonnet/auth-init-unix-persist` — **not yet on `main`**. It arrives when that branch merges.
@@ -1452,7 +1452,7 @@ narrow enough that another full cycle was not justified.
 
 ---
 
-### 6.15 A Dangling Profile Symlink Is Replaced With a Regular File 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.15 A Dangling Profile Symlink Is Replaced With a Regular File 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`; the diagnosis below was wrong — see the closing note)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs`, the profile write in
 `PersistEnvironmentVariablesUnix`, on branch `sonnet/auth-init-unix-persist` — **not yet on
@@ -1483,6 +1483,15 @@ target. **Do not** fall back to writing a regular file in the link's place.
 
 **Found by** `/code-review high` on round 4 of that branch, and filed for the same reason as
 § 6.14.
+
+**Closing note (2026-09-25).** The premise above is wrong. On Unix, .NET's `File.Exists` returns **true**
+for a dangling symlink; it does not follow the link and return false. Measured in WSL (.NET 10): the first fix,
+which relied on `File.Exists` being false, never fired, and its Unix-only test failed on Linux while being skipped
+on Windows. On the pre-fix code a dangling link was never replaced: `File.ReadAllBytes` on it threw
+`FileNotFoundException`, and the user got "Could not write ...: Could not find file". It was safe but unclear.
+`6c48da0` decides by the final target's existence (`File.ResolveLinkTarget(..., returnFinalTarget: true)`), and
+now refuses a dangling link or chain with a message naming both. Verified live: the link survives and no target
+is created.
 
 ---
 
@@ -1532,7 +1541,7 @@ than a correctness one.
 
 ---
 
-### 6.17 `--persist` Ignores zsh's `ZDOTDIR` and Reports Success 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.17 `--persist` Ignores zsh's `ZDOTDIR` and Reports Success 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
 `sonnet/auth-init-unix-persist` — **not yet on `main`**. Line number from the branch at `377a9d1`.
@@ -1559,7 +1568,7 @@ add cases to its existing table test.
 **Found by** `/code-review high` on round 6 of that branch. Filed rather than fixed, for the same
 reason as § 6.16: a narrow precondition and a loud, fail-closed outcome.
 
-### 6.18 A Relative `XDG_CONFIG_HOME` Puts `config.fish` Under the Current Directory 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.18 A Relative `XDG_CONFIG_HOME` Puts `config.fish` Under the Current Directory 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
 `sonnet/auth-init-unix-persist` — **not yet on `main`**. Line numbers from the branch at `8c6e298`.
@@ -1580,7 +1589,7 @@ pure; add a relative-value case to the existing `ResolveUnixProfilePath` table t
 
 **Found by** `/code-review medium` on round 8 of that branch; confirmed by reading.
 
-### 6.19 The CLI Falls Back to a Relative dev-secrets Path When the Data Folder Is Unknown 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.19 The CLI Falls Back to a Relative dev-secrets Path When the Data Folder Is Unknown 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
 `sonnet/auth-init-unix-persist` — **not yet on `main`**. `ResolveUsersFileForCli` (`:899-929`) and
@@ -1606,7 +1615,7 @@ directory.
 **Fix shape:** in both resolvers, refuse when the dev-secrets fallback would be chosen and
 `DevSecretsDirectory` is not rooted — the same check `init` makes.
 
-### 6.20 `init` Crashes When the Data Folder Is Not Writable 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.20 `init` Crashes When the Data Folder Is Not Writable 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`; the message names a not-yet-existing parent — tidied in the § 6.16 round)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs`, `EnsureDevSecretsDirectory`. Line
 number from branch `sonnet/auth-init-unix-persist` at `14bf21a` (`:242`); **`main` has the same
@@ -1630,7 +1639,7 @@ false before any `FileAccessCheck`.
 
 **Found by** `/code-review medium` on round 9 of that branch.
 
-### 6.21 `--persist` Drops Permission Bits From a Profile It Rewrites 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.21 `--persist` Drops Permission Bits From a Profile It Rewrites 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
 `sonnet/auth-init-unix-persist` — **not yet on `main`**. Line numbers from the branch at `14bf21a`.
@@ -1651,7 +1660,7 @@ already exists with a mode no looser than the target's.
 
 **Found by** `/code-review medium` on round 9 of that branch.
 
-### 6.22 A Username Over ~400 Bytes Logs In but Every Request 401s 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.22 A Username Over ~400 Bytes Logs In but Every Request 401s 🟢 LOW (✅ CLOSED 2026-09-25 — merge `340e1a6`; the matching `loom auth add-user` cap follows in the § 6.16 round)
 
 **Where the code lives:** `Loom.Security/JwtValidator.cs:87` (`stackalloc byte[512]` for the claims), line
 numbers at `5e8d545`. `JwtIssuer.IssueWithSessionStart` and `UserStore.Load` accept a username of any length.
@@ -1672,7 +1681,7 @@ discovered at request time. Alternatively decode oversized claims into an `Array
 
 **Found by** `/code-review high Loom.Security` (pre-publish review #1).
 
-### 6.23 The `Bearer` Scheme Match Is Case-Sensitive 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.23 The `Bearer` Scheme Match Is Case-Sensitive 🟢 LOW (✅ CLOSED 2026-09-25 — merge `340e1a6`)
 
 **Where the code lives:** `Loom.Security/AuthenticationMiddleware.cs:82` and `Loom.Security/TokenEndpoints.cs:63`,
 both `StartsWith("Bearer ", StringComparison.Ordinal)`. Line numbers at `5e8d545`.
@@ -1689,7 +1698,7 @@ proxies that normalise header values are pointed at it.
 
 **Found by** `/code-review high Loom.Security` (pre-publish review #1).
 
-### 6.24 `Retry-After: 0` in the Last Second of a Login Lockout 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.24 `Retry-After: 0` in the Last Second of a Login Lockout 🟢 LOW (✅ CLOSED 2026-09-25 — merge `340e1a6`)
 
 **Where the code lives:** `Loom.Security/TokenEndpoints.cs:28`, `((int)retryAfter.TotalSeconds).ToString()`.
 Line number at `5e8d545`.
@@ -1709,7 +1718,7 @@ fold this in if that round is still open.
 
 **Found by** `/code-review high Loom.Security` (pre-publish review #1).
 
-### 6.25 `LoginThrottle.IsBlocked` / `RecordFailure` Are Still Public 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.25 `LoginThrottle.IsBlocked` / `RecordFailure` Are Still Public 🟢 LOW (✅ CLOSED — found already `internal`, with `InternalsVisibleTo`, on 2026-09-25)
 
 **Where the code lives:** `Loom.Security/LoginThrottle.cs:18` and `:34`, at `b48b717`.
 
@@ -2026,6 +2035,19 @@ structural one-liner.
    test suite **and** in `Loom.AotProbe`, so the Linux AOT CI job enforces it natively.
 3. Reword the description and README to what is then measured true.
 4. Tags, gauges and the error path are separate, larger work; state their costs honestly rather than fix them now.
+
+---
+
+### 6.36 Every Windows Build Rewrites the Checked-In `LoomProfileInterceptors.g.cs` 🟢 LOW (OPEN — filed 2026-09-25)
+
+`Loom.Telemetry.Tests/Generated/.../LoomProfileInterceptors.g.cs` was committed in `69e4f16`. Its
+`InterceptsLocationAttribute` carries a checksum of `RecordingAllocationTests.cs`, and that checksum
+depends on line endings. The file is stored LF (`i/lf`) and checked out CRLF on Windows (`text=auto`,
+`core.autocrlf=true`), so every Windows build rewrites one line of the generated file. Linux builds match it.
+The result is a permanently dirty file that must never be staged, in every Windows checkout and worktree.
+
+**Fix options:** pin the test sources an interceptor points at to LF in `.gitattributes`, or stop checking in
+this generator's output (keep only the RequestDelegateGenerator output that `ac34669` checked in on purpose).
 
 ---
 

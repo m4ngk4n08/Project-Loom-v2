@@ -575,6 +575,11 @@ public static class AuthCommand
                     UnixCreateMode = existingMode.Value,
                 });
                 stream.Write(bytes, 0, bytes.Length);
+
+                // UnixCreateMode is masked by the process umask (022 turns 664 into 644),
+                // so the mode captured above is only a ceiling at creation. Set it
+                // explicitly, before the rename, to restore exactly what the file had.
+                File.SetUnixFileMode(tempPath, existingMode.Value);
             }
             else
             {

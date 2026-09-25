@@ -448,6 +448,28 @@ public class AuthCommandTests
         finally { Directory.Delete(dir, recursive: true); }
     }
 
+    // The process umask (usually 022) strips group-write from UnixCreateMode, so a 664
+    // profile used to come back 644. Proves nothing if the host's umask is 000.
+    [UnixOnlyFact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void WriteProfileAtomically_PreservesTheExistingFilesPermissionBits()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var file = Path.Combine(dir, ".zshrc");
+            File.WriteAllText(file, "# old\n");
+            const UnixFileMode mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead;
+            File.SetUnixFileMode(file, mode);
+
+            AuthCommand.WriteProfileAtomically(file, Encoding.UTF8.GetBytes("# new\n"));
+
+            Assert.Equal("# new\n", File.ReadAllText(file));
+            Assert.Equal(mode, File.GetUnixFileMode(file));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
     [Fact]
     public void UpsertUnixPersistBlockBytes_NonAsciiPath_EncodesBlockAsUtf8NotLatin1()
     {

@@ -37,7 +37,8 @@ public static class AuthCommand
             return false;
         }
 
-        var directoryTightened = EnsureDevSecretsDirectory();
+        var directoryTightened = EnsureDevSecretsDirectory(out var directoryCreateFailed);
+        if (directoryCreateFailed) return false;
         var keyPath = Path.Combine(DevSecretsDirectory, "jwt.key");
         var usersPath = Path.Combine(DevSecretsDirectory, "users");
 
@@ -227,20 +228,34 @@ public static class AuthCommand
     /// leftover from before this fix), tightens it in place rather than trusting the mode
     /// it already has. Returns false when it exists but could not be tightened (see
     /// TightenIfLoose) - init's whole promise on Unix is a private dev-secrets directory,
-    /// and succeeding while that promise is unmet would be a lie.</summary>
-    private static bool EnsureDevSecretsDirectory()
+    /// and succeeding while that promise is unmet would be a lie.
+    ///
+    /// `createFailed` is a separate outcome from a false return: a directory that exists
+    /// but is loose is survivable (init carries on and reports it), whereas one that could
+    /// not be CREATED means the key write that follows would crash on a directory that
+    /// does not exist. The failure is already printed to stderr when createFailed is true.</summary>
+    private static bool EnsureDevSecretsDirectory(out bool createFailed)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Directory.CreateDirectory(DevSecretsDirectory);
-            return true;
-        }
-
-        if (Directory.Exists(DevSecretsDirectory))
+        createFailed = false;
+        if (!OperatingSystem.IsWindows() && Directory.Exists(DevSecretsDirectory))
             return TightenIfLoose(DevSecretsDirectory, SecretDirMode);
 
-        Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode);
-        return true;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                Directory.CreateDirectory(DevSecretsDirectory);
+            else
+                Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            var parent = Path.GetDirectoryName(DevSecretsDirectory);
+            Console.Error.WriteLine($"Could not create {DevSecretsDirectory}: {ex.Message}");
+            Console.Error.WriteLine($"  Check that you can write to {parent}, or set LOCALAPPDATA (Windows) or XDG_DATA_HOME (Unix) to a writable location.");
+            createFailed = true;
+            return false;
+        }
     }
 
     /// <summary>Creates a new file at 600 on Unix by passing the mode to the OS at create

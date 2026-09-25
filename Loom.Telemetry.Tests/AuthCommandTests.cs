@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -480,6 +481,41 @@ public class AuthCommandTests
             Assert.Equal(mode, File.GetUnixFileMode(file));
         }
         finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    // KeyMaterial.DevSecretsDirectory is recomputed from XDG_DATA_HOME on every call, so a
+    // read-only data home reaches EnsureDevSecretsDirectory's create. Before the fix this
+    // threw an uncaught UnauthorizedAccessException out of Init.
+    [UnixOnlyFact(RequireNonRoot = true)]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void Init_DataFolderNotWritable_ReturnsFalseAndCreatesNothing()
+    {
+        var dataHome = Directory.CreateTempSubdirectory("loom-xdg-").FullName;
+        var previousXdg = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        var previousError = Console.Error;
+        var previousOut = Console.Out;
+        var error = new StringWriter();
+        try
+        {
+            File.SetUnixFileMode(dataHome, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", dataHome);
+            Console.SetError(error);
+            Console.SetOut(TextWriter.Null);
+
+            var succeeded = AuthCommand.Init(persist: false);
+
+            Assert.False(succeeded);
+            Assert.Contains("Could not create", error.ToString());
+            Assert.Empty(Directory.GetFileSystemEntries(dataHome));
+        }
+        finally
+        {
+            Console.SetError(previousError);
+            Console.SetOut(previousOut);
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previousXdg);
+            File.SetUnixFileMode(dataHome, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.Delete(dataHome, recursive: true);
+        }
     }
 
     [Fact]

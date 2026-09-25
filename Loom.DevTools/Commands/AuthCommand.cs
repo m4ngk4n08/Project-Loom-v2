@@ -33,7 +33,7 @@ public static class AuthCommand
         if (!Path.IsPathRooted(devSecretsDirectory))
         {
             Console.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devSecretsDirectory}'.");
-            Console.WriteLine("Refusing to write a signing key under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix) and try again.");
+            Console.WriteLine("Refusing to write a signing key under the current directory. Check that your user profile is intact (Windows), or set XDG_DATA_HOME/HOME (Unix), and try again.");
             return false;
         }
 
@@ -74,9 +74,10 @@ public static class AuthCommand
                 Console.WriteLine();
                 var existingUsersPath = File.Exists(usersPath) ? usersPath : null;
                 Console.WriteLine("Set these before starting loom-dashboard:");
-                Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
                 if (existingUsersPath is not null)
-                    Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, existingUsersPath));
+                    PrintSetVarLines((KeyMaterial.KeyFileVariable, keyPath), (KeyMaterial.UsersFileVariable, existingUsersPath));
+                else
+                    PrintSetVarLines((KeyMaterial.KeyFileVariable, keyPath));
                 Console.WriteLine();
 
                 // Printed AFTER persisting, from what actually happened - not before,
@@ -171,8 +172,7 @@ public static class AuthCommand
         Console.WriteLine(usersFileAlreadyExisted ? $"Users file already exists at {usersPath}." : $"Wrote {usersPath}");
         Console.WriteLine();
         Console.WriteLine("Set these before starting loom-dashboard:");
-        Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
-        Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, usersPath));
+        PrintSetVarLines((KeyMaterial.KeyFileVariable, keyPath), (KeyMaterial.UsersFileVariable, usersPath));
 
         var freshPersisted = true;
         if (persist)
@@ -187,41 +187,72 @@ public static class AuthCommand
         }
 
         Console.WriteLine();
-        Console.WriteLine($"Then add an operator:  loom auth add-user operator --users-file {QuoteForCurrentShell(usersPath)}");
+        foreach (var line in RenderAddUserHint(OperatingSystem.IsWindows(), Environment.GetEnvironmentVariable("SHELL"), usersPath))
+            Console.WriteLine(line);
 
         return directoryTightened && usersFileTightened && freshPersisted;
     }
 
-    /// <summary>The "set these before starting" line, in the syntax the terminal the user
-    /// is actually in will accept - PowerShell on Windows, otherwise whatever
-    /// RenderUnixExportLine would put in the shell profile. Printing `$env:` syntax to a
-    /// Linux or macOS terminal is not just cosmetic: pasted verbatim, it is a syntax
-    /// error there. Routed through QuoteForCurrentShell rather than a hand-rolled,
-    /// always-double-quoted format, so a path containing `$` or a backtick can't print
-    /// one thing here and be misread as something else when pasted: PowerShell
-    /// interpolates both inside double quotes, so the Windows branch uses PowerShell's
-    /// single-quoted literal form - the same quoting QuoteForCurrentShell gives the
-    /// printed `add-user --users-file` line - and the Unix branch uses the same
-    /// per-shell renderer the persisted file itself is written with.</summary>
-    private static string FormatSetVarLine(string variable, string value)
+    private const string CmdPercentNote = "(Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
+
+    /// <summary>Pure. The "set these before starting" lines, in the syntax the terminal
+    /// the user is actually in will accept. Windows could be PowerShell or cmd.exe and
+    /// there is no reliable way to tell which, so both are printed under labels. Unix
+    /// prints whatever RenderUnixExportLine puts in the shell profile - `$env:` pasted
+    /// into a Linux or macOS terminal is a syntax error.
+    ///
+    /// PowerShell uses the single-quoted literal form (`''` doubles a quote), NOT double
+    /// quotes, which it interpolates: `$` or a backtick inside `"..."` sets a wrong value.
+    /// cmd uses `set "NAME=value"`, but expands %NAME% even inside quotes and has no
+    /// reliable interactive escape for `%`, so a value containing one gets a note
+    /// instead of a line that would silently mean something else.</summary>
+    internal static string[] RenderSetVarLines(bool isWindows, string? shellEnvValue, params (string Variable, string Value)[] vars)
     {
-        if (OperatingSystem.IsWindows()) return $"  $env:{variable} = {QuoteForCurrentShell(value)}";
-        var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
-        return "  " + RenderUnixExportLine(isFish, variable, value);
+        var lines = new List<string>();
+        if (!isWindows)
+        {
+            var isFish = ClassifyUnixShell(shellEnvValue) == "fish";
+            foreach (var (variable, value) in vars)
+                lines.Add("  " + RenderUnixExportLine(isFish, variable, value));
+            return [.. lines];
+        }
+
+        lines.Add("  PowerShell:");
+        foreach (var (variable, value) in vars)
+            lines.Add($"    $env:{variable} = {QuotePowerShell(value)}");
+        lines.Add("  Command Prompt:");
+        foreach (var (variable, value) in vars)
+            lines.Add(value.Contains('%') ? "    " + CmdPercentNote : $"    set \"{variable}={value}\"");
+        return [.. lines];
     }
 
-    /// <summary>Quotes a value for whatever shell the user is actually in, matching
-    /// FormatSetVarLine's own per-platform choice, so a printed CLI command (e.g. the
-    /// "add-user" line Init prints) can be copied and pasted with the same safety as the
-    /// "set these" lines - one path value, one quoting rule, everywhere it is printed.
-    /// PowerShell's literal form is single-quoted with `''` doubling for an embedded
-    /// quote - NOT double quotes, which PowerShell interpolates: a path containing `$`
-    /// or a backtick inside `"..."` sets a wrong or empty value when pasted.</summary>
-    private static string QuoteForCurrentShell(string value)
+    /// <summary>Pure. The "Then add an operator" hint. Same per-shell rules as
+    /// RenderSetVarLines: Unix is one line, Windows is one line per shell.</summary>
+    internal static string[] RenderAddUserHint(bool isWindows, string? shellEnvValue, string usersPath)
     {
-        if (OperatingSystem.IsWindows()) return "'" + value.Replace("'", "''") + "'";
-        var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
-        return isFish ? QuoteFishSingle(value) : QuotePosixSingle(value);
+        const string prefix = "loom auth add-user operator --users-file ";
+        if (!isWindows)
+        {
+            var quoted = ClassifyUnixShell(shellEnvValue) == "fish" ? QuoteFishSingle(usersPath) : QuotePosixSingle(usersPath);
+            return [$"Then add an operator:  {prefix}{quoted}"];
+        }
+
+        return
+        [
+            "Then add an operator:",
+            $"  PowerShell:      {prefix}{QuotePowerShell(usersPath)}",
+            usersPath.Contains('%')
+                ? "  Command Prompt:  " + CmdPercentNote
+                : $"  Command Prompt:  {prefix}\"{usersPath}\"",
+        ];
+    }
+
+    private static string QuotePowerShell(string value) => "'" + value.Replace("'", "''") + "'";
+
+    private static void PrintSetVarLines(params (string Variable, string Value)[] vars)
+    {
+        foreach (var line in RenderSetVarLines(OperatingSystem.IsWindows(), Environment.GetEnvironmentVariable("SHELL"), vars))
+            Console.WriteLine(line);
     }
 
     /// <summary>Creates dev-secrets at 700 on Unix. If it already exists (a re-run, or a
@@ -250,12 +281,24 @@ public static class AuthCommand
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
-            var parent = Path.GetDirectoryName(DevSecretsDirectory);
+            var parent = NearestExistingAncestor(DevSecretsDirectory);
             Console.Error.WriteLine($"Could not create {DevSecretsDirectory}: {ex.Message}");
-            Console.Error.WriteLine($"  Check that you can write to {parent}, or set LOCALAPPDATA (Windows) or XDG_DATA_HOME (Unix) to a writable location.");
+            Console.Error.WriteLine($"  Check that you can write to {parent}, or (Unix) set XDG_DATA_HOME to a writable location.");
             createFailed = true;
             return false;
         }
+    }
+
+    /// <summary>The first directory at or above `path`'s parent that exists. The direct
+    /// parent usually does not exist yet (`.../Loom` under a fresh data home), so naming it
+    /// points the user at a directory they cannot check; the one that blocks the create
+    /// is the nearest existing one.</summary>
+    internal static string? NearestExistingAncestor(string path)
+    {
+        var current = Path.GetDirectoryName(path);
+        while (!string.IsNullOrEmpty(current) && !Directory.Exists(current))
+            current = Path.GetDirectoryName(current);
+        return current;
     }
 
     /// <summary>Creates a new file at 600 on Unix by passing the mode to the OS at create
@@ -999,7 +1042,7 @@ public static class AuthCommand
         if (resolved == devPath && !Path.IsPathRooted(devPath))
         {
             Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
-            Console.Error.WriteLine($"  Refusing to use a users file under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.UsersFileVariable}, or pass --users-file.");
+            Console.Error.WriteLine($"  Refusing to use a users file under the current directory. Set {KeyMaterial.UsersFileVariable}, pass --users-file, or (Unix) set XDG_DATA_HOME/HOME.");
             return null;
         }
 
@@ -1037,7 +1080,7 @@ public static class AuthCommand
         if (resolved == devPath && !Path.IsPathRooted(devPath))
         {
             Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
-            Console.Error.WriteLine($"  Refusing to read a signing key from under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.KeyFileVariable}, or pass --key-file.");
+            Console.Error.WriteLine($"  Refusing to read a signing key from under the current directory. Set {KeyMaterial.KeyFileVariable}, pass --key-file, or (Unix) set XDG_DATA_HOME/HOME.");
             return null;
         }
 
@@ -1077,6 +1120,30 @@ public static class AuthCommand
             return false;
         }
 
+        // Before ReadPassword, so nobody types a password that is then thrown away. Each
+        // refusal is a name UserStore.Load would reject or read differently - and Load
+        // rejecting means the dashboard cannot start.
+        var nameProblem = ValidateNewUsername(username);
+        if (nameProblem is not null)
+        {
+            Console.Error.WriteLine($"Refusing to add that user: {nameProblem}");
+            return false;
+        }
+
+        try
+        {
+            if (UsernameExists(usersPath, username))
+            {
+                Console.Error.WriteLine($"Refusing to add that user: '{username}' already exists in {usersPath}.");
+                return false;
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            Console.Error.WriteLine($"Could not read {usersPath}: {ex.Message}");
+            return false;
+        }
+
         var line = $"{username}:{PasswordHasher.Hash(ReadPassword())}";
         try
         {
@@ -1089,6 +1156,37 @@ public static class AuthCommand
         }
         Console.WriteLine($"Added '{username}' to {usersPath}.");
         return true;
+    }
+
+    /// <summary>Pure. Null when `name` is safe to append as a users-file record, else the
+    /// reason. Mirrors UserStore.Load: it Trims each line, treats a leading `#` as a
+    /// comment, splits at the first `:`, and aborts host startup on an over-long name.</summary>
+    internal static string? ValidateNewUsername(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "the username is empty.";
+        if (name != name.Trim()) return "the username has leading or trailing whitespace, which the users file would trim away.";
+        if (name.Contains(':')) return "the username contains ':', which separates the name from the hash.";
+        if (name[0] == '#') return "a username starting with '#' would be read as a comment, so the user would not exist.";
+        if (name.Any(char.IsControl)) return "the username contains a control character, which would corrupt the users file.";
+        if (Encoding.UTF8.GetByteCount(name) > UserStore.MaxUsernameBytes)
+            return $"the username is over {UserStore.MaxUsernameBytes} UTF-8 bytes, which would stop the dashboard starting.";
+        return null;
+    }
+
+    /// <summary>Whether a record for `name` is already in the users file, parsed the way
+    /// UserStore.Load parses it: trimmed lines, `#` comments skipped, split at the first
+    /// `:`, names compared ordinally.</summary>
+    internal static bool UsernameExists(string usersPath, string name)
+    {
+        foreach (var raw in File.ReadLines(usersPath))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#')) continue;
+            var split = line.IndexOf(':');
+            if (split <= 0) continue;
+            if (string.Equals(line[..split], name, StringComparison.Ordinal)) return true;
+        }
+        return false;
     }
 
     public static void Hash() => Console.WriteLine(PasswordHasher.Hash(ReadPassword()));

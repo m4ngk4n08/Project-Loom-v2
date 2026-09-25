@@ -527,6 +527,7 @@ public class AuthCommandTests
 
             Assert.False(succeeded);
             Assert.Contains("Could not create", error.ToString());
+            Assert.Contains($"write to {dataHome}", error.ToString());
             Assert.Empty(Directory.GetFileSystemEntries(dataHome));
         }
         finally
@@ -537,6 +538,152 @@ public class AuthCommandTests
             File.SetUnixFileMode(dataHome, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             Directory.Delete(dataHome, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData("alice")]
+    [InlineData("a b")]
+    [InlineData("José")]
+    public void ValidateNewUsername_AcceptsOrdinaryNames(string name) =>
+        Assert.Null(AuthCommand.ValidateNewUsername(name));
+
+    [Fact]
+    public void ValidateNewUsername_Accepts128BytesRejects129()
+    {
+        Assert.Null(AuthCommand.ValidateNewUsername(new string('a', UserStore.MaxUsernameBytes)));
+        Assert.NotNull(AuthCommand.ValidateNewUsername(new string('a', UserStore.MaxUsernameBytes + 1)));
+        // 43 x U+20AC is 43 chars but 129 bytes: bytes, not chars.
+        Assert.NotNull(AuthCommand.ValidateNewUsername(new string('€', 43)));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(" alice")]
+    [InlineData("alice ")]
+    [InlineData("al:ice")]
+    [InlineData(":alice")]
+    [InlineData("#alice")]
+    [InlineData("al\nice")]
+    [InlineData("al\tice")]
+    [InlineData("alice\r")]
+    public void ValidateNewUsername_RefusesNamesTheHostWouldRejectOrMisread(string name) =>
+        Assert.NotNull(AuthCommand.ValidateNewUsername(name));
+
+    [Fact]
+    public void UsernameExists_MatchesOrdinallyAndSkipsCommentsAndPaddedLines()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllLines(path, ["# alice:x", "", $"  bob:{PasswordHasher.Hash("pw")}  ", $"Alice:{PasswordHasher.Hash("pw")}"]);
+
+            Assert.True(AuthCommand.UsernameExists(path, "bob"));
+            Assert.True(AuthCommand.UsernameExists(path, "Alice"));
+            Assert.False(AuthCommand.UsernameExists(path, "alice"));   // ordinal, like Load
+            Assert.False(AuthCommand.UsernameExists(path, "carol"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void NearestExistingAncestor_SkipsDirectoriesThatDoNotExistYet()
+    {
+        var root = Directory.CreateTempSubdirectory("loom-anc-").FullName;
+        try
+        {
+            var deep = Path.Combine(root, "missing", "Loom", "dev-secrets");
+            Assert.Equal(root, AuthCommand.NearestExistingAncestor(deep));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private const string Note = "    (Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
+
+    private static void AssertLines(string[] expected, string[] actual) => Assert.Equal(expected, actual);
+
+    [Fact]
+    public void RenderSetVarLines_Windows_HoldsBothLabelledForms()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null,
+            ("LOOM_JWT_KEY_FILE", @"C:\d\jwt.key"), ("LOOM_AUTH_USERS_FILE", @"C:\d\users"));
+
+        AssertLines(
+        [
+            "  PowerShell:",
+            @"    $env:LOOM_JWT_KEY_FILE = 'C:\d\jwt.key'",
+            @"    $env:LOOM_AUTH_USERS_FILE = 'C:\d\users'",
+            "  Command Prompt:",
+            "    set \"LOOM_JWT_KEY_FILE=C:\\d\\jwt.key\"",
+            "    set \"LOOM_AUTH_USERS_FILE=C:\\d\\users\"",
+        ], lines);
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Windows_QuoteDoublesInPowerShellAndIsUntouchedForCmd()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null, ("V", @"C:\o'brien\k"));
+
+        Assert.Contains(@"    $env:V = 'C:\o''brien\k'", lines);
+        Assert.Contains("    set \"V=C:\\o'brien\\k\"", lines);
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Windows_PercentGetsNoteInsteadOfCmdLine()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null, ("V", @"C:\100%\k"));
+
+        Assert.Contains(@"    $env:V = 'C:\100%\k'", lines);
+        Assert.Contains(Note, lines);
+        Assert.DoesNotContain(lines, l => l.Contains("set \"V="));
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Windows_DollarAndBacktickStayLiteralInBothForms()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null, ("V", "C:\\a$b`c\\k"));
+
+        Assert.Contains("    $env:V = 'C:\\a$b`c\\k'", lines);
+        Assert.Contains("    set \"V=C:\\a$b`c\\k\"", lines);
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Unix_IsUnchangedAndUnlabelled()
+    {
+        var bash = AuthCommand.RenderSetVarLines(false, "/bin/bash", ("LOOM_JWT_KEY_FILE", "/h/it's/jwt.key"), ("LOOM_AUTH_USERS_FILE", "/h/users"));
+        var fish = AuthCommand.RenderSetVarLines(false, "/usr/bin/fish", ("LOOM_JWT_KEY_FILE", "/h/it's/jwt.key"), ("LOOM_AUTH_USERS_FILE", "/h/users"));
+
+        AssertLines(
+        [
+            "  export LOOM_JWT_KEY_FILE='/h/it'\\''s/jwt.key'",
+            "  export LOOM_AUTH_USERS_FILE='/h/users'",
+        ], bash);
+        AssertLines(
+        [
+            "  set -gx LOOM_JWT_KEY_FILE '/h/it\\'s/jwt.key'",
+            "  set -gx LOOM_AUTH_USERS_FILE '/h/users'",
+        ], fish);
+    }
+
+    [Fact]
+    public void RenderAddUserHint_Windows_HasBothForms_AndPercentNote()
+    {
+        var hint = AuthCommand.RenderAddUserHint(true, null, @"C:\o'b\users");
+        Assert.Equal("Then add an operator:", hint[0]);
+        Assert.Equal(@"  PowerShell:      loom auth add-user operator --users-file 'C:\o''b\users'", hint[1]);
+        Assert.Equal("  Command Prompt:  loom auth add-user operator --users-file \"C:\\o'b\\users\"", hint[2]);
+
+        var pct = AuthCommand.RenderAddUserHint(true, null, @"C:\100%\users");
+        Assert.Equal("  Command Prompt:  " + Note.TrimStart(), pct[2]);
+    }
+
+    [Fact]
+    public void RenderAddUserHint_Unix_IsOneUnlabelledLine()
+    {
+        AssertLines(["Then add an operator:  loom auth add-user operator --users-file '/h/users'"],
+            AuthCommand.RenderAddUserHint(false, "/bin/bash", "/h/users"));
+        AssertLines(["Then add an operator:  loom auth add-user operator --users-file '/h/it\\'s'"],
+            AuthCommand.RenderAddUserHint(false, "/usr/bin/fish", "/h/it's"));
     }
 
     [Fact]

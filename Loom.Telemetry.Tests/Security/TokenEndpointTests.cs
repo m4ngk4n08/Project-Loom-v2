@@ -148,4 +148,18 @@ public sealed class TokenEndpointTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Refresh_LowercaseBearerScheme_Returns200()
+    {
+        await using var api = await StartAsync($"alice:{PasswordHasher.Hash("pw")}");
+
+        var aliceToken = api.Issuer.Issue("alice", TokenEndpoints.AccessTokenLifetime);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/token/refresh");
+        request.Headers.Add("Authorization", $"bearer {aliceToken}");
+        var response = await api.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
 }

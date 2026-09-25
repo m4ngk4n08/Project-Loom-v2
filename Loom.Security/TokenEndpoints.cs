@@ -68,7 +68,7 @@ public static class TokenEndpoints
             UserStore users) =>
         {
             var header = context.Request.Headers.Authorization.ToString();
-            if (!header.StartsWith("Bearer ", StringComparison.Ordinal))
+            if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 return Results.StatusCode(StatusCodes.Status401Unauthorized);
 
             if (validator.Validate(header.AsSpan(7), out var principal) != JwtFailure.None)

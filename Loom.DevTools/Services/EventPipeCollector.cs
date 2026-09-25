@@ -181,10 +181,6 @@ public sealed class EventPipeCollector : IDisposable
                     return;
                 }
 
-                // Only ingest actual value-publish events; BeginInstrumentReporting is metadata only
-                if (!eventName.Contains("ValuePublished"))
-                    return;
-
                 if (!EventPipeMetricPayload.TryBuildRecord(eventName, traceEvent.PayloadNames, i => traceEvent.PayloadValue(i), DateTime.UtcNow.Ticks, out var record))
                     return;
 

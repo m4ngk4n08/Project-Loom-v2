@@ -427,6 +427,16 @@ public static class AuthCommand
 
         try
         {
+            // First, before File.Exists below reads a dangling link as an empty profile.
+            var writeTargetPath = ResolveProfileWriteTarget(profilePath, out var refusal);
+            if (writeTargetPath is null)
+            {
+                Console.Error.WriteLine(refusal);
+                Console.WriteLine("Add the exports above to your shell profile manually.");
+                succeeded = false;
+                return null;
+            }
+
             var directory = Path.GetDirectoryName(profilePath);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
@@ -477,8 +487,7 @@ public static class AuthCommand
 
             var updatedBytes = UpsertUnixPersistBlockBytes(existingBytes, existing, block);
 
-            var writeTargetPath = ResolveProfileWriteTarget(profilePath, out _);
-            WriteProfileAtomically(writeTargetPath!, updatedBytes);
+            WriteProfileAtomically(writeTargetPath, updatedBytes);
 
             Console.WriteLine($"Wrote to {profilePath}.");
         }
@@ -500,6 +509,18 @@ public static class AuthCommand
     internal static string? ResolveProfileWriteTarget(string profilePath, out string? refusal)
     {
         refusal = null;
+
+        // File.Exists follows links, so for a dangling one it is false: the resolution
+        // below would be skipped and File.Move would replace the link with a regular
+        // file, silently detaching the user's dotfiles setup - and the caller's own
+        // File.Exists would have read the profile as empty. Detect the link without
+        // following it, and refuse rather than guess where it was meant to point.
+        var linkTarget = new FileInfo(profilePath).LinkTarget;
+        if (linkTarget is not null && !File.Exists(profilePath))
+        {
+            refusal = $"{profilePath} is a symlink to {linkTarget}, which does not exist - refusing to replace the link with a regular file.";
+            return null;
+        }
 
         // Many people's shell profile is a symlink into a dotfiles repo (stow,
         // chezmoi, a plain git repo). File.Move REPLACES the target rather than

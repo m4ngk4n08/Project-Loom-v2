@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Text;
 using Loom.DevTools.Commands;
@@ -389,6 +390,62 @@ public class AuthCommandTests
         var block = AuthCommand.RenderUnixPersistBlock(shellEnvValue, "/home/u/jwt.key", weirdPath);
 
         Assert.Equal(weirdPath, AuthCommand.ExtractExistingUsersPath(block));
+    }
+
+    [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_DanglingSymlink_RefusesAndLeavesTheLinkAlone()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var link = Path.Combine(dir, ".zshrc");
+            var missingTarget = Path.Combine(dir, "dotfiles", "zshrc");
+            File.CreateSymbolicLink(link, missingTarget);
+
+            var result = AuthCommand.ResolveProfileWriteTarget(link, out var refusal);
+
+            Assert.Null(result);
+            Assert.Contains(link, refusal);
+            Assert.Contains(missingTarget, refusal);
+            Assert.Equal(missingTarget, new FileInfo(link).LinkTarget);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_LiveSymlink_ResolvesToItsTarget()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var target = Path.Combine(dir, "zshrc");
+            File.WriteAllText(target, "# real\n");
+            var link = Path.Combine(dir, ".zshrc");
+            File.CreateSymbolicLink(link, target);
+
+            var result = AuthCommand.ResolveProfileWriteTarget(link, out var refusal);
+
+            Assert.Equal(target, result);
+            Assert.Null(refusal);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_RegularFile_ResolvesToItself()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var file = Path.Combine(dir, ".zshrc");
+            File.WriteAllText(file, "# real\n");
+
+            var result = AuthCommand.ResolveProfileWriteTarget(file, out var refusal);
+
+            Assert.Equal(file, result);
+            Assert.Null(refusal);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 
     [Fact]

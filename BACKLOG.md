@@ -619,7 +619,13 @@ No telemetry, no logs, no configuration.
 
 ---
 
-### 4.10 Setup Instructions Are Windows-Only on the Platform That Ships 🟢 LOW
+### 4.10 Setup Instructions Are Windows-Only on the Platform That Ships 🟢 LOW (✅ CLOSED 2026-09-25 — found already fixed; verified against the code, not re-run)
+
+**Closing note.** Both items are gone from the code. (1) `AuthCommand.RenderSetVarLines`
+(`AuthCommand.cs`) renders `export`/`set -gx` on Unix and both PowerShell and cmd forms on
+Windows, covered by tests (§ 6.16 round, merge `189f1bd`). (2) No non-`.md` file contains the
+string "Windows dev setup". Not checked: what the startup failure message says now, only that
+the old wording is absent. The original entry follows unchanged.
 
 **Issue:** Two operator-facing messages hardcode Windows syntax and print unchanged on
 Linux. Both were hit while smoke-testing the Linux AOT binary in WSL on 2026-08-31.
@@ -697,7 +703,16 @@ the pattern is established in the same file.
 
 ---
 
-### 5.3 Alerting README Documents a Call That Throws 🟢 LOW
+### 5.3 Alerting README Documents a Call That Throws 🟢 LOW (✅ CLOSED 2026-09-25 — README corrected; the root cause below is stale)
+
+**Correction.** `WebhookAlertTarget` no longer takes a `string webhookUrl`. Its constructor is
+`(IHttpClientFactory, IOptions<WebhookAlertOptions>)` (`AlertTargets.cs:8`), and a test
+(`ServiceCollectionExtensions_AddWebhookAlertTarget_ResolvesFromDI_EvenWithoutConfiguredUrl`)
+shows it resolves once `AddHttpClient()` is registered, doing nothing until a URL is set. The
+README example omitted `AddHttpClient()` and the `WebhookAlertOptions` configuration that
+`Loom.Dashboard.AspNetCore` registers (`ServiceExtensions.cs:50-53`). It now shows both. The
+resolution failure without `AddHttpClient()` is inferred from standard DI behavior, not run.
+The original entry below describes the older constructor.
 
 **Issue:** `Loom.Telemetry.Alerting/README.md:26` instructs
 `services.AddAlertTarget<WebhookAlertTarget>();` as a usage example. Following it
@@ -2048,6 +2063,25 @@ The result is a permanently dirty file that must never be staged, in every Windo
 
 **Fix options:** pin the test sources an interceptor points at to LF in `.gitattributes`, or stop checking in
 this generator's output (keep only the RequestDelegateGenerator output that `ac34669` checked in on purpose).
+
+---
+
+### 6.37 `Init_DataFolderNotWritable_ReturnsFalseAndCreatesNothing` Fails on macOS 🟢 LOW (OPEN — filed 2026-09-25)
+
+CI run `36110211951` on `20898b8`: macOS 899 passed, 1 failed of 900. Ubuntu and Windows passed all 900
+(the test is skipped on Windows, so ubuntu is the run that exercised it). The failure is the first assertion,
+`Assert.False(succeeded)` in `AuthCommandTests.cs`: `AuthCommand.Init(persist: false)` returned `True` where the
+test expects `False`. The test came in with `cf2bf4a`, before the § 6.16 round.
+
+**Suspected cause, not verified:** the test makes a read-only `XDG_DATA_HOME` and expects
+`KeyMaterial.DevSecretsDirectory` to land under it. If .NET on macOS does not honour `XDG_DATA_HOME` for
+`LocalApplicationData`, `Init` would write to the real home instead and succeed. Nothing here has been
+run on macOS. It may also mean the test's premise is wrong on macOS while the code is fine.
+
+**Why LOW:** the macOS job is `continue-on-error` (advisory), so it blocks nothing and both Linux AOT gates
+still ran. If the cause is confirmed, the fix is a macOS skip on this test, or the test setting whatever
+macOS does read. If the code is at fault, `init` would be writing a signing key somewhere other than the
+directory the user configured, which would raise this above LOW.
 
 ---
 

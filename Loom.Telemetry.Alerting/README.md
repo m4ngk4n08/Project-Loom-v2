@@ -23,6 +23,11 @@ services.AddLoomAlerting();
 
 // Register alert targets
 services.AddAlertTarget<ConsoleAlertTarget>();
+
+// WebhookAlertTarget needs an IHttpClientFactory and a configured URL. Without a URL
+// it resolves but does nothing (it logs one warning).
+services.AddHttpClient();
+services.Configure<WebhookAlertOptions>(o => o.Url = "https://example.com/hook");
 services.AddAlertTarget<WebhookAlertTarget>();
 
 // Configure alerts

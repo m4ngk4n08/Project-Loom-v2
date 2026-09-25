@@ -1327,7 +1327,19 @@ the matching test before this fix was committed.
 
 ---
 
-### 6.12 The Two EventPipe Ingest Parsers Are Hand-Synced Duplicates 🟡 MEDIUM (OPEN — filed 2026-09-07)
+### 6.12 The Two EventPipe Ingest Parsers Are Hand-Synced Duplicates 🟡 MEDIUM (✅ CLOSED 2026-09-25 — `a25a8f2`)
+
+**Closing note.** Merged as `a25a8f2` (`99d02ad`, `e8fdff1`, `d46b231`). The value-publish decision now lives once in
+`EventPipeMetricPayload.TryBuildRecord`, and the log-field loop once in `EventPipeLogPayload.TryBuildLogRecord`,
+both in `Loom.Telemetry` and taking plain values (`Func<int, object?>` reads the payload). Both call sites
+delegate; a grep of `Loom.DevTools` and `Loom.Dashboard.AspNetCore` for the field and event names now hits only
+comments. 28 new plain unit tests cover the seams. Verified: EventPipe filter 41 → 69 passed, full suite 922
+passed / 6 skipped on Windows and 928 passed / 0 skipped on Linux, strict Release build 0 errors, AOT publish
+of `Loom.AotProbe` native-only. **Correction to "zero test coverage" below:** by closing time
+`EventPipeBridgeTests.cs` (6 live-session tests) and `EventPipeBridgeUpDownCounterTests.cs` existed; that claim
+was stale. The seam adds one small closure allocation per event (about once per second per instrument) —
+accepted. `IngestEventCounters` is still duplicated between the two classes and was left out of scope. The
+original entry follows.
 
 `Loom.DevTools/Services/EventPipeCollector.cs` and
 `Loom.Dashboard.AspNetCore/EventPipeBridge.cs` carry near-identical payload-parsing logic —

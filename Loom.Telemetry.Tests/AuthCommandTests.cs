@@ -114,6 +114,7 @@ public class AuthCommandTests
     [InlineData("", "/home/u/.config/fish/config.fish")]
     [InlineData("/home/u/xdgcfg", "/home/u/xdgcfg/fish/config.fish")]
     [InlineData("/home/u/xdgcfg/", "/home/u/xdgcfg/fish/config.fish")]
+    [InlineData("relative/cfg", "/home/u/.config/fish/config.fish")]
     public void ResolveUnixProfilePath_Fish_HonoursXdgConfigHome(string? xdgConfigHome, string expected)
     {
         Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/local/bin/fish", "/home/u", isMacOS: false, xdgConfigHome));

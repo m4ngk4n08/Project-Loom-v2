@@ -618,7 +618,7 @@ public static class AuthCommand
     }
 
     private static string ResolveConfigHome(string? xdgConfigHome, string home) =>
-        string.IsNullOrEmpty(xdgConfigHome) ? $"{home}/.config" : xdgConfigHome.TrimEnd('/');
+        !string.IsNullOrEmpty(xdgConfigHome) && Path.IsPathRooted(xdgConfigHome) ? xdgConfigHome.TrimEnd('/') : $"{home}/.config";
 
     /// <summary>Pure. Renders the marked block for the given shell. fish needs
     /// `set -gx VAR "value"` - `export VAR="value"` is a syntax error there, and writing

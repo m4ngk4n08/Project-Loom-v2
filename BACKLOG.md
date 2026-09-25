@@ -1495,7 +1495,7 @@ is created.
 
 ---
 
-### 6.16 `loom auth` Prints PowerShell-Only Commands to Every Windows Shell 🟢 LOW (OPEN — filed 2026-09-17)
+### 6.16 `loom auth` Prints PowerShell-Only Commands to Every Windows Shell 🟢 LOW (✅ CLOSED 2026-09-25 — option 1, both forms printed; merge `189f1bd`)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs` on branch
 `sonnet/auth-init-unix-persist` — **not yet on `main`**. Line numbers from the branch at `d758e14`.
@@ -1615,7 +1615,7 @@ directory.
 **Fix shape:** in both resolvers, refuse when the dev-secrets fallback would be chosen and
 `DevSecretsDirectory` is not rooted — the same check `init` makes.
 
-### 6.20 `init` Crashes When the Data Folder Is Not Writable 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`; the message names a not-yet-existing parent — tidied in the § 6.16 round)
+### 6.20 `init` Crashes When the Data Folder Is Not Writable 🟢 LOW (✅ CLOSED 2026-09-25 — merge `f0c374f`; the message names a not-yet-existing parent — fixed in the § 6.16 round)
 
 **Where the code lives:** `Loom.DevTools/Commands/AuthCommand.cs`, `EnsureDevSecretsDirectory`. Line
 number from branch `sonnet/auth-init-unix-persist` at `14bf21a` (`:242`); **`main` has the same
@@ -1660,7 +1660,7 @@ already exists with a mode no looser than the target's.
 
 **Found by** `/code-review medium` on round 9 of that branch.
 
-### 6.22 A Username Over ~400 Bytes Logs In but Every Request 401s 🟢 LOW (✅ CLOSED 2026-09-25 — merge `340e1a6`; the matching `loom auth add-user` cap follows in the § 6.16 round)
+### 6.22 A Username Over ~400 Bytes Logs In but Every Request 401s 🟢 LOW (✅ CLOSED 2026-09-25 — merge `340e1a6`; the matching `loom auth add-user` cap landed in the § 6.16 round, with duplicate and `:`/`#`/control-character checks)
 
 **Where the code lives:** `Loom.Security/JwtValidator.cs:87` (`stackalloc byte[512]` for the claims), line
 numbers at `5e8d545`. `JwtIssuer.IssueWithSessionStart` and `UserStore.Load` accept a username of any length.

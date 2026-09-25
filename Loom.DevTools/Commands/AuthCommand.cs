@@ -37,7 +37,8 @@ public static class AuthCommand
             return false;
         }
 
-        var directoryTightened = EnsureDevSecretsDirectory();
+        var directoryTightened = EnsureDevSecretsDirectory(out var directoryCreateFailed);
+        if (directoryCreateFailed) return false;
         var keyPath = Path.Combine(DevSecretsDirectory, "jwt.key");
         var usersPath = Path.Combine(DevSecretsDirectory, "users");
 
@@ -227,20 +228,34 @@ public static class AuthCommand
     /// leftover from before this fix), tightens it in place rather than trusting the mode
     /// it already has. Returns false when it exists but could not be tightened (see
     /// TightenIfLoose) - init's whole promise on Unix is a private dev-secrets directory,
-    /// and succeeding while that promise is unmet would be a lie.</summary>
-    private static bool EnsureDevSecretsDirectory()
+    /// and succeeding while that promise is unmet would be a lie.
+    ///
+    /// `createFailed` is a separate outcome from a false return: a directory that exists
+    /// but is loose is survivable (init carries on and reports it), whereas one that could
+    /// not be CREATED means the key write that follows would crash on a directory that
+    /// does not exist. The failure is already printed to stderr when createFailed is true.</summary>
+    private static bool EnsureDevSecretsDirectory(out bool createFailed)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Directory.CreateDirectory(DevSecretsDirectory);
-            return true;
-        }
-
-        if (Directory.Exists(DevSecretsDirectory))
+        createFailed = false;
+        if (!OperatingSystem.IsWindows() && Directory.Exists(DevSecretsDirectory))
             return TightenIfLoose(DevSecretsDirectory, SecretDirMode);
 
-        Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode);
-        return true;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                Directory.CreateDirectory(DevSecretsDirectory);
+            else
+                Directory.CreateDirectory(DevSecretsDirectory, SecretDirMode);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            var parent = Path.GetDirectoryName(DevSecretsDirectory);
+            Console.Error.WriteLine($"Could not create {DevSecretsDirectory}: {ex.Message}");
+            Console.Error.WriteLine($"  Check that you can write to {parent}, or set LOCALAPPDATA (Windows) or XDG_DATA_HOME (Unix) to a writable location.");
+            createFailed = true;
+            return false;
+        }
     }
 
     /// <summary>Creates a new file at 600 on Unix by passing the mode to the OS at create
@@ -422,11 +437,23 @@ public static class AuthCommand
             return null;
         }
 
-        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, OperatingSystem.IsMacOS(), Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"));
+        var profilePath = ResolveUnixProfilePath(shellEnvValue, homeDirectory, OperatingSystem.IsMacOS(), Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"), Environment.GetEnvironmentVariable("ZDOTDIR"));
         string? effectiveUsersPath;
 
         try
         {
+            // First: File.Exists below is true for a dangling symlink on Unix, and the
+            // ReadAllBytes that follows would throw FileNotFoundException instead of
+            // giving the user the refusal.
+            var writeTargetPath = ResolveProfileWriteTarget(profilePath, out var refusal);
+            if (writeTargetPath is null)
+            {
+                Console.Error.WriteLine(refusal);
+                Console.WriteLine("Add the exports above to your shell profile manually.");
+                succeeded = false;
+                return null;
+            }
+
             var directory = Path.GetDirectoryName(profilePath);
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
@@ -477,64 +504,7 @@ public static class AuthCommand
 
             var updatedBytes = UpsertUnixPersistBlockBytes(existingBytes, existing, block);
 
-            // Many people's shell profile is a symlink into a dotfiles repo (stow,
-            // chezmoi, a plain git repo). File.Move REPLACES the target rather than
-            // writing through it - unlinking the symlink and dropping a regular file in
-            // its place, silently detaching the user's setup. Resolve to the final
-            // target first and write-then-rename there instead; a non-symlink
-            // profilePath resolves to itself (ResolveLinkTarget returns null).
-            var writeTargetPath = profilePath;
-            if (File.Exists(profilePath))
-            {
-                var resolvedTarget = File.ResolveLinkTarget(profilePath, returnFinalTarget: true);
-                if (resolvedTarget is not null) writeTargetPath = resolvedTarget.FullName;
-            }
-
-            // File.Move also does not preserve the replaced file's permissions - a 600
-            // profile would come back 644. Capture the current mode and re-apply it to
-            // the temp file before the rename so it survives. The !IsWindows() guard is
-            // redundant with the caller's (this method only runs on Unix) but is what
-            // the platform-compat analyzer needs to see directly around a Unix-only
-            // API to accept the call - see TightenIfLoose above for the same pattern.
-            UnixFileMode? existingMode = null;
-            if (!OperatingSystem.IsWindows() && File.Exists(writeTargetPath))
-                existingMode = File.GetUnixFileMode(writeTargetPath);
-
-            // Write-then-rename rather than truncate-in-place, so a crash mid-write
-            // leaves either the old file or the new one intact, never a truncated shell
-            // profile. File.Move's overwrite is atomic on the same filesystem, and the
-            // temp file sits next to the target so it always is one.
-            var tempPath = writeTargetPath + $".loom-tmp-{Guid.NewGuid():N}";
-            try
-            {
-                // When the target already exists, create the temp file WITH its mode from
-                // the moment it comes into being - the same technique WriteSecretFile uses
-                // for key files - rather than WriteAllBytes (default permissions, typically
-                // 644) followed by SetUnixFileMode. For a profile deliberately kept at 600
-                // (e.g. because it exports tokens), that write-then-chmod left its full
-                // contents world-readable beside the target for the gap between the two
-                // calls. A brand-new profile (no existing mode) keeps today's default
-                // permissions - this must not quietly make a fresh .zshrc 600.
-                if (!OperatingSystem.IsWindows() && existingMode is not null)
-                {
-                    using var stream = new FileStream(tempPath, new FileStreamOptions
-                    {
-                        Mode = FileMode.CreateNew,
-                        Access = FileAccess.Write,
-                        UnixCreateMode = existingMode.Value,
-                    });
-                    stream.Write(updatedBytes, 0, updatedBytes.Length);
-                }
-                else
-                {
-                    File.WriteAllBytes(tempPath, updatedBytes);
-                }
-                File.Move(tempPath, writeTargetPath, overwrite: true);
-            }
-            finally
-            {
-                if (File.Exists(tempPath)) File.Delete(tempPath);
-            }
+            WriteProfileAtomically(writeTargetPath, updatedBytes);
 
             Console.WriteLine($"Wrote to {profilePath}.");
         }
@@ -551,17 +521,108 @@ public static class AuthCommand
         return effectiveUsersPath;
     }
 
+    /// <summary>Resolves the file a profile write must land on. `refusal` is set, and
+    /// null returned, when the profile must not be written.</summary>
+    internal static string? ResolveProfileWriteTarget(string profilePath, out string? refusal)
+    {
+        refusal = null;
+
+        // Not a link: write the path itself (a missing regular file is the caller's
+        // "new profile" case).
+        var linkTarget = new FileInfo(profilePath).LinkTarget;
+        if (linkTarget is null) return profilePath;
+
+        // Many people's shell profile is a symlink into a dotfiles repo (stow,
+        // chezmoi, a plain git repo). File.Move REPLACES the target rather than
+        // writing through it - unlinking the symlink and dropping a regular file in
+        // its place, silently detaching the user's setup. So resolve to the final
+        // target and write-then-rename there instead.
+        //
+        // Decide by the FINAL target's existence, not File.Exists(profilePath): on
+        // Unix .NET's File.Exists returns true for a dangling symlink (it sees the
+        // link itself), so it cannot tell a live link from a dangling one. Refuse a
+        // dangling link or chain rather than guess where it was meant to point.
+        var final = File.ResolveLinkTarget(profilePath, returnFinalTarget: true);
+        if (final is null || !final.Exists)
+        {
+            refusal = $"{profilePath} is a symlink to {linkTarget}, which does not exist - refusing to write through it.";
+            return null;
+        }
+        return final.FullName;
+    }
+
+    /// <summary>Write-then-rename of `bytes` onto writeTargetPath, keeping the replaced
+    /// file's permissions.</summary>
+    internal static void WriteProfileAtomically(string writeTargetPath, byte[] bytes)
+    {
+        // File.Move also does not preserve the replaced file's permissions - a 600
+        // profile would come back 644. Capture the current mode and re-apply it to
+        // the temp file before the rename so it survives. The !IsWindows() guard is
+        // redundant with the caller's (this method only runs on Unix) but is what
+        // the platform-compat analyzer needs to see directly around a Unix-only
+        // API to accept the call - see TightenIfLoose above for the same pattern.
+        UnixFileMode? existingMode = null;
+        if (!OperatingSystem.IsWindows() && File.Exists(writeTargetPath))
+            existingMode = File.GetUnixFileMode(writeTargetPath);
+
+        // Write-then-rename rather than truncate-in-place, so a crash mid-write
+        // leaves either the old file or the new one intact, never a truncated shell
+        // profile. File.Move's overwrite is atomic on the same filesystem, and the
+        // temp file sits next to the target so it always is one.
+        var tempPath = writeTargetPath + $".loom-tmp-{Guid.NewGuid():N}";
+        try
+        {
+            // When the target already exists, create the temp file WITH its mode from
+            // the moment it comes into being - the same technique WriteSecretFile uses
+            // for key files - rather than WriteAllBytes (default permissions, typically
+            // 644) followed by SetUnixFileMode. For a profile deliberately kept at 600
+            // (e.g. because it exports tokens), that write-then-chmod left its full
+            // contents world-readable beside the target for the gap between the two
+            // calls. A brand-new profile (no existing mode) keeps today's default
+            // permissions - this must not quietly make a fresh .zshrc 600.
+            if (!OperatingSystem.IsWindows() && existingMode is not null)
+            {
+                using var stream = new FileStream(tempPath, new FileStreamOptions
+                {
+                    Mode = FileMode.CreateNew,
+                    Access = FileAccess.Write,
+                    UnixCreateMode = existingMode.Value,
+                });
+                stream.Write(bytes, 0, bytes.Length);
+
+                // UnixCreateMode is masked by the process umask (022 turns 664 into 644),
+                // so the mode captured above is only a ceiling at creation. Set it
+                // explicitly, before the rename, to restore exactly what the file had.
+                File.SetUnixFileMode(tempPath, existingMode.Value);
+            }
+            else
+            {
+                File.WriteAllBytes(tempPath, bytes);
+            }
+            File.Move(tempPath, writeTargetPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+        }
+    }
+
     /// <summary>Pure. Maps $SHELL's basename to the profile file loom persists into.
     /// Unknown or unset shells fall back to ~/.profile rather than guessing. isMacOS is
     /// an explicit parameter, not an internal OperatingSystem.IsMacOS() read, so this
     /// stays pure and testable for both branches on any host - the caller passes what
     /// it detects.</summary>
-    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory, bool isMacOS, string? xdgConfigHome = null)
+    public static string ResolveUnixProfilePath(string? shellEnvValue, string homeDirectory, bool isMacOS, string? xdgConfigHome = null, string? zdotdir = null)
     {
         var home = homeDirectory.TrimEnd('/');
         return ClassifyUnixShell(shellEnvValue) switch
         {
-            "zsh" => $"{home}/.zshrc",
+            // zsh reads $ZDOTDIR/.zshrc when ZDOTDIR is set, and only falls back to
+            // $HOME when it is not. A relative value is not a location we can trust
+            // (it would resolve against the working directory), so it falls back too.
+            "zsh" => !string.IsNullOrEmpty(zdotdir) && Path.IsPathRooted(zdotdir)
+                ? $"{zdotdir.TrimEnd('/')}/.zshrc"
+                : $"{home}/.zshrc",
             // Terminal.app and iTerm start bash as a login shell on macOS, which reads
             // .bash_profile (or .bash_login / .profile) and never .bashrc - a stock
             // .bash_profile does not source .bashrc either. Linux interactive bash reads
@@ -576,7 +637,7 @@ public static class AuthCommand
     }
 
     private static string ResolveConfigHome(string? xdgConfigHome, string home) =>
-        string.IsNullOrEmpty(xdgConfigHome) ? $"{home}/.config" : xdgConfigHome.TrimEnd('/');
+        !string.IsNullOrEmpty(xdgConfigHome) && Path.IsPathRooted(xdgConfigHome) ? xdgConfigHome.TrimEnd('/') : $"{home}/.config";
 
     /// <summary>Pure. Renders the marked block for the given shell. fish needs
     /// `set -gx VAR "value"` - `export VAR="value"` is a syntax error there, and writing
@@ -632,7 +693,14 @@ public static class AuthCommand
         if (!blockMatch.Success) return null;
 
         var assignment = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+");
-        return assignment.Success ? ParseShellValue(blockMatch.Value, assignment.Index + assignment.Length) : null;
+        if (!assignment.Success) return null;
+
+        // The block's own syntax says which writer produced it: `set -gx` is fish,
+        // `export` is POSIX. Their single-quote rules differ (see ParseShellValue), and
+        // this method takes no shell argument.
+        var lineStart = blockMatch.Value.LastIndexOf('\n', assignment.Index) + 1;
+        var isFish = Regex.IsMatch(blockMatch.Value[lineStart..assignment.Index], @"^\s*set\s");
+        return ParseShellValue(blockMatch.Value, assignment.Index + assignment.Length, isFish);
     }
 
     /// <summary>Pure. ExtractExistingUsersPath is called against the Latin-1 decoding of
@@ -647,12 +715,14 @@ public static class AuthCommand
 
     /// <summary>Pure. Parses one shell value starting at valueStart: a single-quoted
     /// value understanding BOTH quoting conventions this file writes - POSIX's
-    /// close-escape-reopen splice ('\'') from QuotePosixSingle, and fish's in-string
-    /// backslash escapes (\\ and \') from QuoteFishSingle - a double-quoted value with
-    /// \" and \\ unescaped, or - if valueStart is neither quote character - a bare
-    /// value running to end of line. Returns null on an unterminated quote, which reads
-    /// as "nothing to preserve" rather than a mangled partial value.</summary>
-    private static string? ParseShellValue(string content, int valueStart)
+    /// close-escape-reopen splice ('\'') from QuotePosixSingle, and, when isFish, fish's
+    /// in-string backslash escapes (\\ and \') from QuoteFishSingle. POSIX single quotes
+    /// have no escapes, so with isFish false every backslash is literal. Also: a
+    /// double-quoted value with \" and \\ unescaped, or - if valueStart is neither quote
+    /// character - a bare value running to end of line. Returns null on an unterminated
+    /// quote, which reads as "nothing to preserve" rather than a mangled partial
+    /// value.</summary>
+    private static string? ParseShellValue(string content, int valueStart, bool isFish)
     {
         if (valueStart >= content.Length) return null;
 
@@ -681,7 +751,7 @@ public static class AuthCommand
                 // \\ and \' - fish's in-string escapes (QuoteFishSingle): everything
                 // else, $ and backticks included, is literal inside fish's single
                 // quotes, so only these two backslash pairs unescape.
-                if (content[pos] == '\\' && pos + 1 < content.Length && (content[pos + 1] == '\\' || content[pos + 1] == '\''))
+                if (isFish && content[pos] == '\\' && pos + 1 < content.Length && (content[pos + 1] == '\\' || content[pos + 1] == '\''))
                 {
                     sb.Append(content[pos + 1]);
                     pos += 2;
@@ -922,6 +992,17 @@ public static class AuthCommand
             return null;
         }
 
+        // The dev-secrets fallback is relative when the per-user data folder is unknown
+        // (same case Init refuses up front) - it would then resolve against whatever the
+        // current working directory happens to be. ResolveCliPath cannot own this check:
+        // its null already means "cannot access the system default".
+        if (resolved == devPath && !Path.IsPathRooted(devPath))
+        {
+            Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
+            Console.Error.WriteLine($"  Refusing to use a users file under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.UsersFileVariable}, or pass --users-file.");
+            return null;
+        }
+
         if (!KeyMaterial.IsEnvironmentValueSet(envValue) && state == FileAccessState.Missing)
             Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
 
@@ -949,6 +1030,14 @@ public static class AuthCommand
         {
             Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set, and the system default at {KeyMaterial.DefaultKeyFile} exists or might exist but this process cannot access it.");
             Console.Error.WriteLine("  Run with access to it, or pass --key-file explicitly.");
+            return null;
+        }
+
+        // See ResolveUsersFileForCli - the same relative dev-secrets fallback.
+        if (resolved == devPath && !Path.IsPathRooted(devPath))
+        {
+            Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
+            Console.Error.WriteLine($"  Refusing to read a signing key from under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.KeyFileVariable}, or pass --key-file.");
             return null;
         }
 

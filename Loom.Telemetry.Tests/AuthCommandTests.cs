@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Loom.DevTools.Commands;
@@ -113,9 +115,21 @@ public class AuthCommandTests
     [InlineData("", "/home/u/.config/fish/config.fish")]
     [InlineData("/home/u/xdgcfg", "/home/u/xdgcfg/fish/config.fish")]
     [InlineData("/home/u/xdgcfg/", "/home/u/xdgcfg/fish/config.fish")]
+    [InlineData("relative/cfg", "/home/u/.config/fish/config.fish")]
     public void ResolveUnixProfilePath_Fish_HonoursXdgConfigHome(string? xdgConfigHome, string expected)
     {
         Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/local/bin/fish", "/home/u", isMacOS: false, xdgConfigHome));
+    }
+
+    [Theory]
+    [InlineData("/home/u/zdot", "/home/u/zdot/.zshrc")]
+    [InlineData("/home/u/zdot/", "/home/u/zdot/.zshrc")]
+    [InlineData(null, "/home/u/.zshrc")]
+    [InlineData("", "/home/u/.zshrc")]
+    [InlineData("relative/zdot", "/home/u/.zshrc")]
+    public void ResolveUnixProfilePath_Zsh_HonoursZdotdir(string? zdotdir, string expected)
+    {
+        Assert.Equal(expected, AuthCommand.ResolveUnixProfilePath("/usr/bin/zsh", "/home/u", isMacOS: false, zdotdir: zdotdir));
     }
 
     [Fact]
@@ -374,6 +388,155 @@ public class AuthCommandTests
         var block = AuthCommand.RenderUnixPersistBlock("/bin/bash", "/home/u/jwt.key", weirdPath);
 
         Assert.Equal(weirdPath, AuthCommand.ExtractExistingUsersPath(block));
+    }
+
+    // POSIX single quotes have no escapes, so a literal backslash is written as one
+    // backslash. ParseShellValue used to apply fish's \\ and \' unescaping to these too.
+    [Theory]
+    [InlineData("/bin/bash")]
+    [InlineData("/usr/bin/zsh")]
+    [InlineData("/usr/local/bin/fish")]
+    public void ExtractExistingUsersPath_RoundTripsValueWithBackslashesApostropheDollarAndBacktick(string shellEnvValue)
+    {
+        const string weirdPath = "/home/u/a\\\\b\\'c'd$e`f/users";
+
+        var block = AuthCommand.RenderUnixPersistBlock(shellEnvValue, "/home/u/jwt.key", weirdPath);
+
+        Assert.Equal(weirdPath, AuthCommand.ExtractExistingUsersPath(block));
+    }
+
+    [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_DanglingSymlink_RefusesAndLeavesTheLinkAlone()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var link = Path.Combine(dir, ".zshrc");
+            var missingTarget = Path.Combine(dir, "dotfiles", "zshrc");
+            File.CreateSymbolicLink(link, missingTarget);
+
+            var result = AuthCommand.ResolveProfileWriteTarget(link, out var refusal);
+
+            Assert.Null(result);
+            Assert.Contains(link, refusal);
+            Assert.Contains(missingTarget, refusal);
+            Assert.Equal(missingTarget, new FileInfo(link).LinkTarget);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_DanglingSymlinkChain_Refuses()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var missingTarget = Path.Combine(dir, "dotfiles", "zshrc");
+            var middle = Path.Combine(dir, "middle");
+            var link = Path.Combine(dir, ".zshrc");
+            File.CreateSymbolicLink(middle, missingTarget);
+            File.CreateSymbolicLink(link, middle);
+
+            var result = AuthCommand.ResolveProfileWriteTarget(link, out var refusal);
+
+            Assert.Null(result);
+            Assert.Contains(link, refusal);
+            Assert.Equal(middle, new FileInfo(link).LinkTarget);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_LiveSymlink_ResolvesToItsTarget()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var target = Path.Combine(dir, "zshrc");
+            File.WriteAllText(target, "# real\n");
+            var link = Path.Combine(dir, ".zshrc");
+            File.CreateSymbolicLink(link, target);
+
+            var result = AuthCommand.ResolveProfileWriteTarget(link, out var refusal);
+
+            Assert.Equal(target, result);
+            Assert.Null(refusal);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_RegularFile_ResolvesToItself()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var file = Path.Combine(dir, ".zshrc");
+            File.WriteAllText(file, "# real\n");
+
+            var result = AuthCommand.ResolveProfileWriteTarget(file, out var refusal);
+
+            Assert.Equal(file, result);
+            Assert.Null(refusal);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    // The process umask (usually 022) strips group-write from UnixCreateMode, so a 664
+    // profile used to come back 644. Proves nothing if the host's umask is 000.
+    [UnixOnlyFact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void WriteProfileAtomically_PreservesTheExistingFilesPermissionBits()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var file = Path.Combine(dir, ".zshrc");
+            File.WriteAllText(file, "# old\n");
+            const UnixFileMode mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead;
+            File.SetUnixFileMode(file, mode);
+
+            AuthCommand.WriteProfileAtomically(file, Encoding.UTF8.GetBytes("# new\n"));
+
+            Assert.Equal("# new\n", File.ReadAllText(file));
+            Assert.Equal(mode, File.GetUnixFileMode(file));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    // KeyMaterial.DevSecretsDirectory is recomputed from XDG_DATA_HOME on every call, so a
+    // read-only data home reaches EnsureDevSecretsDirectory's create. Before the fix this
+    // threw an uncaught UnauthorizedAccessException out of Init.
+    [UnixOnlyFact(RequireNonRoot = true)]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void Init_DataFolderNotWritable_ReturnsFalseAndCreatesNothing()
+    {
+        var dataHome = Directory.CreateTempSubdirectory("loom-xdg-").FullName;
+        var previousXdg = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        var previousError = Console.Error;
+        var previousOut = Console.Out;
+        var error = new StringWriter();
+        try
+        {
+            File.SetUnixFileMode(dataHome, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", dataHome);
+            Console.SetError(error);
+            Console.SetOut(TextWriter.Null);
+
+            var succeeded = AuthCommand.Init(persist: false);
+
+            Assert.False(succeeded);
+            Assert.Contains("Could not create", error.ToString());
+            Assert.Empty(Directory.GetFileSystemEntries(dataHome));
+        }
+        finally
+        {
+            Console.SetError(previousError);
+            Console.SetOut(previousOut);
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previousXdg);
+            File.SetUnixFileMode(dataHome, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.Delete(dataHome, recursive: true);
+        }
     }
 
     [Fact]

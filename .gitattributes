@@ -19,3 +19,11 @@
 *.woff2 binary
 *.snk binary
 *.pfx binary
+
+# Interceptor call sites. The checked-in Loom.Telemetry.Tests/Generated/.../LoomProfileInterceptors.g.cs
+# carries a content checksum of each of these files, and that checksum changes with line endings. Pinned
+# to LF so a Windows (CRLF) checkout hashes the same bytes as Linux and the file is not rewritten by a build.
+Loom.Telemetry.Tests/GeneratorTests.cs text eol=lf
+Loom.Telemetry.Tests/LoomProfileInterceptorTests.cs text eol=lf
+Loom.Telemetry.Tests/LoomProfileInterfaceDispatchTests.cs text eol=lf
+Loom.Telemetry.Tests/RecordingAllocationTests.cs text eol=lf

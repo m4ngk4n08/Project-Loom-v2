@@ -978,6 +978,17 @@ public static class AuthCommand
             return null;
         }
 
+        // The dev-secrets fallback is relative when the per-user data folder is unknown
+        // (same case Init refuses up front) - it would then resolve against whatever the
+        // current working directory happens to be. ResolveCliPath cannot own this check:
+        // its null already means "cannot access the system default".
+        if (resolved == devPath && !Path.IsPathRooted(devPath))
+        {
+            Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
+            Console.Error.WriteLine($"  Refusing to use a users file under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.UsersFileVariable}, or pass --users-file.");
+            return null;
+        }
+
         if (!KeyMaterial.IsEnvironmentValueSet(envValue) && state == FileAccessState.Missing)
             Console.Error.WriteLine($"{KeyMaterial.UsersFileVariable} is not set and no users file exists at the system default - using {devPath}.");
 
@@ -1005,6 +1016,14 @@ public static class AuthCommand
         {
             Console.Error.WriteLine($"{KeyMaterial.KeyFileVariable} is not set, and the system default at {KeyMaterial.DefaultKeyFile} exists or might exist but this process cannot access it.");
             Console.Error.WriteLine("  Run with access to it, or pass --key-file explicitly.");
+            return null;
+        }
+
+        // See ResolveUsersFileForCli - the same relative dev-secrets fallback.
+        if (resolved == devPath && !Path.IsPathRooted(devPath))
+        {
+            Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
+            Console.Error.WriteLine($"  Refusing to read a signing key from under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.KeyFileVariable}, or pass --key-file.");
             return null;
         }
 

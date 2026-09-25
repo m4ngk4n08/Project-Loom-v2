@@ -79,7 +79,7 @@ public static class AuthenticationMiddleware
         }
 
         var header = context.Request.Headers.Authorization.ToString();
-        if (!header.StartsWith("Bearer ", StringComparison.Ordinal)) return false;
+        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return false;
         token = header[7..];
         return token.Length > 0;
     }

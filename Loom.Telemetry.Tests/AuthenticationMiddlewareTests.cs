@@ -85,6 +85,20 @@ public class AuthenticationMiddlewareTests
     }
 
     [Fact]
+    public async Task PlainEndpoint_LowercaseBearerScheme_NextRan()
+    {
+        var token = _issuer.Issue("alice", TimeSpan.FromHours(1));
+        var endpoint = EndpointWith();
+        var ctx = ContextFor(endpoint, _services);
+        ctx.Request.Headers.Authorization = $"bearer {token}";
+
+        var (nextRan, context) = await InvokeAsync(ctx);
+
+        Assert.True(nextRan);
+        Assert.Equal("alice", context.Items["loom.sub"]);
+    }
+
+    [Fact]
     public async Task PlainEndpoint_ExpiredBearer_Returns401WithExpiredToken()
     {
         var token = _issuer.Issue("alice", TimeSpan.FromMinutes(5));

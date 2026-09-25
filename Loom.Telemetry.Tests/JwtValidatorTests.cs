@@ -205,6 +205,25 @@ public class JwtValidatorTests
         Assert.Fail("No signature segment with '-' or '_' found in 200 iterations.");
     }
 
+    // The default JSON encoder writes '"' and every non-ASCII char as a 6-byte \uXXXX, so
+    // the payload for these names is far larger than the name itself.
+    public static TheoryData<string> LongSubjects => new()
+    {
+        new string('"', 128),
+        new string('€', 42),
+        new string('a', 600),
+    };
+
+    [Theory]
+    [MemberData(nameof(LongSubjects))]
+    public void LongSubject_Validates(string subject)
+    {
+        var token = _issuer.Issue(subject, TimeSpan.FromHours(1));
+        var result = _validator.Validate(token, out var principal);
+        Assert.Equal(JwtFailure.None, result);
+        Assert.Equal(subject, principal.Subject);
+    }
+
     private JwtClaims ExtractClaims(string token)
     {
         var payloadSegment = token.Split('.')[1];

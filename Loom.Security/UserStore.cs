@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Text;
 
 namespace Loom.Security;
 
@@ -8,6 +9,9 @@ public sealed record UserRecord(string Username, int Iterations, byte[] Salt, by
 /// either would drag reflection into an AOT binary.</summary>
 public sealed class UserStore
 {
+    /// <summary>Counted in UTF-8 bytes, not chars. Bounds the username a token can carry.</summary>
+    public const int MaxUsernameBytes = 128;
+
     private readonly FrozenDictionary<string, UserRecord> _users;
     private readonly UserRecord _dummy;
 
@@ -57,6 +61,10 @@ public sealed class UserStore
 
             var username = line[..split];
             var encoded = line[(split + 1)..];
+
+            if (Encoding.UTF8.GetByteCount(username) > MaxUsernameBytes)
+                throw new InvalidOperationException(
+                    $"Loom auth: {path}:{lineNumber} has a username over {MaxUsernameBytes} UTF-8 bytes.");
 
             if (!PasswordHasher.TryParse(encoded, out var iterations, out var salt, out var hash))
                 throw new InvalidOperationException($"Loom auth: {path}:{lineNumber} has an unparseable password hash.");

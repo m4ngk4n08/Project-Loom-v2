@@ -78,6 +78,17 @@ public sealed class TokenEndpointTests
 
     private static StringContent RawJson(string json) => new(json, Encoding.UTF8, "application/json");
 
+    [Theory]
+    [InlineData(0, "1")]
+    [InlineData(400, "1")]
+    [InlineData(1000, "1")]
+    [InlineData(1200, "2")]
+    [InlineData(300_000, "300")]
+    public void FormatRetryAfter_RoundsUpAndNeverZero(int milliseconds, string expected)
+    {
+        Assert.Equal(expected, TokenEndpoints.FormatRetryAfter(TimeSpan.FromMilliseconds(milliseconds)));
+    }
+
     [Fact]
     public async Task NullUsername_Returns400()
     {
@@ -144,6 +155,20 @@ public sealed class TokenEndpointTests
 
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/token/refresh");
         request.Headers.Add("Authorization", $"Bearer {aliceToken}");
+        var response = await api.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Refresh_LowercaseBearerScheme_Returns200()
+    {
+        await using var api = await StartAsync($"alice:{PasswordHasher.Hash("pw")}");
+
+        var aliceToken = api.Issuer.Issue("alice", TokenEndpoints.AccessTokenLifetime);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/token/refresh");
+        request.Headers.Add("Authorization", $"bearer {aliceToken}");
         var response = await api.Client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

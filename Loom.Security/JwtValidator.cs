@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
@@ -16,6 +17,7 @@ public sealed class JwtValidator(byte[] secret, TimeProvider clock)
     public const string MetricsScope = "metrics";
 
     private const int SignatureBytes = 32;                   // HMAC-SHA256 is always 32
+    private const int StackPayloadBytes = 512;
     private const int SkewSeconds = 60;
     private const int AbsoluteSessionSeconds = 12 * 60 * 60; // interactive logins only
 
@@ -84,23 +86,38 @@ public sealed class JwtValidator(byte[] secret, TimeProvider clock)
             return JwtFailure.BadSignature;
 
         // 3. Claims - only after the signature is trusted.
-        Span<byte> payloadBytes = stackalloc byte[512];
-        bool payloadDecoded;
-        int payloadWritten;
-        try
-        {
-            payloadDecoded = Base64Url.TryDecodeFromChars(payloadSpan, payloadBytes, out payloadWritten);
-        }
-        catch (FormatException) { return JwtFailure.Malformed; }
-        if (!payloadDecoded) return JwtFailure.Malformed;
-
+        //    The common case stays on the stack. The default JSON encoder writes every
+        //    non-ASCII char and `"<>&'+` as a 6-byte \uXXXX, so a long or awkward subject
+        //    can exceed it - rent instead of failing every request for that user.
+        byte[]? rented = null;
         JwtClaims? claims;
         try
         {
-            claims = JsonSerializer.Deserialize(
-                payloadBytes[..payloadWritten], LoomJsonSerializerContext.Default.JwtClaims);
+            var maxPayload = Base64Url.GetMaxDecodedLength(payloadSpan.Length);
+            Span<byte> payloadBytes = maxPayload <= StackPayloadBytes
+                ? stackalloc byte[StackPayloadBytes]
+                : (rented = ArrayPool<byte>.Shared.Rent(maxPayload));
+
+            bool payloadDecoded;
+            int payloadWritten;
+            try
+            {
+                payloadDecoded = Base64Url.TryDecodeFromChars(payloadSpan, payloadBytes, out payloadWritten);
+            }
+            catch (FormatException) { return JwtFailure.Malformed; }
+            if (!payloadDecoded) return JwtFailure.Malformed;
+
+            try
+            {
+                claims = JsonSerializer.Deserialize(
+                    payloadBytes[..payloadWritten], LoomJsonSerializerContext.Default.JwtClaims);
+            }
+            catch (JsonException) { return JwtFailure.Malformed; }
         }
-        catch (JsonException) { return JwtFailure.Malformed; }
+        finally
+        {
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented);
+        }
 
         if (claims is null || string.IsNullOrEmpty(claims.Sub)) return JwtFailure.Malformed;
         if (!string.Equals(claims.Iss, Issuer, StringComparison.Ordinal))

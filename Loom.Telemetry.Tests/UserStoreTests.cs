@@ -72,6 +72,46 @@ public class UserStoreTests
     }
 
     [Fact]
+    public void Username_At128AsciiBytes_Loads()
+    {
+        var name = new string('a', UserStore.MaxUsernameBytes);
+        var path = WriteUsersFile($"{name}:{PasswordHasher.Hash("s3cret")}");
+        try
+        {
+            var store = UserStore.Load(path);
+            Assert.True(store.Contains(name));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Username_At129AsciiBytes_ThrowsNamingLineNumber()
+    {
+        var path = WriteUsersFile(
+            $"alice:{PasswordHasher.Hash("s3cret")}",
+            $"{new string('a', UserStore.MaxUsernameBytes + 1)}:{PasswordHasher.Hash("s3cret")}");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => UserStore.Load(path));
+            Assert.Contains(":2", ex.Message);
+        }
+        finally { File.Delete(path); }
+    }
+
+    // 43 x U+20AC is 43 chars but 129 UTF-8 bytes: the limit counts bytes.
+    [Fact]
+    public void Username_43EuroSigns_129Bytes_Throws()
+    {
+        var path = WriteUsersFile($"{new string('€', 43)}:{PasswordHasher.Hash("s3cret")}");
+        try
+        {
+            var ex = Assert.Throws<InvalidOperationException>(() => UserStore.Load(path));
+            Assert.Contains(":1", ex.Message);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void LineWithUnparseableHash_Throws()
     {
         var path = WriteUsersFile("alice:not-a-real-hash");

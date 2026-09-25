@@ -539,7 +539,53 @@ public class AuthCommandTests
         }
     }
 
-    private const string Note = "    (Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
+    [Theory]
+    [InlineData("alice")]
+    [InlineData("a b")]
+    [InlineData("José")]
+    public void ValidateNewUsername_AcceptsOrdinaryNames(string name) =>
+        Assert.Null(AuthCommand.ValidateNewUsername(name));
+
+    [Fact]
+    public void ValidateNewUsername_Accepts128BytesRejects129()
+    {
+        Assert.Null(AuthCommand.ValidateNewUsername(new string('a', UserStore.MaxUsernameBytes)));
+        Assert.NotNull(AuthCommand.ValidateNewUsername(new string('a', UserStore.MaxUsernameBytes + 1)));
+        // 43 x U+20AC is 43 chars but 129 bytes: bytes, not chars.
+        Assert.NotNull(AuthCommand.ValidateNewUsername(new string('€', 43)));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(" alice")]
+    [InlineData("alice ")]
+    [InlineData("al:ice")]
+    [InlineData(":alice")]
+    [InlineData("#alice")]
+    [InlineData("al\nice")]
+    [InlineData("al\tice")]
+    [InlineData("alice\r")]
+    public void ValidateNewUsername_RefusesNamesTheHostWouldRejectOrMisread(string name) =>
+        Assert.NotNull(AuthCommand.ValidateNewUsername(name));
+
+    [Fact]
+    public void UsernameExists_MatchesOrdinallyAndSkipsCommentsAndPaddedLines()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllLines(path, ["# alice:x", "", $"  bob:{PasswordHasher.Hash("pw")}  ", $"Alice:{PasswordHasher.Hash("pw")}"]);
+
+            Assert.True(AuthCommand.UsernameExists(path, "bob"));
+            Assert.True(AuthCommand.UsernameExists(path, "Alice"));
+            Assert.False(AuthCommand.UsernameExists(path, "alice"));   // ordinal, like Load
+            Assert.False(AuthCommand.UsernameExists(path, "carol"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    private const string Note ="    (Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
 
     private static void AssertLines(string[] expected, string[] actual) => Assert.Equal(expected, actual);
 

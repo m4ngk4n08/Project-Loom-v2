@@ -1108,6 +1108,30 @@ public static class AuthCommand
             return false;
         }
 
+        // Before ReadPassword, so nobody types a password that is then thrown away. Each
+        // refusal is a name UserStore.Load would reject or read differently - and Load
+        // rejecting means the dashboard cannot start.
+        var nameProblem = ValidateNewUsername(username);
+        if (nameProblem is not null)
+        {
+            Console.Error.WriteLine($"Refusing to add that user: {nameProblem}");
+            return false;
+        }
+
+        try
+        {
+            if (UsernameExists(usersPath, username))
+            {
+                Console.Error.WriteLine($"Refusing to add that user: '{username}' already exists in {usersPath}.");
+                return false;
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            Console.Error.WriteLine($"Could not read {usersPath}: {ex.Message}");
+            return false;
+        }
+
         var line = $"{username}:{PasswordHasher.Hash(ReadPassword())}";
         try
         {
@@ -1120,6 +1144,37 @@ public static class AuthCommand
         }
         Console.WriteLine($"Added '{username}' to {usersPath}.");
         return true;
+    }
+
+    /// <summary>Pure. Null when `name` is safe to append as a users-file record, else the
+    /// reason. Mirrors UserStore.Load: it Trims each line, treats a leading `#` as a
+    /// comment, splits at the first `:`, and aborts host startup on an over-long name.</summary>
+    internal static string? ValidateNewUsername(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "the username is empty.";
+        if (name != name.Trim()) return "the username has leading or trailing whitespace, which the users file would trim away.";
+        if (name.Contains(':')) return "the username contains ':', which separates the name from the hash.";
+        if (name[0] == '#') return "a username starting with '#' would be read as a comment, so the user would not exist.";
+        if (name.Any(char.IsControl)) return "the username contains a control character, which would corrupt the users file.";
+        if (Encoding.UTF8.GetByteCount(name) > UserStore.MaxUsernameBytes)
+            return $"the username is over {UserStore.MaxUsernameBytes} UTF-8 bytes, which would stop the dashboard starting.";
+        return null;
+    }
+
+    /// <summary>Whether a record for `name` is already in the users file, parsed the way
+    /// UserStore.Load parses it: trimmed lines, `#` comments skipped, split at the first
+    /// `:`, names compared ordinally.</summary>
+    internal static bool UsernameExists(string usersPath, string name)
+    {
+        foreach (var raw in File.ReadLines(usersPath))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#')) continue;
+            var split = line.IndexOf(':');
+            if (split <= 0) continue;
+            if (string.Equals(line[..split], name, StringComparison.Ordinal)) return true;
+        }
+        return false;
     }
 
     public static void Hash() => Console.WriteLine(PasswordHasher.Hash(ReadPassword()));

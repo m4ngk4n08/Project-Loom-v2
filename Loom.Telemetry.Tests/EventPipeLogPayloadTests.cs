@@ -183,6 +183,103 @@ public class EventPipeLogPayloadTests
         Assert.Null(message);
     }
 
+    static readonly string[] LogNames =
+        ["LoggerName", "Level", "EventId", "FormattedMessage", "ExceptionJson", "ArgumentsJson", "ActivityTraceId", "ActivitySpanId"];
+
+    static object?[] LogValues(object? level = null, object? eventId = null) =>
+    [
+        "MyApp.Checkout", level ?? 2, eventId ?? 7, "User 41 checkout failed after 900ms", null, ArgsJson, null, null
+    ];
+
+    static bool BuildLog(string[]? names, object?[] values, out LogRecord record) =>
+        EventPipeLogPayload.TryBuildLogRecord(new LogMessageParser(), names, i => values[i], 99L, out record);
+
+    [Fact]
+    public void TryBuildLogRecord_HappyPath_PopulatesRecord()
+    {
+        Assert.True(BuildLog(LogNames, LogValues(), out var record));
+
+        Assert.Equal("MyApp.Checkout", record.Category);
+        Assert.Equal("User 41 checkout failed after 900ms", record.Message);
+        Assert.Equal(LoomLogLevel.Information, record.Level);
+        Assert.Equal(7, record.EventId);
+        Assert.Equal(99L, record.TimestampUtcTicks);
+        Assert.Equal("User {UserId} checkout failed after {Ms}ms", record.Template);
+    }
+
+    [Fact]
+    public void TryBuildLogRecord_NullPayloadNames_ReturnsFalse()
+    {
+        Assert.False(BuildLog(null, [], out _));
+    }
+
+    [Fact]
+    public void TryBuildLogRecord_MissingLoggerName_ReturnsFalse()
+    {
+        string[] names = ["Level", "FormattedMessage"];
+        object?[] values = [2, "msg"];
+
+        Assert.False(BuildLog(names, values, out _));
+    }
+
+    [Fact]
+    public void TryBuildLogRecord_MissingFormattedMessage_ReturnsFalse()
+    {
+        string[] names = ["LoggerName", "Level"];
+        object?[] values = ["Cat", 2];
+
+        Assert.False(BuildLog(names, values, out _));
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, true)]
+    [InlineData(5, true)]
+    [InlineData(6, false)]
+    public void TryBuildLogRecord_LevelRange_Gated(int level, bool expected)
+    {
+        Assert.Equal(expected, BuildLog(LogNames, LogValues(level: level), out _));
+    }
+
+    [Fact]
+    public void TryBuildLogRecord_MissingLevel_ReturnsFalse()
+    {
+        string[] names = ["LoggerName", "FormattedMessage"];
+        object?[] values = ["Cat", "msg"];
+
+        Assert.False(BuildLog(names, values, out _));
+    }
+
+    [Fact]
+    public void TryBuildLogRecord_LevelAndEventIdAsInt_Read()
+    {
+        Assert.True(BuildLog(LogNames, LogValues(level: 3, eventId: 12), out var record));
+
+        Assert.Equal((LoomLogLevel)3, record.Level);
+        Assert.Equal(12, record.EventId);
+    }
+
+    [Fact]
+    public void TryBuildLogRecord_LevelAndEventIdAsString_Read()
+    {
+        Assert.True(BuildLog(LogNames, LogValues(level: "4", eventId: "13"), out var record));
+
+        Assert.Equal((LoomLogLevel)4, record.Level);
+        Assert.Equal(13, record.EventId);
+    }
+
+    [Fact]
+    public void TryBuildLogRecord_UnknownPayloadNames_Ignored()
+    {
+        string[] names = ["Bogus", "LoggerName", "Level", "FormattedMessage", "AlsoBogus"];
+        object?[] values = ["x", "Cat", 1, "msg", "y"];
+
+        Assert.True(BuildLog(names, values, out var record));
+
+        Assert.Equal("Cat", record.Category);
+        Assert.Equal("msg", record.Message);
+    }
+
     [Fact]
     public void ToInt32_BoxedInt_ReturnsUnchanged()
     {

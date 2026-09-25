@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 
 namespace Loom.Telemetry;
@@ -60,6 +61,72 @@ public static class EventPipeLogPayload
             traceHi,
             traceLo,
             spanId);
+    }
+
+    /// <summary>
+    /// Reads the payload fields via <paramref name="valueAt"/> and builds the record.
+    /// Returns false when the logger name or message is missing or the level is out of
+    /// range. The closure costs one small allocation per event.
+    /// </summary>
+    public static bool TryBuildLogRecord(
+        LogMessageParser parser,
+        string[]? payloadNames,
+        Func<int, object?> valueAt,
+        long timestampUtcTicks,
+        out LogRecord record)
+    {
+        record = default;
+        if (payloadNames == null) return false;
+
+        string? category = null;
+        string? formattedMessage = null;
+        string? exceptionJson = null;
+        string? argumentsJson = null;
+        string? activityTraceId = null;
+        string? activitySpanId = null;
+        int level = -1;
+        int eventId = 0;
+
+        for (int i = 0; i < payloadNames.Length; i++)
+        {
+            switch (payloadNames[i])
+            {
+                case "LoggerName":
+                    category = valueAt(i)?.ToString();
+                    break;
+                case "Level":
+                    level = ToInt32(valueAt(i), -1);
+                    break;
+                case "EventId":
+                    eventId = ToInt32(valueAt(i), 0);
+                    break;
+                case "FormattedMessage":
+                    formattedMessage = valueAt(i)?.ToString();
+                    break;
+                case "ExceptionJson":
+                    exceptionJson = valueAt(i)?.ToString();
+                    break;
+                case "ArgumentsJson":
+                    argumentsJson = valueAt(i)?.ToString();
+                    break;
+                case "ActivityTraceId":
+                    activityTraceId = valueAt(i)?.ToString();
+                    break;
+                case "ActivitySpanId":
+                    activitySpanId = valueAt(i)?.ToString();
+                    break;
+            }
+        }
+
+        if (category == null || formattedMessage == null) return false;
+        // Observed range is 0..5 (Trace..Critical), matching LoomLogLevel's ordering.
+        if (level < 0 || level > 5) return false;
+
+        record = BuildLogRecord(
+            parser, formattedMessage, category, level,
+            timestampUtcTicks, eventId,
+            exceptionJson, argumentsJson, activityTraceId, activitySpanId);
+        return true;
     }
 
     public static (string? Type, string? Message) ParseExceptionJson(string? exceptionJson)

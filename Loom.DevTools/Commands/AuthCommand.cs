@@ -33,7 +33,7 @@ public static class AuthCommand
         if (!Path.IsPathRooted(devSecretsDirectory))
         {
             Console.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devSecretsDirectory}'.");
-            Console.WriteLine("Refusing to write a signing key under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix) and try again.");
+            Console.WriteLine("Refusing to write a signing key under the current directory. Check that your user profile is intact (Windows), or set XDG_DATA_HOME/HOME (Unix), and try again.");
             return false;
         }
 
@@ -283,7 +283,7 @@ public static class AuthCommand
         {
             var parent = NearestExistingAncestor(DevSecretsDirectory);
             Console.Error.WriteLine($"Could not create {DevSecretsDirectory}: {ex.Message}");
-            Console.Error.WriteLine($"  Check that you can write to {parent}, or set LOCALAPPDATA (Windows) or XDG_DATA_HOME (Unix) to a writable location.");
+            Console.Error.WriteLine($"  Check that you can write to {parent}, or (Unix) set XDG_DATA_HOME to a writable location.");
             createFailed = true;
             return false;
         }
@@ -1042,7 +1042,7 @@ public static class AuthCommand
         if (resolved == devPath && !Path.IsPathRooted(devPath))
         {
             Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
-            Console.Error.WriteLine($"  Refusing to use a users file under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.UsersFileVariable}, or pass --users-file.");
+            Console.Error.WriteLine($"  Refusing to use a users file under the current directory. Set {KeyMaterial.UsersFileVariable}, pass --users-file, or (Unix) set XDG_DATA_HOME/HOME.");
             return null;
         }
 
@@ -1080,7 +1080,7 @@ public static class AuthCommand
         if (resolved == devPath && !Path.IsPathRooted(devPath))
         {
             Console.Error.WriteLine($"Could not determine a per-user data directory - dev-secrets would resolve to the relative path '{devPath}'.");
-            Console.Error.WriteLine($"  Refusing to read a signing key from under the current directory. Set LOCALAPPDATA (Windows) or XDG_DATA_HOME/HOME (Unix), {KeyMaterial.KeyFileVariable}, or pass --key-file.");
+            Console.Error.WriteLine($"  Refusing to read a signing key from under the current directory. Set {KeyMaterial.KeyFileVariable}, pass --key-file, or (Unix) set XDG_DATA_HOME/HOME.");
             return null;
         }
 

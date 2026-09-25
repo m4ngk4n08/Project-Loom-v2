@@ -648,7 +648,14 @@ public static class AuthCommand
         if (!blockMatch.Success) return null;
 
         var assignment = Regex.Match(blockMatch.Value, Regex.Escape(KeyMaterial.UsersFileVariable) + "[ =]+");
-        return assignment.Success ? ParseShellValue(blockMatch.Value, assignment.Index + assignment.Length) : null;
+        if (!assignment.Success) return null;
+
+        // The block's own syntax says which writer produced it: `set -gx` is fish,
+        // `export` is POSIX. Their single-quote rules differ (see ParseShellValue), and
+        // this method takes no shell argument.
+        var lineStart = blockMatch.Value.LastIndexOf('\n', assignment.Index) + 1;
+        var isFish = Regex.IsMatch(blockMatch.Value[lineStart..assignment.Index], @"^\s*set\s");
+        return ParseShellValue(blockMatch.Value, assignment.Index + assignment.Length, isFish);
     }
 
     /// <summary>Pure. ExtractExistingUsersPath is called against the Latin-1 decoding of
@@ -663,12 +670,14 @@ public static class AuthCommand
 
     /// <summary>Pure. Parses one shell value starting at valueStart: a single-quoted
     /// value understanding BOTH quoting conventions this file writes - POSIX's
-    /// close-escape-reopen splice ('\'') from QuotePosixSingle, and fish's in-string
-    /// backslash escapes (\\ and \') from QuoteFishSingle - a double-quoted value with
-    /// \" and \\ unescaped, or - if valueStart is neither quote character - a bare
-    /// value running to end of line. Returns null on an unterminated quote, which reads
-    /// as "nothing to preserve" rather than a mangled partial value.</summary>
-    private static string? ParseShellValue(string content, int valueStart)
+    /// close-escape-reopen splice ('\'') from QuotePosixSingle, and, when isFish, fish's
+    /// in-string backslash escapes (\\ and \') from QuoteFishSingle. POSIX single quotes
+    /// have no escapes, so with isFish false every backslash is literal. Also: a
+    /// double-quoted value with \" and \\ unescaped, or - if valueStart is neither quote
+    /// character - a bare value running to end of line. Returns null on an unterminated
+    /// quote, which reads as "nothing to preserve" rather than a mangled partial
+    /// value.</summary>
+    private static string? ParseShellValue(string content, int valueStart, bool isFish)
     {
         if (valueStart >= content.Length) return null;
 
@@ -697,7 +706,7 @@ public static class AuthCommand
                 // \\ and \' - fish's in-string escapes (QuoteFishSingle): everything
                 // else, $ and backticks included, is literal inside fish's single
                 // quotes, so only these two backslash pairs unescape.
-                if (content[pos] == '\\' && pos + 1 < content.Length && (content[pos + 1] == '\\' || content[pos + 1] == '\''))
+                if (isFish && content[pos] == '\\' && pos + 1 < content.Length && (content[pos + 1] == '\\' || content[pos + 1] == '\''))
                 {
                     sb.Append(content[pos + 1]);
                     pos += 2;

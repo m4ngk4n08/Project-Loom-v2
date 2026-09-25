@@ -376,6 +376,21 @@ public class AuthCommandTests
         Assert.Equal(weirdPath, AuthCommand.ExtractExistingUsersPath(block));
     }
 
+    // POSIX single quotes have no escapes, so a literal backslash is written as one
+    // backslash. ParseShellValue used to apply fish's \\ and \' unescaping to these too.
+    [Theory]
+    [InlineData("/bin/bash")]
+    [InlineData("/usr/bin/zsh")]
+    [InlineData("/usr/local/bin/fish")]
+    public void ExtractExistingUsersPath_RoundTripsValueWithBackslashesApostropheDollarAndBacktick(string shellEnvValue)
+    {
+        const string weirdPath = "/home/u/a\\\\b\\'c'd$e`f/users";
+
+        var block = AuthCommand.RenderUnixPersistBlock(shellEnvValue, "/home/u/jwt.key", weirdPath);
+
+        Assert.Equal(weirdPath, AuthCommand.ExtractExistingUsersPath(block));
+    }
+
     [Fact]
     public void UpsertUnixPersistBlockBytes_NonAsciiPath_EncodesBlockAsUtf8NotLatin1()
     {

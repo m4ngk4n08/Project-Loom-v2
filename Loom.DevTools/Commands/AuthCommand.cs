@@ -281,12 +281,24 @@ public static class AuthCommand
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
-            var parent = Path.GetDirectoryName(DevSecretsDirectory);
+            var parent = NearestExistingAncestor(DevSecretsDirectory);
             Console.Error.WriteLine($"Could not create {DevSecretsDirectory}: {ex.Message}");
             Console.Error.WriteLine($"  Check that you can write to {parent}, or set LOCALAPPDATA (Windows) or XDG_DATA_HOME (Unix) to a writable location.");
             createFailed = true;
             return false;
         }
+    }
+
+    /// <summary>The first directory at or above `path`'s parent that exists. The direct
+    /// parent usually does not exist yet (`.../Loom` under a fresh data home), so naming it
+    /// points the user at a directory they cannot check; the one that blocks the create
+    /// is the nearest existing one.</summary>
+    internal static string? NearestExistingAncestor(string path)
+    {
+        var current = Path.GetDirectoryName(path);
+        while (!string.IsNullOrEmpty(current) && !Directory.Exists(current))
+            current = Path.GetDirectoryName(current);
+        return current;
     }
 
     /// <summary>Creates a new file at 600 on Unix by passing the mode to the OS at create

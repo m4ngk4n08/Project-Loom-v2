@@ -527,6 +527,7 @@ public class AuthCommandTests
 
             Assert.False(succeeded);
             Assert.Contains("Could not create", error.ToString());
+            Assert.Contains($"write to {dataHome}", error.ToString());
             Assert.Empty(Directory.GetFileSystemEntries(dataHome));
         }
         finally
@@ -585,7 +586,19 @@ public class AuthCommandTests
         finally { File.Delete(path); }
     }
 
-    private const string Note ="    (Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
+    [Fact]
+    public void NearestExistingAncestor_SkipsDirectoriesThatDoNotExistYet()
+    {
+        var root = Directory.CreateTempSubdirectory("loom-anc-").FullName;
+        try
+        {
+            var deep = Path.Combine(root, "missing", "Loom", "dev-secrets");
+            Assert.Equal(root, AuthCommand.NearestExistingAncestor(deep));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private const string Note = "    (Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
 
     private static void AssertLines(string[] expected, string[] actual) => Assert.Equal(expected, actual);
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Loom.Web.Contracts;
 using Loom.Web.Contracts.Dtos;
 using Microsoft.AspNetCore.Builder;
@@ -33,7 +34,7 @@ public static class TokenEndpoints
 
             if (!throttle.TryBeginAttempt(client, out var retryAfter))
             {
-                context.Response.Headers.RetryAfter = ((int)retryAfter.TotalSeconds).ToString();
+                context.Response.Headers.RetryAfter = FormatRetryAfter(retryAfter);
                 return Results.StatusCode(StatusCodes.Status429TooManyRequests);
             }
 
@@ -98,6 +99,11 @@ public static class TokenEndpoints
 
         return app;
     }
+
+    /// <summary>Whole seconds, rounded UP and never 0: a truncated sub-second wait would
+    /// send `Retry-After: 0` and invite an immediate retry into another 429.</summary>
+    internal static string FormatRetryAfter(TimeSpan retryAfter) =>
+        Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
 
     /// <summary>Reads `iat` from an ALREADY-VALIDATED token so refresh can preserve the
     /// original session start. Only ever called after JwtValidator returns None.</summary>

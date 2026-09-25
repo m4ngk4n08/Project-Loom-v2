@@ -78,6 +78,17 @@ public sealed class TokenEndpointTests
 
     private static StringContent RawJson(string json) => new(json, Encoding.UTF8, "application/json");
 
+    [Theory]
+    [InlineData(0, "1")]
+    [InlineData(400, "1")]
+    [InlineData(1000, "1")]
+    [InlineData(1200, "2")]
+    [InlineData(300_000, "300")]
+    public void FormatRetryAfter_RoundsUpAndNeverZero(int milliseconds, string expected)
+    {
+        Assert.Equal(expected, TokenEndpoints.FormatRetryAfter(TimeSpan.FromMilliseconds(milliseconds)));
+    }
+
     [Fact]
     public async Task NullUsername_Returns400()
     {

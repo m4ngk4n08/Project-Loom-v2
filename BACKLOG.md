@@ -1338,7 +1338,12 @@ passed / 6 skipped on Windows and 928 passed / 0 skipped on Linux, strict Releas
 of `Loom.AotProbe` native-only. **Correction to "zero test coverage" below:** by closing time
 `EventPipeBridgeTests.cs` (6 live-session tests) and `EventPipeBridgeUpDownCounterTests.cs` existed; that claim
 was stale. The seam adds one small closure allocation per event (about once per second per instrument) —
-accepted. `IngestEventCounters` is still duplicated between the two classes and was left out of scope. The
+accepted. `IngestEventCounters` is still duplicated between the two classes and was left out of scope. **Assessed
+2026-09-25 and deliberately not lifted:** the two 13-line bodies are identical, but the decision logic is
+already shared in `SystemRuntimeCounters.Parse` (`Loom.Storage`, tested in `SystemRuntimeCountersTests`). What
+remains is a loop writing to each class's own `_store` and counter, plus one `TraceEvent` read; lifting it
+would need a callback and gain no testable logic. Reopen only if `Parse` gains a second consumer or the two
+loop bodies start to differ. The
 original entry follows.
 
 `Loom.DevTools/Services/EventPipeCollector.cs` and

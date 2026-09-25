@@ -74,9 +74,10 @@ public static class AuthCommand
                 Console.WriteLine();
                 var existingUsersPath = File.Exists(usersPath) ? usersPath : null;
                 Console.WriteLine("Set these before starting loom-dashboard:");
-                Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
                 if (existingUsersPath is not null)
-                    Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, existingUsersPath));
+                    PrintSetVarLines((KeyMaterial.KeyFileVariable, keyPath), (KeyMaterial.UsersFileVariable, existingUsersPath));
+                else
+                    PrintSetVarLines((KeyMaterial.KeyFileVariable, keyPath));
                 Console.WriteLine();
 
                 // Printed AFTER persisting, from what actually happened - not before,
@@ -171,8 +172,7 @@ public static class AuthCommand
         Console.WriteLine(usersFileAlreadyExisted ? $"Users file already exists at {usersPath}." : $"Wrote {usersPath}");
         Console.WriteLine();
         Console.WriteLine("Set these before starting loom-dashboard:");
-        Console.WriteLine(FormatSetVarLine(KeyMaterial.KeyFileVariable, keyPath));
-        Console.WriteLine(FormatSetVarLine(KeyMaterial.UsersFileVariable, usersPath));
+        PrintSetVarLines((KeyMaterial.KeyFileVariable, keyPath), (KeyMaterial.UsersFileVariable, usersPath));
 
         var freshPersisted = true;
         if (persist)
@@ -187,41 +187,72 @@ public static class AuthCommand
         }
 
         Console.WriteLine();
-        Console.WriteLine($"Then add an operator:  loom auth add-user operator --users-file {QuoteForCurrentShell(usersPath)}");
+        foreach (var line in RenderAddUserHint(OperatingSystem.IsWindows(), Environment.GetEnvironmentVariable("SHELL"), usersPath))
+            Console.WriteLine(line);
 
         return directoryTightened && usersFileTightened && freshPersisted;
     }
 
-    /// <summary>The "set these before starting" line, in the syntax the terminal the user
-    /// is actually in will accept - PowerShell on Windows, otherwise whatever
-    /// RenderUnixExportLine would put in the shell profile. Printing `$env:` syntax to a
-    /// Linux or macOS terminal is not just cosmetic: pasted verbatim, it is a syntax
-    /// error there. Routed through QuoteForCurrentShell rather than a hand-rolled,
-    /// always-double-quoted format, so a path containing `$` or a backtick can't print
-    /// one thing here and be misread as something else when pasted: PowerShell
-    /// interpolates both inside double quotes, so the Windows branch uses PowerShell's
-    /// single-quoted literal form - the same quoting QuoteForCurrentShell gives the
-    /// printed `add-user --users-file` line - and the Unix branch uses the same
-    /// per-shell renderer the persisted file itself is written with.</summary>
-    private static string FormatSetVarLine(string variable, string value)
+    private const string CmdPercentNote = "(Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
+
+    /// <summary>Pure. The "set these before starting" lines, in the syntax the terminal
+    /// the user is actually in will accept. Windows could be PowerShell or cmd.exe and
+    /// there is no reliable way to tell which, so both are printed under labels. Unix
+    /// prints whatever RenderUnixExportLine puts in the shell profile - `$env:` pasted
+    /// into a Linux or macOS terminal is a syntax error.
+    ///
+    /// PowerShell uses the single-quoted literal form (`''` doubles a quote), NOT double
+    /// quotes, which it interpolates: `$` or a backtick inside `"..."` sets a wrong value.
+    /// cmd uses `set "NAME=value"`, but expands %NAME% even inside quotes and has no
+    /// reliable interactive escape for `%`, so a value containing one gets a note
+    /// instead of a line that would silently mean something else.</summary>
+    internal static string[] RenderSetVarLines(bool isWindows, string? shellEnvValue, params (string Variable, string Value)[] vars)
     {
-        if (OperatingSystem.IsWindows()) return $"  $env:{variable} = {QuoteForCurrentShell(value)}";
-        var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
-        return "  " + RenderUnixExportLine(isFish, variable, value);
+        var lines = new List<string>();
+        if (!isWindows)
+        {
+            var isFish = ClassifyUnixShell(shellEnvValue) == "fish";
+            foreach (var (variable, value) in vars)
+                lines.Add("  " + RenderUnixExportLine(isFish, variable, value));
+            return [.. lines];
+        }
+
+        lines.Add("  PowerShell:");
+        foreach (var (variable, value) in vars)
+            lines.Add($"    $env:{variable} = {QuotePowerShell(value)}");
+        lines.Add("  Command Prompt:");
+        foreach (var (variable, value) in vars)
+            lines.Add(value.Contains('%') ? "    " + CmdPercentNote : $"    set \"{variable}={value}\"");
+        return [.. lines];
     }
 
-    /// <summary>Quotes a value for whatever shell the user is actually in, matching
-    /// FormatSetVarLine's own per-platform choice, so a printed CLI command (e.g. the
-    /// "add-user" line Init prints) can be copied and pasted with the same safety as the
-    /// "set these" lines - one path value, one quoting rule, everywhere it is printed.
-    /// PowerShell's literal form is single-quoted with `''` doubling for an embedded
-    /// quote - NOT double quotes, which PowerShell interpolates: a path containing `$`
-    /// or a backtick inside `"..."` sets a wrong or empty value when pasted.</summary>
-    private static string QuoteForCurrentShell(string value)
+    /// <summary>Pure. The "Then add an operator" hint. Same per-shell rules as
+    /// RenderSetVarLines: Unix is one line, Windows is one line per shell.</summary>
+    internal static string[] RenderAddUserHint(bool isWindows, string? shellEnvValue, string usersPath)
     {
-        if (OperatingSystem.IsWindows()) return "'" + value.Replace("'", "''") + "'";
-        var isFish = ClassifyUnixShell(Environment.GetEnvironmentVariable("SHELL")) == "fish";
-        return isFish ? QuoteFishSingle(value) : QuotePosixSingle(value);
+        const string prefix = "loom auth add-user operator --users-file ";
+        if (!isWindows)
+        {
+            var quoted = ClassifyUnixShell(shellEnvValue) == "fish" ? QuoteFishSingle(usersPath) : QuotePosixSingle(usersPath);
+            return [$"Then add an operator:  {prefix}{quoted}"];
+        }
+
+        return
+        [
+            "Then add an operator:",
+            $"  PowerShell:      {prefix}{QuotePowerShell(usersPath)}",
+            usersPath.Contains('%')
+                ? "  Command Prompt:  " + CmdPercentNote
+                : $"  Command Prompt:  {prefix}\"{usersPath}\"",
+        ];
+    }
+
+    private static string QuotePowerShell(string value) => "'" + value.Replace("'", "''") + "'";
+
+    private static void PrintSetVarLines(params (string Variable, string Value)[] vars)
+    {
+        foreach (var line in RenderSetVarLines(OperatingSystem.IsWindows(), Environment.GetEnvironmentVariable("SHELL"), vars))
+            Console.WriteLine(line);
     }
 
     /// <summary>Creates dev-secrets at 700 on Unix. If it already exists (a re-run, or a

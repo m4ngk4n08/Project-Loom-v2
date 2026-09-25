@@ -539,6 +539,94 @@ public class AuthCommandTests
         }
     }
 
+    private const string Note = "    (Command Prompt: this path contains '%' - use PowerShell, or set it in System Properties)";
+
+    private static void AssertLines(string[] expected, string[] actual) => Assert.Equal(expected, actual);
+
+    [Fact]
+    public void RenderSetVarLines_Windows_HoldsBothLabelledForms()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null,
+            ("LOOM_JWT_KEY_FILE", @"C:\d\jwt.key"), ("LOOM_AUTH_USERS_FILE", @"C:\d\users"));
+
+        AssertLines(
+        [
+            "  PowerShell:",
+            @"    $env:LOOM_JWT_KEY_FILE = 'C:\d\jwt.key'",
+            @"    $env:LOOM_AUTH_USERS_FILE = 'C:\d\users'",
+            "  Command Prompt:",
+            "    set \"LOOM_JWT_KEY_FILE=C:\\d\\jwt.key\"",
+            "    set \"LOOM_AUTH_USERS_FILE=C:\\d\\users\"",
+        ], lines);
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Windows_QuoteDoublesInPowerShellAndIsUntouchedForCmd()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null, ("V", @"C:\o'brien\k"));
+
+        Assert.Contains(@"    $env:V = 'C:\o''brien\k'", lines);
+        Assert.Contains("    set \"V=C:\\o'brien\\k\"", lines);
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Windows_PercentGetsNoteInsteadOfCmdLine()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null, ("V", @"C:\100%\k"));
+
+        Assert.Contains(@"    $env:V = 'C:\100%\k'", lines);
+        Assert.Contains(Note, lines);
+        Assert.DoesNotContain(lines, l => l.Contains("set \"V="));
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Windows_DollarAndBacktickStayLiteralInBothForms()
+    {
+        var lines = AuthCommand.RenderSetVarLines(true, null, ("V", "C:\\a$b`c\\k"));
+
+        Assert.Contains("    $env:V = 'C:\\a$b`c\\k'", lines);
+        Assert.Contains("    set \"V=C:\\a$b`c\\k\"", lines);
+    }
+
+    [Fact]
+    public void RenderSetVarLines_Unix_IsUnchangedAndUnlabelled()
+    {
+        var bash = AuthCommand.RenderSetVarLines(false, "/bin/bash", ("LOOM_JWT_KEY_FILE", "/h/it's/jwt.key"), ("LOOM_AUTH_USERS_FILE", "/h/users"));
+        var fish = AuthCommand.RenderSetVarLines(false, "/usr/bin/fish", ("LOOM_JWT_KEY_FILE", "/h/it's/jwt.key"), ("LOOM_AUTH_USERS_FILE", "/h/users"));
+
+        AssertLines(
+        [
+            "  export LOOM_JWT_KEY_FILE='/h/it'\\''s/jwt.key'",
+            "  export LOOM_AUTH_USERS_FILE='/h/users'",
+        ], bash);
+        AssertLines(
+        [
+            "  set -gx LOOM_JWT_KEY_FILE '/h/it\\'s/jwt.key'",
+            "  set -gx LOOM_AUTH_USERS_FILE '/h/users'",
+        ], fish);
+    }
+
+    [Fact]
+    public void RenderAddUserHint_Windows_HasBothForms_AndPercentNote()
+    {
+        var hint = AuthCommand.RenderAddUserHint(true, null, @"C:\o'b\users");
+        Assert.Equal("Then add an operator:", hint[0]);
+        Assert.Equal(@"  PowerShell:      loom auth add-user operator --users-file 'C:\o''b\users'", hint[1]);
+        Assert.Equal("  Command Prompt:  loom auth add-user operator --users-file \"C:\\o'b\\users\"", hint[2]);
+
+        var pct = AuthCommand.RenderAddUserHint(true, null, @"C:\100%\users");
+        Assert.Equal("  Command Prompt:  " + Note.TrimStart(), pct[2]);
+    }
+
+    [Fact]
+    public void RenderAddUserHint_Unix_IsOneUnlabelledLine()
+    {
+        AssertLines(["Then add an operator:  loom auth add-user operator --users-file '/h/users'"],
+            AuthCommand.RenderAddUserHint(false, "/bin/bash", "/h/users"));
+        AssertLines(["Then add an operator:  loom auth add-user operator --users-file '/h/it\\'s'"],
+            AuthCommand.RenderAddUserHint(false, "/usr/bin/fish", "/h/it's"));
+    }
+
     [Fact]
     public void UpsertUnixPersistBlockBytes_NonAsciiPath_EncodesBlockAsUtf8NotLatin1()
     {

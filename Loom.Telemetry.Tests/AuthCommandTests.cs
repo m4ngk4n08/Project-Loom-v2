@@ -426,6 +426,27 @@ public class AuthCommandTests
     }
 
     [UnixOnlyFact]
+    public void ResolveProfileWriteTarget_DanglingSymlinkChain_Refuses()
+    {
+        var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;
+        try
+        {
+            var missingTarget = Path.Combine(dir, "dotfiles", "zshrc");
+            var middle = Path.Combine(dir, "middle");
+            var link = Path.Combine(dir, ".zshrc");
+            File.CreateSymbolicLink(middle, missingTarget);
+            File.CreateSymbolicLink(link, middle);
+
+            var result = AuthCommand.ResolveProfileWriteTarget(link, out var refusal);
+
+            Assert.Null(result);
+            Assert.Contains(link, refusal);
+            Assert.Equal(middle, new FileInfo(link).LinkTarget);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [UnixOnlyFact]
     public void ResolveProfileWriteTarget_LiveSymlink_ResolvesToItsTarget()
     {
         var dir = Directory.CreateTempSubdirectory("loom-profile-").FullName;

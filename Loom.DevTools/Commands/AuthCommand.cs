@@ -442,7 +442,9 @@ public static class AuthCommand
 
         try
         {
-            // First, before File.Exists below reads a dangling link as an empty profile.
+            // First: File.Exists below is true for a dangling symlink on Unix, and the
+            // ReadAllBytes that follows would throw FileNotFoundException instead of
+            // giving the user the refusal.
             var writeTargetPath = ResolveProfileWriteTarget(profilePath, out var refusal);
             if (writeTargetPath is null)
             {
@@ -525,31 +527,28 @@ public static class AuthCommand
     {
         refusal = null;
 
-        // File.Exists follows links, so for a dangling one it is false: the resolution
-        // below would be skipped and File.Move would replace the link with a regular
-        // file, silently detaching the user's dotfiles setup - and the caller's own
-        // File.Exists would have read the profile as empty. Detect the link without
-        // following it, and refuse rather than guess where it was meant to point.
+        // Not a link: write the path itself (a missing regular file is the caller's
+        // "new profile" case).
         var linkTarget = new FileInfo(profilePath).LinkTarget;
-        if (linkTarget is not null && !File.Exists(profilePath))
-        {
-            refusal = $"{profilePath} is a symlink to {linkTarget}, which does not exist - refusing to replace the link with a regular file.";
-            return null;
-        }
+        if (linkTarget is null) return profilePath;
 
         // Many people's shell profile is a symlink into a dotfiles repo (stow,
         // chezmoi, a plain git repo). File.Move REPLACES the target rather than
         // writing through it - unlinking the symlink and dropping a regular file in
-        // its place, silently detaching the user's setup. Resolve to the final
-        // target first and write-then-rename there instead; a non-symlink
-        // profilePath resolves to itself (ResolveLinkTarget returns null).
-        var writeTargetPath = profilePath;
-        if (File.Exists(profilePath))
+        // its place, silently detaching the user's setup. So resolve to the final
+        // target and write-then-rename there instead.
+        //
+        // Decide by the FINAL target's existence, not File.Exists(profilePath): on
+        // Unix .NET's File.Exists returns true for a dangling symlink (it sees the
+        // link itself), so it cannot tell a live link from a dangling one. Refuse a
+        // dangling link or chain rather than guess where it was meant to point.
+        var final = File.ResolveLinkTarget(profilePath, returnFinalTarget: true);
+        if (final is null || !final.Exists)
         {
-            var resolvedTarget = File.ResolveLinkTarget(profilePath, returnFinalTarget: true);
-            if (resolvedTarget is not null) writeTargetPath = resolvedTarget.FullName;
+            refusal = $"{profilePath} is a symlink to {linkTarget}, which does not exist - refusing to write through it.";
+            return null;
         }
-        return writeTargetPath;
+        return final.FullName;
     }
 
     /// <summary>Write-then-rename of `bytes` onto writeTargetPath, keeping the replaced

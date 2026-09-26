@@ -21,7 +21,7 @@ namespace Loom.Telemetry.GeneratedInterceptors
     {
         [global::System.Runtime.CompilerServices.InterceptsLocationAttribute(1, "7VAdMJ8Ejb5XIBE6jvIWa3AFAABHZW5lcmF0b3JUZXN0cy5jcw==")]
         [global::System.Runtime.CompilerServices.InterceptsLocationAttribute(1, "1AfJukrhFvz6rNk/QOkV+7YEAABMb29tUHJvZmlsZUludGVyY2VwdG9yVGVzdHMuY3M=")]
-        [global::System.Runtime.CompilerServices.InterceptsLocationAttribute(1, "VHfSlnfILIY0UIDm6cXeFaoGAABSZWNvcmRpbmdBbGxvY2F0aW9uVGVzdHMuY3M=")]
+        [global::System.Runtime.CompilerServices.InterceptsLocationAttribute(1, "L3Eb8VehT1KK8N+iDSPZvOoJAABSZWNvcmRpbmdBbGxvY2F0aW9uVGVzdHMuY3M=")]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int LoomProfile_Intercept_0(this Loom.Telemetry.Tests.SampleInstrumentedClass instance, int x, int y)
         {

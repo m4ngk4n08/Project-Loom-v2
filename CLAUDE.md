@@ -85,6 +85,8 @@ Not in the solution:
   examples/SampleMonitoredApp/ → demo app; runs until killed
   ci/consumer-aot-gate/        → PackageConsumer: restores the packed Loom.Telemetry
                                  .nupkg and AOT-publishes it (CI job only)
+  ci/dashboard-consumer-aot-gate/ → DashboardConsumer: same for the packed
+                                 Dashboard.AspNetCore, then runs it (CI job only)
 ```
 
 Package IDs: `LoomDiagnostics.Telemetry` (library), `LoomDiagnostics.Cli` → `loom`,
@@ -176,19 +178,25 @@ npx ng test                         # vitest, one pass, no watch
 ```
 
 **CI** (`.github/workflows/ci.yml`, push + PR to `main`): build/test on ubuntu, windows
-and macOS; Angular tests + prod build; Linux AOT publish of `Loom.AotProbe`; and the
-packaged consumer AOT gate (packs `Loom.Telemetry`, restores it into
-`ci/consumer-aot-gate`, AOT-publishes — the only check that exercises the package
-layout). Both AOT jobs `needs: build-and-test`, so a test failure on ubuntu shows them as
-**skipped**, not failed. Slowest job ~4.5 min (windows, run `35182511586`).
+and macOS; Angular tests + prod build; Linux AOT publish of `Loom.AotProbe`; and two
+packaged-consumer AOT gates, the only checks that exercise the package layout.
+`ci/consumer-aot-gate.ps1` packs `Loom.Telemetry`, restores it into `ci/consumer-aot-gate`
+and AOT-publishes. `ci/dashboard-consumer-aot-gate.ps1` packs Telemetry and
+`Loom.Dashboard.AspNetCore`, AOT-publishes `ci/dashboard-consumer-aot-gate`, and runs it
+against a live `Loom.TestFixtureApp`. All three AOT jobs `needs: build-and-test`, so a test
+failure on ubuntu shows them as **skipped**, not failed. macOS is `continue-on-error`
+(advisory). Slowest job ~4.5 min (windows, run `35182511586`).
 
 **Publishing** (`.github/workflows/publish.yml`, manual `workflow_dispatch`, `main` only):
 nuget.org Trusted Publishing — OIDC via `NuGet/login@v1`, a one-hour key, nothing stored.
 Refuses a version already on nuget.org, runs `release.ps1` on windows-latest, pushes
-Telemetry first. Needs the `release` environment (with required reviewers), the
-`NUGET_USER` secret, and the policy on nuget.org. `1.0.0-preview.1` shipped 2026-09-23 by
-hand with an API key; every later release goes through this workflow and needs a new
-`<Version>` in `Directory.Build.props`.
+Telemetry first. Needs the `release` environment, the `NUGET_USER` secret, and the policy
+on nuget.org. **As of 2026-09-26 the first two are not set up:** the `release` environment
+has no protection rules (no required reviewers — anyone who can dispatch the workflow on
+`main` publishes unreviewed), and `NUGET_USER` does not exist, so run `36212517442` failed
+at `NuGet/login` with `Input required and not supplied: user` — after `release.ps1` passed,
+before any push. `1.0.0-preview.1` shipped 2026-09-23 by hand with an API key; every later
+release goes through this workflow and needs a new `<Version>` in `Directory.Build.props`.
 
 ---
 
@@ -347,9 +355,10 @@ dotnet build Loom.slnx -c Release /p:TreatWarningsAsErrors=true /p:EnableTrimAna
 dotnet publish Loom.AotProbe/Loom.AotProbe.csproj -c Release -r win-x64
 Get-ChildItem Loom.AotProbe/bin/Release/net10.0/win-x64/publish/ | Select-Object Name, Length
 
-# 4. Baselines: 820 passing / 0 skipped backend (measured 2026-09-17 on main 02522c7,
-#    Windows and Linux; re-verify before trusting it — it has drifted before, and every
-#    merged branch moves it). Frontend last verified 2026-09-17: 4 files / 102 passing.
+# 4. Baselines: 922 passing / 6 skipped backend on Windows, 928 passing / 0 skipped on
+#    Linux (WSL), 928 total (measured 2026-09-25 on d46b231, merged as a25a8f2; re-verify
+#    before trusting it — it has drifted before, and every merged branch moves it).
+#    Frontend last verified 2026-09-17: 4 files / 102 passing.
 #    Before any push, also run the backend suite on Linux (WSL): path- and OS-dependent
 #    tests have failed only there.
 dotnet test Loom.slnx -c Debug

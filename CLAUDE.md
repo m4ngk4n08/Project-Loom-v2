@@ -190,13 +190,15 @@ failure on ubuntu shows them as **skipped**, not failed. macOS is `continue-on-e
 **Publishing** (`.github/workflows/publish.yml`, manual `workflow_dispatch`, `main` only):
 nuget.org Trusted Publishing — OIDC via `NuGet/login@v1`, a one-hour key, nothing stored.
 Refuses a version already on nuget.org, runs `release.ps1` on windows-latest, pushes
-Telemetry first. Needs the `release` environment, the `NUGET_USER` secret, and the policy
-on nuget.org. **As of 2026-09-26 the first two are not set up:** the `release` environment
-has no protection rules (no required reviewers — anyone who can dispatch the workflow on
-`main` publishes unreviewed), and `NUGET_USER` does not exist, so run `36212517442` failed
-at `NuGet/login` with `Input required and not supplied: user` — after `release.ps1` passed,
-before any push. `1.0.0-preview.1` shipped 2026-09-23 by hand with an API key; every later
-release goes through this workflow and needs a new `<Version>` in `Directory.Build.props`.
+Telemetry first. Needs three things, all set up 2026-09-26: the `release` environment with
+`m4ngk4n08` as required reviewer (a dispatched run waits for approval before any step runs),
+the `NUGET_USER` repository secret (the nuget.org username, not the email), and the
+nuget.org Trusted Publishing policy "Loom GitHub publish" (repo `m4ngk4n08/Project-Loom-v2`,
+`publish.yml`, environment `release`, the four package IDs listed exactly). Without the
+secret, `NuGet/login` fails with `Input required and not supplied: user` (run
+`36212517442`, attempt 1). `1.0.0-preview.1` shipped 2026-09-23 by hand with an API key;
+every later release goes through this workflow and needs a new `<Version>` in
+`Directory.Build.props`.
 
 ---
 

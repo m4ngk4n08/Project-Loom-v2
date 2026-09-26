@@ -65,9 +65,9 @@ Loom.slnx                      (16 projects)
 │                                consumer's AOT publish. Its binary size is NOT a
 │                                product metric. Refs: Loom.Telemetry + its generator.
 ├── Loom.Dashboard.AspNetCore/ → The actual web host: endpoints, EventPipeBridge,
-│                                Minimal API wiring. Library, not packable yet (needs
-│                                public IDs for everything it references first — see
-│                                BACKLOG.md § 11.1). EventPipeBridge.cs lives here but
+│                                Minimal API wiring. Packable as
+│                                LoomDiagnostics.Dashboard.AspNetCore (API only, no UI).
+│                                EventPipeBridge.cs lives here but
 │                                still declares `namespace Loom.Dashboard;` — a leftover
 │                                from before the split, not a build error, but grep for
 │                                the namespace and you'll miss this file.
@@ -88,8 +88,10 @@ Not in the solution:
 ```
 
 Package IDs: `LoomDiagnostics.Telemetry` (library), `LoomDiagnostics.Cli` → `loom`,
-`LoomDiagnostics.Dashboard` → `loom-dashboard`. All MIT (`LICENSE` at the root). Every other
-project is `IsPackable=false`.
+`LoomDiagnostics.Dashboard` → `loom-dashboard`, and `LoomDiagnostics.Dashboard.AspNetCore`
+(the dashboard API as a library, no UI; depends on `LoomDiagnostics.Telemetry`). Four
+packages, pushed Telemetry first. All MIT (`LICENSE` at the root). Every other project is
+`IsPackable=false`.
 
 **Does not exist** despite older docs referencing them: `Loom.Core` (SIMD engine),
 `Loom.Host`, `Loom.Benchmarks` — planned, never built. `Loom.Web.Api` was retired; its

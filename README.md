@@ -352,7 +352,7 @@ or CI), not from Windows.
 Loom.slnx
 ├── Loom.Telemetry/              the library (packed as LoomDiagnostics.Telemetry)
 ├── Loom.Telemetry.Generators/   the source generator, shipped inside the library package
-├── Loom.Dashboard.AspNetCore/   the dashboard API as a library
+├── Loom.Dashboard.AspNetCore/   the dashboard API as a library (packed as LoomDiagnostics.Dashboard.AspNetCore)
 ├── Loom.Dashboard/              the loom-dashboard tool (embeds the Angular UI)
 ├── Loom.DevTools/               the loom tool
 ├── Loom.Security/               JWT, password hashing, login throttle, auth middleware

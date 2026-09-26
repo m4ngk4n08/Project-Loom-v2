@@ -17,7 +17,7 @@ in a local web dashboard.
 - **Local and locked down.** The dashboard listens on `127.0.0.1` only and every endpoint
   needs a login.
 
-> **Preview.** Loom is at `1.0.0-preview.1`. APIs may still change before `1.0.0`, which is
+> **Preview.** Loom is at `1.0.0-preview.2`. APIs may still change before `1.0.0`, which is
 > why the install commands below use `--prerelease`.
 
 ---
@@ -330,7 +330,7 @@ git clone https://github.com/m4ngk4n08/Project-Loom-v2.git
 cd Project-Loom-v2
 
 dotnet build Loom.slnx
-dotnet test  Loom.slnx                          # 849 tests
+dotnet test  Loom.slnx                          # the full suite (928 tests)
 
 cd Loom.Web.Frontend && npm ci && npx ng build && cd ..   # the dashboard UI
 dotnet run --project Loom.Dashboard -- <pid>              # run the dashboard from source

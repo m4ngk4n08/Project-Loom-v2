@@ -135,7 +135,10 @@ import { DataTableComponent, TableColumn, TableRow } from '../../shared/data-tab
                       <span class="metric-samples">{{ summary.sampleCount }} samples</span>
                     </span>
                     <span class="metric-latest">
-                      {{ formatValue(summary.latestValue, summary.unit) }} <span class="metric-unit">{{ summary.unit }}</span>
+                      {{ formatValue(summary.latestValue) }}
+                      @if (summary.unit) {
+                        <span class="metric-unit">{{ summary.unit }}</span>
+                      }
                     </span>
                   </button>
                   <button
@@ -261,7 +264,9 @@ import { DataTableComponent, TableColumn, TableRow } from '../../shared/data-tab
                   @if (selectedSummary()) {
                     <div class="title-badges">
                       <span class="type-badge" [class]="'type-' + selectedSummary()!.type">{{ selectedSummary()!.type }}</span>
-                      <span class="unit-badge">{{ selectedSummary()!.unit }}</span>
+                      @if (selectedSummary()!.unit) {
+                        <span class="unit-badge">{{ selectedSummary()!.unit }}</span>
+                      }
                     </div>
                   }
                 </div>

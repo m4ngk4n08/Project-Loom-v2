@@ -89,7 +89,15 @@ public static class LoomMetrics
     /// Use for: request latencies, response sizes, order amounts.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void RecordHistogram(string name, double value, params MetricTag[] tags)
+    public static void RecordHistogram(string name, double value, params MetricTag[] tags) =>
+        RecordHistogramWithUnit(name, value, MetricUnit.None, tags);
+
+    /// <summary>
+    /// Internal: a histogram whose unit Loom knows (milliseconds, for [LoomProfile] timings).
+    /// The unit is published with the instrument, so the tools can label it truthfully.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void RecordHistogramWithUnit(string name, double value, MetricUnit unit, MetricTag[] tags)
     {
         var record = new MetricRecord(
             name,
@@ -100,7 +108,7 @@ public static class LoomMetrics
             null
         );
         GetOrCreateBuffer(name).Write(in record);
-        MetricsBridge.PublishHistogram(name, value, tags);
+        MetricsBridge.PublishHistogram(name, value, tags, unit);
     }
 
     /// <summary>

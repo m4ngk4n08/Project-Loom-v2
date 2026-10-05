@@ -162,6 +162,51 @@ public sealed class MetricsBridgeGaugeAndTagsTests
         Assert.Contains(observedTags!, t => t.Key == "unit" && (string?)t.Value == "ms");
     }
 
+    // [LoomProfile]'s timings go through LoomRuntime.RecordMethodExecution. The unit on
+    // the instrument is what EventPipe carries to the tools; without it they showed "count".
+    [Fact]
+    public void RecordMethodExecution_PublishesAHistogramInMilliseconds()
+    {
+        var name = $"test.profile.unit.{System.Guid.NewGuid():N}";
+        string? unit = null;
+
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == "Loom.Telemetry" && instrument.Name == name)
+                unit = instrument.Unit;
+        };
+        listener.Start();
+
+        LoomRuntime.RecordMethodExecution(name, System.TimeSpan.FromMilliseconds(3), null);
+
+        Assert.Equal(MetricUnit.Milliseconds.Symbol(), unit);
+    }
+
+    [Fact]
+    public void RecordHistogram_PublicApi_DeclaresNoUnit()
+    {
+        var name = $"test.histogram.nounit.{System.Guid.NewGuid():N}";
+        var published = false;
+        string? unit = "unset";
+
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == "Loom.Telemetry" && instrument.Name == name)
+            {
+                published = true;
+                unit = instrument.Unit;
+            }
+        };
+        listener.Start();
+
+        LoomMetrics.RecordHistogram(name, 129.90);
+
+        Assert.True(published);
+        Assert.Null(unit);
+    }
+
     [Fact]
     public void RecordGauge_WithTags_PropagatesTagsToTheGaugeInstrument()
     {

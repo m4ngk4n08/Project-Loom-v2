@@ -5,56 +5,43 @@ namespace Loom.Telemetry.Tests.DevTools;
 
 public sealed class UnitFormatterTests
 {
-    [Theory]
-    [InlineData("cpu-usage", "%")]
-    [InlineData("gc-fragmentation", "%")]
-    [InlineData("percent-complete", "%")]
-    [InlineData("working-set", "MB")]
-    [InlineData("gc-heap-size", "MB")]
-    [InlineData("gen-0-size", "B")]
-    [InlineData("loh-size", "B")]
-    [InlineData("request.duration", "ms")]
-    [InlineData("order.latency", "ms")]
-    [InlineData("order.elapsed", "ms")]
-    [InlineData("order.total", "$")]
-    [InlineData("order.revenue", "$")]
-    [InlineData("gc-time", "/s")]
-    [InlineData("lock-contention", "/s")]
-    [InlineData("unrecognized-metric-name", "count")]
-    public void InferUnit_MatchesExpectedCategory(string name, string expectedUnit)
-    {
-        Assert.Equal(expectedUnit, UnitFormatter.InferUnit(name));
-    }
-
-    // Pins the fix: MetricsCommand.InferUnit had "alloc-rate"/"gc-time"/"lock-contention" -> "/s"
-    // checked before a dead "alloc-rate" -> "B/s" branch, so alloc-rate was mislabeled "/s".
-    [Fact]
-    public void InferUnit_AllocRate_ResolvesToBytesPerSecond()
-    {
-        Assert.Equal("B/s", UnitFormatter.InferUnit("alloc-rate"));
-    }
-
     [Fact]
     public void Format_Percent_UsesOneDecimalWithSuffix()
     {
-        Assert.Equal("12.4%", UnitFormatter.Format("cpu-usage", 12.44));
+        Assert.Equal("12.4%", UnitFormatter.Format(MetricUnit.Percent, 12.44));
     }
 
     [Fact]
-    public void Format_AllocRate_UsesHumanBytesWithPerSecondSuffix()
+    public void Format_Milliseconds_UsesOneDecimalWithSuffix()
     {
-        Assert.Equal("1.0KB/s", UnitFormatter.Format("alloc-rate", 1024));
+        Assert.Equal("8.8ms", UnitFormatter.Format(MetricUnit.Milliseconds, 8.828));
+    }
+
+    [Fact]
+    public void Format_BytesPerSecond_UsesHumanBytesWithPerSecondSuffix()
+    {
+        Assert.Equal("1.0KB/s", UnitFormatter.Format(MetricUnit.BytesPerSecond, 1024));
     }
 
     [Fact]
     public void Format_Bytes_ScalesToLargestSensibleUnit()
     {
-        Assert.Equal("1.0MB", UnitFormatter.Format("gen-0-size", 1024 * 1024));
+        Assert.Equal("1.0MB", UnitFormatter.Format(MetricUnit.Bytes, 1024 * 1024));
     }
 
     [Fact]
-    public void Format_UnknownCategory_FallsBackToPlainNumber()
+    public void Format_PerSecond_UsesTwoDecimalsWithSuffix()
     {
-        Assert.Equal("42", UnitFormatter.Format("unrecognized-metric-name", 42));
+        Assert.Equal("3.00/s", UnitFormatter.Format(MetricUnit.PerSecond, 3));
+    }
+
+    // The regression this replaces: a unitless value used to get a unit guessed from
+    // its name ("order.total" -> "$", a [LoomProfile] timing -> "count").
+    [Theory]
+    [InlineData(42, "42")]
+    [InlineData(129.9, "129.9")]
+    public void Format_NoDeclaredUnit_IsAPlainNumber(double value, string expected)
+    {
+        Assert.Equal(expected, UnitFormatter.Format(MetricUnit.None, value));
     }
 }

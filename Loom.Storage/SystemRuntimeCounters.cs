@@ -27,7 +27,7 @@ public static class SystemRuntimeCounters
     ///   .NET 10 runtime:   { "Payload": { "Name":"cpu-usage", "Mean":0.07, ... } }
     ///   Older runtimes:    [ { "Name":"cpu-usage", "Mean":0.07, ... }, ... ]
     /// </summary>
-    public static IEnumerable<(string Name, MetricType Type, double Value)> Parse(string json)
+    public static IEnumerable<(string Name, MetricType Type, double Value, MetricUnit Unit)> Parse(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
             yield break;
@@ -70,7 +70,7 @@ public static class SystemRuntimeCounters
         }
     }
 
-    private static (string Name, MetricType Type, double Value)? TryReadCounter(JsonElement counter)
+    private static (string Name, MetricType Type, double Value, MetricUnit Unit)? TryReadCounter(JsonElement counter)
     {
         if (!counter.TryGetProperty("Name", out var nameProp) || nameProp.ValueKind != JsonValueKind.String)
             return null;
@@ -84,13 +84,16 @@ public static class SystemRuntimeCounters
         // monitor-lock-contention-count, alloc-rate, exception-count, and others) was
         // being rejected here before Classify was ever consulted.
         double value;
+        bool isDelta;
         if (counter.TryGetProperty("Mean", out var meanProp) && meanProp.TryGetDouble(out var mean))
         {
             value = mean;
+            isDelta = false;
         }
         else if (counter.TryGetProperty("Increment", out var incrementProp) && incrementProp.TryGetDouble(out var increment))
         {
             value = increment;
+            isDelta = true;
         }
         else
         {
@@ -101,7 +104,24 @@ public static class SystemRuntimeCounters
         if (string.IsNullOrEmpty(name))
             return null;
 
-        return (name, Classify(name), value);
+        return (name, Classify(name), value, ReadUnit(counter, isDelta));
+    }
+
+    /// <summary>
+    /// The unit the runtime declares in "DisplayUnits" (measured: "%", "B", "MB", "ms" or
+    /// empty). An "Increment" value is the delta over one collection interval, and both
+    /// collectors set EventCounterIntervalSec=1, so its unit is the per-second form: "B"
+    /// becomes B/s, an empty unit becomes /s. The runtime's "DisplayRateTimeScale" is
+    /// deliberately ignored - it is 1 minute for gen-N-gc-count, but Loom stores the
+    /// one-second delta, not a per-minute figure.
+    /// </summary>
+    private static MetricUnit ReadUnit(JsonElement counter, bool isDelta)
+    {
+        var declared = counter.TryGetProperty("DisplayUnits", out var unitsProp) && unitsProp.ValueKind == JsonValueKind.String
+            ? unitsProp.GetString()
+            : null;
+        var unit = MetricUnits.Parse(declared);
+        return isDelta ? unit.ToRate() : unit;
     }
 
     private static MetricType Classify(string name) => name switch

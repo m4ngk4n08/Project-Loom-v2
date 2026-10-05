@@ -48,6 +48,11 @@ public sealed class LoomMetricsStoreAdapter : IMetricStore
     // buffer-summing for every series here.
     public IReadOnlyCollection<CounterTotal> GetCounterTotals() => Array.Empty<CounterTotal>();
 
+    // The static buffers hold records, not instrument metadata - no unit is known here.
+    public void SetUnit(string metricName, MetricUnit unit) { }
+
+    public MetricUnit GetUnit(string metricName) => MetricUnit.None;
+
     private static IReadOnlyDictionary<string, MetricBuffer> GetStaticBuffers() =>
         LoomRuntime.GetBuffersSnapshot();
 }

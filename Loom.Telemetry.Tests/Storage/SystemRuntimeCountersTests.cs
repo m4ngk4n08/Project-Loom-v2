@@ -45,6 +45,47 @@ public sealed class SystemRuntimeCountersTests
     }
 
     [Fact]
+    public void Parse_MeanCounter_CarriesTheRuntimesDeclaredUnit()
+    {
+        var record = Assert.Single(SystemRuntimeCounters.Parse(MeanCounterPayload));
+
+        Assert.Equal(MetricUnit.Megabytes, record.Unit);
+    }
+
+    [Fact]
+    public void Parse_IncrementCounter_UnitIsThePerSecondRate()
+    {
+        var record = Assert.Single(SystemRuntimeCounters.Parse(IncrementCounterPayload));
+
+        Assert.Equal(MetricUnit.BytesPerSecond, record.Unit);
+    }
+
+    [Fact]
+    public void Parse_IncrementCounter_IgnoresTheRuntimesPerMinuteDisplayScale()
+    {
+        // gen-0-gc-count's DisplayUnits (empty), DisplayRateTimeScale (1 minute) and
+        // CounterType were measured against a live .NET 10 session on 2026-09-30. The
+        // value Loom stores is the delta over its own one-second interval, so labelling
+        // it "per minute" would be wrong by a factor of 60.
+        var json =
+            """{ "Payload":{ "Name":"gen-0-gc-count", "DisplayRateTimeScale":"00:01:00", "Increment":2, "IntervalSec":1.0026728, "CounterType":"Sum", "DisplayUnits":"" } }""";
+
+        var record = Assert.Single(SystemRuntimeCounters.Parse(json));
+
+        Assert.Equal(MetricUnit.PerSecond, record.Unit);
+    }
+
+    [Fact]
+    public void Parse_NoDisplayUnits_IsNone()
+    {
+        var json = """{ "Payload":{ "Name":"threadpool-thread-count", "Mean":4, "CounterType":"Mean", "DisplayUnits":"" } }""";
+
+        var record = Assert.Single(SystemRuntimeCounters.Parse(json));
+
+        Assert.Equal(MetricUnit.None, record.Unit);
+    }
+
+    [Fact]
     public void Parse_OlderRuntimeArrayShape_YieldsBothCounters()
     {
         // The "older runtimes" shape documented at SystemRuntimeCounters.cs:26-28: a

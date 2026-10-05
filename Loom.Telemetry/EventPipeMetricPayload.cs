@@ -21,9 +21,25 @@ public static class EventPipeMetricPayload
         string[]? payloadNames,
         Func<int, object?> valueAt,
         long timestampUtcTicks,
-        out MetricRecord record)
+        out MetricRecord record) =>
+        TryBuildRecord(eventName, payloadNames, valueAt, timestampUtcTicks, out record, out _);
+
+    /// <summary>
+    /// As above, also returning the unit the instrument was created with (the event's
+    /// "unit" field), or <see cref="MetricUnit.None"/> when it declared none. Units are per
+    /// instrument, not per record, which is why this is an out value rather than a
+    /// MetricRecord field.
+    /// </summary>
+    public static bool TryBuildRecord(
+        string eventName,
+        string[]? payloadNames,
+        Func<int, object?> valueAt,
+        long timestampUtcTicks,
+        out MetricRecord record,
+        out MetricUnit unit)
     {
         record = default;
+        unit = MetricUnit.None;
 
         // Only ingest actual value-publish events; BeginInstrumentReporting is metadata only
         if (!eventName.Contains("ValuePublished"))
@@ -94,6 +110,10 @@ public static class EventPipeMetricPayload
             else if (payloadName == "tags")
             {
                 tagPayload = valueAt(i)?.ToString();
+            }
+            else if (payloadName == "unit")
+            {
+                unit = MetricUnits.Parse(valueAt(i)?.ToString());
             }
             else if (valueField != null && payloadName == valueField)
             {

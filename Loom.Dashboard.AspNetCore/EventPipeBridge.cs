@@ -140,9 +140,10 @@ public sealed class EventPipeBridge : BackgroundService
                 return;
             }
 
-            if (!EventPipeMetricPayload.TryBuildRecord(eventName, traceEvent.PayloadNames, i => traceEvent.PayloadValue(i), DateTime.UtcNow.Ticks, out var record))
+            if (!EventPipeMetricPayload.TryBuildRecord(eventName, traceEvent.PayloadNames, i => traceEvent.PayloadValue(i), DateTime.UtcNow.Ticks, out var record, out var unit))
                 return;
 
+            if (unit != MetricUnit.None) _store.SetUnit(record.Name, unit);
             _store.Write(in record);
             Interlocked.Increment(ref _recordsIngested);
         };
@@ -176,8 +177,9 @@ public sealed class EventPipeBridge : BackgroundService
 
         var records = SystemRuntimeCounters.Parse(payload);
         var now = DateTime.UtcNow.Ticks;
-        foreach (var (name, type, value) in records)
+        foreach (var (name, type, value, unit) in records)
         {
+            if (unit != MetricUnit.None) _store.SetUnit(name, unit);
             _store.Write(new MetricRecord(name, type, value, now));
             Interlocked.Increment(ref _recordsIngested);
         }

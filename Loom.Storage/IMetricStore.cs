@@ -34,4 +34,15 @@ public interface IMetricStore
     /// May be empty, or may omit series past the cardinality cap - callers must fall back.
     /// </summary>
     IReadOnlyCollection<CounterTotal> GetCounterTotals();
+
+    /// <summary>
+    /// Records the unit a metric's source declared. Units belong to the instrument, not to
+    /// each record, so they are stored per name. Call before writing the record, so a
+    /// subscriber that looks the unit up on receipt finds it.
+    /// </summary>
+    void SetUnit(string metricName, MetricUnit unit);
+
+    /// <summary>The declared unit, or <see cref="MetricUnit.None"/> when the source declared
+    /// none. Never guessed from the name.</summary>
+    MetricUnit GetUnit(string metricName);
 }

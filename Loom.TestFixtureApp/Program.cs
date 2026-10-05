@@ -18,6 +18,7 @@ using var cts = new CancellationTokenSource();
 // instrument, so this is picked up identically to a LoomMetrics.Record* call.
 using var meter = new Meter("Loom.Telemetry");
 var activeConnections = meter.CreateUpDownCounter<long>("fixture.active.connections");
+var profiledWork = new ProfiledWork();
 
 // Ramps to a starting level, then keeps climbing slowly and monotonically forever. This
 // replaced a plain ramp-and-hold that went silent forever once it reached the plateau
@@ -64,6 +65,7 @@ void EmitOnce()
     LoomMetrics.RecordGauge("fixture.queue.depth", 10, new MetricTag("queue", "alpha"));
     LoomMetrics.RecordGauge("fixture.queue.depth", 20, new MetricTag("queue", "beta"));
     LoomMetrics.RecordHistogram("fixture.request.duration", 42.0, new MetricTag("route", "checkout"));
+    profiledWork.Run();
 
     var connectionTag = new KeyValuePair<string, object?>("pool", "primary");
     if (activeConnectionLevel < InitialLevel)
@@ -122,3 +124,13 @@ catch (OperationCanceledException)
 }
 
 return 0;
+
+// A [LoomProfile] timing records its histogram with the unit "ms"; the unit tests prove
+// that crosses a real EventPipe session (EventPipeHarnessTests / EventPipeBridgeTests).
+public sealed class ProfiledWork
+{
+    [LoomProfile(Name = "fixture.profiled.call")]
+    public void Run()
+    {
+    }
+}

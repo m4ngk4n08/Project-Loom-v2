@@ -74,6 +74,37 @@ public sealed class EventPipeBridgeTests : IClassFixture<FixtureProcess>
     }
 
     [Fact]
+    public async Task Units_AreTheOnesTheSourceDeclared()
+    {
+        using var store = new InMemoryMetricStore();
+        using var logStore = new InMemoryLogStore();
+        var logger = new CapturingLogger<EventPipeBridge>();
+        var bridge = new EventPipeBridge(_fixture.Pid, store, logStore, logger);
+
+        await bridge.StartAsync(CancellationToken.None);
+        try
+        {
+            await PollUntilAsync(
+                () =>
+                {
+                    var names = store.GetMetricNames();
+                    return names.Contains("fixture.profiled.call")
+                        && names.Contains("fixture.request.duration")
+                        && names.Contains("cpu-usage");
+                },
+                logger, store);
+
+            Assert.Equal(MetricUnit.Milliseconds, store.GetUnit("fixture.profiled.call"));
+            Assert.Equal(MetricUnit.None, store.GetUnit("fixture.request.duration"));
+            Assert.Equal(MetricUnit.Percent, store.GetUnit("cpu-usage"));
+        }
+        finally
+        {
+            await bridge.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task Gauge_TagCombinations_SurviveIngest()
     {
         using var store = new InMemoryMetricStore();

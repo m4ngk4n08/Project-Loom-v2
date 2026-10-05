@@ -24,7 +24,7 @@ public static class MetricSummaryBuilder
             {
                 Name = kvp.Key,
                 Type = GetTypeName(kvp.Value),
-                Unit = InferUnit(kvp.Key),
+                Unit = store.GetUnit(kvp.Key).Symbol(),
                 SampleCount = values.Length,
                 LatestValue = values[0],
                 Average = values.Average(),
@@ -56,50 +56,4 @@ public static class MetricSummaryBuilder
     private static int PercentileIndex(int length, double percentile) =>
         Math.Clamp((int)Math.Ceiling(percentile * length) - 1, 0, length - 1);
 
-    /// <summary>Infer a human-readable unit from the metric name so mixed-unit lists
-    /// (durations, currency, item counts) are unambiguous at a glance.</summary>
-    private static string InferUnit(string name)
-    {
-        if (name.Contains("cpu-usage", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("time-in-gc", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("gc-fragmentation", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("usage", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("percent", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("%", StringComparison.OrdinalIgnoreCase))
-            return "%";
-
-        if (name.Contains("alloc-rate", StringComparison.OrdinalIgnoreCase))
-            return "B/s";
-
-        if (name.Contains("working-set", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("gc-heap-size", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("gc-committed", StringComparison.OrdinalIgnoreCase))
-            return "MB";
-
-        if (name.Contains("loh-size", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("poh-size", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("gen-0-size", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("gen-1-size", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("gen-2-size", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("bytes", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("alloc", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("memory", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("heap", StringComparison.OrdinalIgnoreCase))
-            return "B";
-
-        if (name.EndsWith("-time", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("-time-", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("duration", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("latency", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("elapsed", StringComparison.OrdinalIgnoreCase))
-            return "ms";
-
-        if (name.Contains("amount", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("total", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("price", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("revenue", StringComparison.OrdinalIgnoreCase))
-            return "$";
-
-        return "count";
-    }
 }

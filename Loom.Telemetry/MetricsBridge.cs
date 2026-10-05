@@ -95,8 +95,15 @@ internal static class MetricsBridge
     public static void PublishCounter(string name, double increment, ReadOnlySpan<MetricTag> tags = default) =>
         Counters.GetOrAdd(name, n => Meter.CreateCounter<double>(n)).Add(increment, ToTagList(tags));
 
-    public static void PublishHistogram(string name, double value, ReadOnlySpan<MetricTag> tags = default) =>
-        Histograms.GetOrAdd(name, n => Meter.CreateHistogram<double>(n)).Record(value, ToTagList(tags));
+    // The unit is fixed when the instrument is created (first call for a name wins) and
+    // travels to every EventPipe listener in the "unit" field of each value-publish event.
+    // Static lambda + state-passing GetOrAdd: capturing `unit` would allocate a closure on
+    // every call, breaking [LoomProfile]'s zero-allocation guarantee.
+    public static void PublishHistogram(string name, double value, ReadOnlySpan<MetricTag> tags = default, MetricUnit unit = MetricUnit.None) =>
+        Histograms.GetOrAdd(
+            name,
+            static (n, u) => Meter.CreateHistogram<double>(n, u == MetricUnit.None ? null : u.Symbol()),
+            unit).Record(value, ToTagList(tags));
 
     public static void PublishGauge(string name, double value, ReadOnlySpan<MetricTag> tags = default)
     {

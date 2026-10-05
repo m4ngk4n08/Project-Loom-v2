@@ -26,6 +26,24 @@ public class EventPipeMetricPayloadTests
         Assert.Equal(expected, record.Value);
     }
 
+    // Field names and order as captured from a live HistogramValuePublished event on
+    // 2026-09-30 (loom watch --raw against a [LoomProfile]-instrumented app).
+    [Theory]
+    [InlineData("ms", MetricUnit.Milliseconds)]
+    [InlineData("", MetricUnit.None)]
+    [InlineData(null, MetricUnit.None)]
+    [InlineData("furlongs", MetricUnit.None)]
+    public void TryBuildRecord_ReadsTheInstrumentsDeclaredUnit(string? declared, MetricUnit expected)
+    {
+        string[] names = ["sessionId", "meterName", "meterVersion", "instrumentName", "unit", "tags", "quantiles", "count", "sum", "instrumentId"];
+        object?[] values = ["s", "Loom.Telemetry", "1.0.0", "OrderService.PlaceOrder", declared, "", "0.5=8.8", "2", "8.95", "5"];
+
+        Assert.True(EventPipeMetricPayload.TryBuildRecord("HistogramValuePublished", names, i => values[i], 42, out var record, out var unit));
+
+        Assert.Equal("OrderService.PlaceOrder", record.Name);
+        Assert.Equal(expected, unit);
+    }
+
     [Fact]
     public void TryBuildRecord_UpDownCounter_ReadsValueNotRate()
     {

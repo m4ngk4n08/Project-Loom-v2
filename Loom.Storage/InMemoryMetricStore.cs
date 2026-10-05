@@ -237,6 +237,19 @@ public sealed class InMemoryMetricStore : IMetricStore, IDisposable
 
     public IReadOnlyDictionary<string, MetricBuffer> GetBuffers() => _buffers;
 
+    // Collectors call SetUnit once per ingested event (~1/s per instrument), so the common
+    // case - the unit is already stored - is a read with no write.
+    private readonly ConcurrentDictionary<string, MetricUnit> _units = new();
+
+    public void SetUnit(string metricName, MetricUnit unit)
+    {
+        if (!_units.TryGetValue(metricName, out var existing) || existing != unit)
+            _units[metricName] = unit;
+    }
+
+    public MetricUnit GetUnit(string metricName) =>
+        _units.TryGetValue(metricName, out var unit) ? unit : MetricUnit.None;
+
     public ChannelReader<MetricRecord> Subscribe()
     {
         var channel = Channel.CreateBounded<MetricRecord>(new BoundedChannelOptions(1024)

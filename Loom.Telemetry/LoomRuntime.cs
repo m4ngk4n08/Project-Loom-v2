@@ -19,16 +19,17 @@ public static class LoomRuntime
         // Record as MethodExecution metric
         if (exception != null)
         {
-            LoomMetrics.RecordHistogram(
+            LoomMetrics.RecordHistogramWithUnit(
                 metricName,
                 elapsed.TotalMilliseconds,
-                new MetricTag("exception", exception.GetType().Name)
+                MetricUnit.Milliseconds,
+                [new MetricTag("exception", exception.GetType().Name)]
             );
             LoomMetrics.RecordCounter($"{metricName}.errors", 1);
         }
         else
         {
-            LoomMetrics.RecordHistogram(metricName, elapsed.TotalMilliseconds);
+            LoomMetrics.RecordHistogramWithUnit(metricName, elapsed.TotalMilliseconds, MetricUnit.Milliseconds, Array.Empty<MetricTag>());
         }
     }
 

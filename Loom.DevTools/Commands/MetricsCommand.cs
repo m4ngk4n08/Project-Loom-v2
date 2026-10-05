@@ -1,6 +1,7 @@
 using Loom.DevTools.Rendering;
 using Loom.DevTools.Services;
 using Loom.Storage;
+using Loom.Telemetry;
 using Spectre.Console;
 
 namespace Loom.DevTools.Commands;
@@ -62,15 +63,16 @@ public static class MetricsCommand
             if (records.Length == 0) continue;
 
             var values = records.Select(r => r.Value).ToArray();
+            var unit = store.GetUnit(name);
 
             table.AddRow(
                 Markup.Escape(name),
                 records[0].Type.ToString(),
                 records.Length.ToString(),
-                UnitFormatter.InferUnit(name),
-                UnitFormatter.Format(name, values.Average()),
-                UnitFormatter.Format(name, values.Min()),
-                UnitFormatter.Format(name, values.Max()),
+                Markup.Escape(unit.Symbol()),
+                UnitFormatter.Format(unit, values.Average()),
+                UnitFormatter.Format(unit, values.Min()),
+                UnitFormatter.Format(unit, values.Max()),
                 Trend(values));
         }
 
@@ -104,12 +106,13 @@ public static class MetricsCommand
             var values = records.Select(r => r.Value).OrderBy(v => v).ToArray();
             var avg = values.Average();
             var p99 = values[(int)(values.Length * 0.99)];
+            var unit = store.GetUnit(name);
 
             table.AddRow(
                 Markup.Escape(name),
                 records.Length.ToString(),
-                UnitFormatter.Format(name, avg),
-                UnitFormatter.Format(name, p99),
+                UnitFormatter.Format(unit, avg),
+                UnitFormatter.Format(unit, p99),
                 Trend(records.Select(r => r.Value).ToArray()));
         }
 

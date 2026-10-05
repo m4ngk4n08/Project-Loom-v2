@@ -1,6 +1,7 @@
 using Loom.DevTools.Rendering;
 using Loom.DevTools.Services;
 using Loom.Storage;
+using Loom.Telemetry;
 using Spectre.Console;
 
 namespace Loom.DevTools.Commands;
@@ -38,11 +39,12 @@ public static class ExploreCommand
             if (records.Length == 0) continue;
 
             var latest = records[0];
+            var unit = store.GetUnit(name);
             table.AddRow(
                 Markup.Escape(name),
                 latest.Type.ToString(),
-                UnitFormatter.Format(name, latest.Value),
-                UnitFormatter.InferUnit(name),
+                UnitFormatter.Format(unit, latest.Value),
+                Markup.Escape(unit.Symbol()),
                 records.Length.ToString());
         }
 

@@ -127,10 +127,10 @@ public static class MetricsLiveCommand
         metricsGrid.AddColumn();
 
         metricsGrid.AddRow(BuildMetricRow(
-            "CPU", UnitFormatter.Format("cpu-usage", cpuSeries.Latest), cpuSeries, narrow,
+            "CPU", UnitFormatter.Format(store.GetUnit("cpu-usage"), cpuSeries.Latest), cpuSeries, narrow,
             "Threads", threads.ToString("F0")));
         metricsGrid.AddRow(BuildMetricRow(
-            "Heap", UnitFormatter.Format("gc-heap-size", heapSeries.Latest), heapSeries, narrow,
+            "Heap", UnitFormatter.Format(store.GetUnit("gc-heap-size"), heapSeries.Latest), heapSeries, narrow,
             "GC (0/1/2)", $"{gen0:F0}/{gen1:F0}/{gen2:F0}"));
 
         var (lowerHeaderText, lowerBody) = BuildLowerSection(category, store, narrow);
@@ -263,7 +263,7 @@ public static class MetricsLiveCommand
             var cells = new List<IRenderable>
             {
                 new Markup(Markup.Escape(name)),
-                new Markup(UnitFormatter.Format(name, records[0].Value).PadLeft(10)),
+                new Markup(Markup.Escape(UnitFormatter.Format(store.GetUnit(name), records[0].Value)).PadLeft(10)),
             };
             if (!narrow)
             {

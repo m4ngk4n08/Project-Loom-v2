@@ -39,4 +39,7 @@ internal sealed class FakeMetricStore : IMetricStore
     // Test double with no accumulator - empty is correct, exercising the
     // formatter's buffer-summing fallback path.
     public IReadOnlyCollection<CounterTotal> GetCounterTotals() => Array.Empty<CounterTotal>();
+
+    public void SetUnit(string metricName, MetricUnit unit) => throw new NotImplementedException();
+    public MetricUnit GetUnit(string metricName) => throw new NotImplementedException();
 }

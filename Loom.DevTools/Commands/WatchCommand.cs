@@ -60,7 +60,7 @@ public static class WatchCommand
         {
             await foreach (var record in reader.ReadAllAsync(ct))
             {
-                PrintFormattedRecord(record);
+                PrintFormattedRecord(record, store.GetUnit(record.Name));
             }
         }
         catch (OperationCanceledException)
@@ -84,7 +84,7 @@ public static class WatchCommand
         Console.WriteLine("\nStopped.");
     }
 
-    private static void PrintFormattedRecord(MetricRecord record)
+    private static void PrintFormattedRecord(MetricRecord record, MetricUnit unit)
     {
         var color = Hex(ColorForType(record.Type));
         var dim = Hex(LoomTheme.Dim);
@@ -95,7 +95,7 @@ public static class WatchCommand
 
         AnsiConsole.MarkupLine(
             $"[{dim}]{record.TimestampUtc.ToLocalTime():T}[/]  [{color}]{typeLabel}[/] " +
-            $"{Markup.Escape(record.Name)} = {UnitFormatter.Format(record.Name, record.Value)}{tagsSuffix}");
+            $"{Markup.Escape(record.Name)} = {Markup.Escape(UnitFormatter.Format(unit, record.Value))}{tagsSuffix}");
     }
 
     private static Color ColorForType(MetricType type) => type switch
